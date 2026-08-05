@@ -2,6 +2,27 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.5.0-alpha.1] - Unreleased
+
+### Added
+
+- Encrypted candidate document storage with bounded PDF, DOCX, RTF, TXT, and Markdown extraction.
+- Resume variants and job-family tags with evidence sources and versioned extraction metadata.
+- Strict deterministic claim proposals for contact details, skills, certifications, and dated experience.
+- Explicit review, correction, verification, sensitivity, permitted-use, and locked-fact controls.
+- Reproducible skill-experience calculations that merge overlapping employment periods.
+- Approved answer library with encrypted content, evidence requirements, reuse permission, and provenance.
+- Privacy-preserving hybrid retrieval using blind token indexes and keyed deterministic vectors.
+- Authenticated Candidate Knowledge API, validated desktop IPC, native import picker, and review UI.
+- Candidate Knowledge migration, extraction fixtures, encryption checks, API tests, and release metadata.
+
+### Security
+
+- Original documents, extracted layouts, questions, answers, and retrieval content are encrypted at rest.
+- Retrieval indexes contain no candidate plaintext and exclude proposed, rejected, unlocked, or superseded facts.
+- Generated or extracted content cannot replace an existing locked verified canonical fact.
+- Production application submission and external AI/provider integrations remain disabled.
+
 ## [0.4.0-alpha.1] - Unreleased
 
 ### Added

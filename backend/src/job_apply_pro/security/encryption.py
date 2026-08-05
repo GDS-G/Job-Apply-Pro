@@ -1,5 +1,7 @@
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import os
 from typing import Any
@@ -29,6 +31,9 @@ class SensitiveDataCipher:
 
     def encrypt_json(self, value: dict[str, object], *, context: str) -> str:
         plaintext = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return self.encrypt_bytes(plaintext, context=context)
+
+    def encrypt_bytes(self, plaintext: bytes, *, context: str) -> str:
         nonce = os.urandom(self.NONCE_BYTES)
         ciphertext = AESGCM(self._key_provider.load_key()).encrypt(
             nonce, plaintext, context.encode("utf-8")
@@ -37,6 +42,15 @@ class SensitiveDataCipher:
         return f"{self.PREFIX}:{self.key_id}:{encoded}"
 
     def decrypt_json(self, envelope: str, *, context: str) -> dict[str, object]:
+        try:
+            decoded: Any = json.loads(self.decrypt_bytes(envelope, context=context))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise DecryptionError("Encrypted payload is not valid JSON") from error
+        if not isinstance(decoded, dict):
+            raise DecryptionError("Encrypted payload is not a JSON object")
+        return decoded
+
+    def decrypt_bytes(self, envelope: str, *, context: str) -> bytes:
         parts = envelope.split(":", 3)
         if len(parts) != 4 or ":".join(parts[:2]) != self.PREFIX:
             raise DecryptionError("Unsupported encrypted envelope")
@@ -48,21 +62,24 @@ class SensitiveDataCipher:
             nonce, ciphertext = payload[: self.NONCE_BYTES], payload[self.NONCE_BYTES :]
             if len(nonce) != self.NONCE_BYTES or not ciphertext:
                 raise ValueError
-            plaintext = AESGCM(self._key_provider.load_key()).decrypt(
+            return AESGCM(self._key_provider.load_key()).decrypt(
                 nonce, ciphertext, context.encode("utf-8")
             )
-            decoded: Any = json.loads(plaintext)
         except (
             UnicodeEncodeError,
             binascii.Error,
             ValueError,
             InvalidTag,
-            json.JSONDecodeError,
         ) as error:
             raise DecryptionError("Encrypted data failed authentication") from error
-        if not isinstance(decoded, dict):
-            raise DecryptionError("Encrypted payload is not a JSON object")
-        return decoded
+
+    def blind_index(self, value: str, *, context: str) -> str:
+        normalized = " ".join(value.casefold().split()).encode("utf-8")
+        return hmac.new(
+            self._key_provider.load_key(),
+            context.encode("utf-8") + b"\x00" + normalized,
+            hashlib.sha256,
+        ).hexdigest()
 
     def validate_envelope(self, envelope: str, *, context: str) -> None:
         self.decrypt_json(envelope, context=context)

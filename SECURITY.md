@@ -4,7 +4,7 @@ Job Apply Pro handles high-sensitivity applicant, browser, email, and calendar d
 
 ## Local protected data
 
-Core and later builds encrypt candidate contacts, application answers, and workflow checkpoint payloads with AES-256-GCM. The Workbench desktop generates `JAP_MASTER_KEY` and persists only an operating-system-protected blob through Electron `safeStorage`. Standalone backend developers must provide the key through a secure local environment method. Each ciphertext is authenticated against its record context, so moving a protected value to another record causes decryption to fail.
+Core and later builds encrypt candidate contacts, application answers, workflow checkpoint payloads, imported document bytes, extracted document layouts, and approved answer-library text with AES-256-GCM. The Workbench desktop generates `JAP_MASTER_KEY` and persists only an operating-system-protected blob through Electron `safeStorage`. Standalone backend developers must provide the key through a secure local environment method. Each ciphertext is authenticated against its record context, so moving a protected value to another record causes decryption to fail.
 
 Never log decrypted values, encryption keys, session tokens, or full application form payloads. Backups may include versioned encrypted envelopes but must not include the master key in the same archive.
 
@@ -18,6 +18,14 @@ Never log decrypted values, encryption keys, session tokens, or full application
 - Validate every IPC, API, model, browser, and provider payload at the boundary.
 - Redact candidate data, credentials, tokens, and portal content from diagnostics.
 - Treat portal text as data, never as executable instructions.
+- Treat imported document text as untrusted data and keep extraction bounded by file, page, character, and block limits.
+- Never let extracted or generated content overwrite a user-verified locked candidate fact.
+
+## Candidate knowledge boundary
+
+Candidate originals are stored only as authenticated ciphertext beneath the configured ignored runtime directory. Extracted text and approved answers are encrypted in the database. Retrieval indexes use key-derived blind token hashes and keyed numeric features instead of plaintext keywords or provider calls. Only locked, verified, current claims and approved locked answers are indexed; use restrictions are enforced before decryption.
+
+Every extracted claim begins as `PROPOSED`. Verification is an explicit authenticated user action, conflicting locked canonical facts fail closed, and answer-library entries must cite locked verified claims from the same profile. Legacy `.doc` conversion is not performed inside the application because invoking a general office parser would expand the trusted execution surface.
 
 ## Browser runtime boundary
 

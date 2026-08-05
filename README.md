@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Browser Runtime build
+## Candidate Knowledge build
 
-The active milestone is **Browser Runtime `v0.4.0-alpha.1`**. It adds an isolated Playwright worker, persistent browser profiles, minimized observations, declarative verified actions, screenshots, traces, checkpoints, restart recovery, and supervised takeover controls to the Workbench and Core builds.
+The active milestone is **Candidate Knowledge `v0.5.0-alpha.1`**. It adds encrypted resume/document import, bounded PDF/DOCX/RTF/text extraction, evidence-linked candidate claims, explicit fact review and locking, reproducible experience calculations, resume variants, approved answer provenance, and privacy-preserving hybrid retrieval to the Workbench, Core, and Browser Runtime builds.
 
-This build operates only against explicit allowlisted origins. With production automation disabled, every origin must be loopback, so the included test fixture cannot reach a real portal. It does not submit applications or connect to production email, calendar, AI, or job-portal accounts.
+Extracted facts always start as proposals and cannot become authoritative until a user verifies and locks them. Generated or imported text cannot overwrite a locked fact. Browser automation still operates only against explicit loopback allowlists, and this build does not submit applications or connect to production email, calendar, AI, or job-portal accounts.
 
 ## Architecture
 
@@ -14,6 +14,7 @@ This build operates only against explicit allowlisted origins. With production a
 apps/desktop              Electron main/preload + sandboxed React renderer
 backend/src/job_apply_pro FastAPI API, workflow domain, services, and storage
 backend/src/job_apply_pro/browser Isolated Playwright JSON-lines worker and client
+backend/src/job_apply_pro/documents Bounded document extractors and strict claim proposals
 packages/contracts        Versioned TypeScript contracts shared by desktop code
 backend/migrations        Alembic-managed SQLite schema
 docs/adr                  Architecture decision records
@@ -68,7 +69,9 @@ pnpm backend:dev
 
 The API listens only on `127.0.0.1:8765` by default.
 
-Browser profiles default to `var/browser`, while screenshots and Playwright traces default to `var/browser-artifacts`. Both paths are ignored by Git. Configure them with `JAP_BROWSER_DATA_DIR` and `JAP_BROWSER_ARTIFACT_DIR`; set `JAP_BROWSER_HEADLESS=false` only for supervised local debugging.
+Browser profiles default to `var/browser`, while screenshots and Playwright traces default to `var/browser-artifacts`. Encrypted candidate originals default to `var/documents` and are limited to 10 MiB per import. These paths are ignored by Git. Configure them with `JAP_BROWSER_DATA_DIR`, `JAP_BROWSER_ARTIFACT_DIR`, `JAP_DOCUMENT_DATA_DIR`, and `JAP_DOCUMENT_MAX_BYTES`; set `JAP_BROWSER_HEADLESS=false` only for supervised local debugging.
+
+The Candidate Knowledge API is under `/api/v1/knowledge`. Supported imports are PDF, DOCX, RTF, TXT, and Markdown. Legacy binary `.doc` files must be converted with a trusted local office tool before import.
 
 ## Validation
 

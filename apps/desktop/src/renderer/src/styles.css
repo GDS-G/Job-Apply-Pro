@@ -864,6 +864,95 @@ h1 {
   border-radius: 8px;
 }
 
+.knowledge-panel {
+  margin-top: 14px;
+}
+
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 18px;
+  padding: 4px 18px 18px;
+}
+
+.document-variants,
+.claim-review {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.document-variants > strong,
+.claim-review > strong {
+  color: #535f74;
+  font-size: 10px;
+}
+
+.knowledge-row,
+.claim-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 8px 10px;
+  color: #657087;
+  background: #f8f9fc;
+  border: 1px solid #eceef4;
+  border-radius: 8px;
+}
+
+.knowledge-row > span,
+.claim-row > span {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-row b,
+.claim-row b {
+  overflow: hidden;
+  color: #3e485c;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-row small,
+.claim-row small {
+  overflow: hidden;
+  margin-top: 3px;
+  color: #8791a4;
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-row em {
+  padding: 3px 6px;
+  color: #2a7d62;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  background: #e6f7f0;
+  border-radius: 99px;
+}
+
+.claim-row button {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  color: #5c69dc;
+  background: #fff;
+  border: 1px solid #dfe3eb;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.claim-row button:last-child {
+  color: #9c5960;
+}
+
 .timeline-panel {
   margin-top: 14px;
 }
@@ -1014,6 +1103,9 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .content-grid {
+    grid-template-columns: 1fr;
+  }
+  .knowledge-grid {
     grid-template-columns: 1fr;
   }
   .queue-item {

@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
     listWorkflows: () => ipcRenderer.invoke("workbench:list-workflows"),
     listBrowserSessions: (workflowId?: string) =>
       ipcRenderer.invoke("workbench:list-browser-sessions", workflowId),
+    getCandidateKnowledge: (profileId: string) =>
+      ipcRenderer.invoke("knowledge:get", profileId),
+    selectAndImportResume: (profileId: string) =>
+      ipcRenderer.invoke("knowledge:import-resume", profileId),
+    reviewCandidateClaim: (claimId: string, approved: boolean) =>
+      ipcRenderer.invoke("knowledge:review-claim", claimId, approved),
     createCandidate: (input: CandidateProfileCreate) =>
       ipcRenderer.invoke("workbench:create-candidate", input),
     startMockWorkflow: (input: MockWorkflowCreate) =>

@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { dialog, ipcMain } from "electron";
 
 import type {
   CandidateProfileCreate,
@@ -86,6 +86,37 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
       return supervisor.client.listBrowserSessions(
         requiredText(value, "Workflow id", 100),
       );
+    },
+  );
+  ipcMain.handle("knowledge:get", (_event, value: unknown) =>
+    supervisor.client.getCandidateKnowledge(
+      requiredText(value, "Profile id", 100),
+    ),
+  );
+  ipcMain.handle("knowledge:import-resume", async (_event, value: unknown) => {
+    const profileId = requiredText(value, "Profile id", 100);
+    const selection = await dialog.showOpenDialog({
+      title: "Import candidate resume",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Candidate documents",
+          extensions: ["pdf", "docx", "rtf", "txt", "md"],
+        },
+      ],
+    });
+    const filePath = selection.filePaths[0];
+    if (selection.canceled || !filePath) return null;
+    return supervisor.client.importResume(profileId, filePath);
+  });
+  ipcMain.handle(
+    "knowledge:review-claim",
+    (_event, claimIdValue: unknown, approvedValue: unknown) => {
+      const claimId = requiredText(claimIdValue, "Claim id", 100);
+      if (typeof approvedValue !== "boolean") {
+        throw new TypeError("Claim approval must be a boolean.");
+      }
+      return supervisor.client.reviewCandidateClaim(claimId, approvedValue);
     },
   );
   ipcMain.handle("workbench:create-candidate", (_event, value: unknown) =>

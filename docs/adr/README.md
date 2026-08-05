@@ -11,3 +11,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0007: Durable supervised Workbench controls](0007-durable-supervised-workbench-controls.md)
 - [ADR-0008: Isolated allowlisted Playwright worker](0008-isolated-allowlisted-playwright-worker.md)
 - [ADR-0009: Verified browser observations and recovery](0009-verified-browser-observations-and-recovery.md)
+- [ADR-0010: Encrypted evidence-backed candidate knowledge](0010-encrypted-evidence-backed-candidate-knowledge.md)
+- [ADR-0011: Keyed hybrid retrieval and locked-fact precedence](0011-keyed-hybrid-retrieval-and-locked-fact-precedence.md)

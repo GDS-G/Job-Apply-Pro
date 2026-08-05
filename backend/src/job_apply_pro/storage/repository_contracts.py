@@ -11,6 +11,15 @@ from job_apply_pro.domain.browser import (
 from job_apply_pro.domain.candidate import CandidateBackup
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
 from job_apply_pro.domain.jobs import Job, JobCreate
+from job_apply_pro.domain.knowledge import (
+    AnswerLibraryRecord,
+    CandidateClaim,
+    CandidateDocument,
+    CandidateDocumentVersion,
+    CandidateDocumentVersionRecord,
+    EvidenceSource,
+    RetrievalChunkRecord,
+)
 from job_apply_pro.domain.workbench import WorkflowRunSnapshot
 from job_apply_pro.domain.workflow import TransitionCommand
 
@@ -80,3 +89,37 @@ class BrowserRuntimeRepositoryProtocol(Protocol):
     def list_actions(self, session_id: str) -> list[BrowserActionResult]: ...
 
     def next_action_sequence(self, session_id: str) -> int: ...
+
+
+class CandidateKnowledgeRepositoryProtocol(Protocol):
+    def add_import_bundle(
+        self,
+        document: CandidateDocument,
+        version: CandidateDocumentVersionRecord,
+        evidence: EvidenceSource,
+        claims: list[CandidateClaim],
+    ) -> None: ...
+
+    def list_documents(self, profile_id: str) -> list[CandidateDocument]: ...
+
+    def get_document(self, document_id: str) -> CandidateDocument | None: ...
+
+    def list_versions(self, document_id: str) -> list[CandidateDocumentVersion]: ...
+
+    def get_version_record(self, version_id: str) -> CandidateDocumentVersionRecord | None: ...
+
+    def list_claims(self, profile_id: str) -> list[CandidateClaim]: ...
+
+    def get_claim(self, claim_id: str) -> CandidateClaim | None: ...
+
+    def save_claim(self, claim: CandidateClaim) -> CandidateClaim: ...
+
+    def add_answer(self, answer: AnswerLibraryRecord) -> AnswerLibraryRecord: ...
+
+    def list_answers(self, profile_id: str) -> list[AnswerLibraryRecord]: ...
+
+    def upsert_chunk(self, chunk: RetrievalChunkRecord) -> RetrievalChunkRecord: ...
+
+    def delete_chunk(self, source_type: str, source_id: str) -> None: ...
+
+    def list_chunks(self, profile_id: str) -> list[RetrievalChunkRecord]: ...

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Browser Runtime",
-  version: "0.4.0-alpha.1",
+  name: "Candidate Knowledge",
+  version: "0.5.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -153,6 +153,74 @@ export interface BrowserSessionSnapshot {
   updated_at: string;
 }
 
+export type DocumentKind =
+  | "RESUME"
+  | "COVER_LETTER"
+  | "CERTIFICATION"
+  | "EDUCATION"
+  | "PORTFOLIO"
+  | "OTHER";
+export type ClaimVerificationStatus = "PROPOSED" | "VERIFIED" | "REJECTED";
+export type ClaimPermittedUse = "PROFILE_ONLY" | "APPLICATIONS" | "ANY";
+export type SensitivityLevel = "PUBLIC" | "PERSONAL" | "SENSITIVE";
+
+export interface CandidateDocument {
+  id: string;
+  profile_id: string;
+  kind: DocumentKind;
+  display_name: string;
+  variant_label: string;
+  job_family_tags: string[];
+  is_primary: boolean;
+  archived: boolean;
+  created_at: string;
+}
+
+export interface CandidateClaim {
+  id: string;
+  profile_id: string;
+  evidence_source_id?: string | null;
+  canonical_key: string;
+  statement: string;
+  claim_type: string;
+  value: Record<string, unknown>;
+  source_location?: string | null;
+  context: Record<string, unknown>;
+  start_date?: string | null;
+  end_date?: string | null;
+  confidence: number;
+  verification_status: ClaimVerificationStatus;
+  permitted_use: ClaimPermittedUse;
+  sensitivity: SensitivityLevel;
+  locked: boolean;
+  superseded_by_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnswerLibraryEntry {
+  id: string;
+  profile_id: string;
+  question: string;
+  canonical_field: string;
+  answer: string;
+  evidence_claim_ids: string[];
+  confidence: number;
+  approved: boolean;
+  locked: boolean;
+  reuse_permission: ClaimPermittedUse;
+  provenance: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CandidateKnowledgeSnapshot {
+  profile_id: string;
+  documents: CandidateDocument[];
+  claims: CandidateClaim[];
+  answers: AnswerLibraryEntry[];
+}
+
 export type WorkflowControlAction =
   "ADVANCE" | "PAUSE" | "RESUME" | "RETRY" | "TAKEOVER" | "STOP";
 
@@ -247,6 +315,16 @@ export interface DesktopBridge {
     getStatus(): Promise<BackendRuntimeStatus>;
     listWorkflows(): Promise<WorkflowRunSnapshot[]>;
     listBrowserSessions(workflowId?: string): Promise<BrowserSessionSnapshot[]>;
+    getCandidateKnowledge(
+      profileId: string,
+    ): Promise<CandidateKnowledgeSnapshot>;
+    selectAndImportResume(
+      profileId: string,
+    ): Promise<CandidateKnowledgeSnapshot | null>;
+    reviewCandidateClaim(
+      claimId: string,
+      approved: boolean,
+    ): Promise<CandidateClaim>;
     createCandidate(input: CandidateProfileCreate): Promise<CandidateProfile>;
     startMockWorkflow(input: MockWorkflowCreate): Promise<WorkflowRunSnapshot>;
     controlWorkflow(
