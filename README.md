@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Core build
+## Workbench build
 
-The active milestone is **Core `v0.2.0-alpha.1`**. It extends the modern Foundation with the durable candidate, document, job, application, model-invocation, error, and workflow-checkpoint data model. Sensitive candidate and checkpoint data is stored in authenticated AES-256-GCM envelopes.
+The active milestone is **Workbench `v0.3.0-alpha.1`**. It connects the sandboxed Electron interface to the Core local service through validated IPC, supervises migrations and backend health, and provides durable mock-workflow controls and event recovery.
 
-This build still uses a simulated workflow queue. It does not submit real applications or connect to production email, calendar, AI, or job-portal accounts.
+This build uses real encrypted local profiles and persisted workflow events, but the workflows themselves are simulated. It does not submit applications or connect to production email, calendar, AI, or job-portal accounts.
 
 ## Architecture
 
@@ -18,17 +18,17 @@ backend/migrations        Alembic-managed SQLite schema
 docs/adr                  Architecture decision records
 ```
 
-Electron is the presentation and local process boundary. FastAPI owns business logic and persistence. The renderer never receives Node.js access; its preload exposes a minimal typed bridge. Workflow state transitions are validated by deterministic domain rules before persistence.
+Electron is the presentation and privileged local process boundary. Its main process generates an ephemeral API token, stores the master key with Electron `safeStorage`, runs migrations, supervises FastAPI, and exposes a small validated IPC bridge. The renderer receives neither Node.js access, database access, API credentials, nor encryption keys. Workflow state and events are committed together before the UI receives an update.
 
 ## Local encryption key
 
-Before using candidate or checkpoint APIs, set `JAP_MASTER_KEY` to a base64-encoded 32-byte value. Generate one locally:
+The managed desktop creates the master key and protects it with the operating-system encryption service. For standalone backend development only, set `JAP_MASTER_KEY` to a base64-encoded 32-byte value:
 
 ```powershell
 python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 ```
 
-The key is never committed, persisted by the application, or returned by an API. Backups contain ciphertext and require the same key to restore. Losing the key makes protected records unrecoverable.
+The plaintext key is never committed, logged, sent to the renderer, or returned by an API. The managed desktop persists only the operating-system-protected key blob. Backups contain ciphertext and require the same key to restore.
 
 ## Prerequisites
 
@@ -52,16 +52,16 @@ python -m alembic -c backend\alembic.ini upgrade head
 
 ## Development
 
-Run the backend in one terminal:
-
-```powershell
-pnpm backend:dev
-```
-
-Run the desktop application in another terminal:
+The desktop development command starts and supervises the backend automatically:
 
 ```powershell
 pnpm desktop:dev
+```
+
+For backend-only development, provide `JAP_MASTER_KEY` and optionally `JAP_API_TOKEN`, then run:
+
+```powershell
+pnpm backend:dev
 ```
 
 The API listens only on `127.0.0.1:8765` by default.

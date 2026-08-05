@@ -1,7 +1,7 @@
 {
-  "name": "Core",
-  "version": "0.2.0-alpha.1",
+  "name": "Workbench",
+  "version": "0.3.0-alpha.1",
   "channel": "alpha",
-  "roadmap_phases": [0, 1, 2],
+  "roadmap_phases": [0, 1, 2, 3],
   "production_automation_enabled": false
 }

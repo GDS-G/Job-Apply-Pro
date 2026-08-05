@@ -14,12 +14,12 @@ def test_release_metadata_is_synchronized() -> None:
         (root / "packages" / "contracts" / "package.json").read_text(encoding="utf-8")
     )
 
-    assert version == __version__ == "0.2.0-alpha.1"
+    assert version == __version__ == "0.3.0-alpha.1"
     assert build == {
-        "name": "Core",
+        "name": "Workbench",
         "version": version,
         "channel": "alpha",
-        "roadmap_phases": [0, 1, 2],
+        "roadmap_phases": [0, 1, 2, 3],
         "production_automation_enabled": False,
     }
     assert workspace["version"] == desktop["version"] == contracts["version"] == version
