@@ -35,6 +35,9 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install -e ".\backend[dev]"
 
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
+
       - name: Validate formatting
         run: pnpm format:check
 
