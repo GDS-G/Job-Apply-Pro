@@ -1,6 +1,13 @@
 from typing import Protocol
 
 from job_apply_pro.domain.applications import Application, ApplicationCreate
+from job_apply_pro.domain.browser import (
+    BrowserActionResult,
+    BrowserObservation,
+    BrowserSessionRecord,
+    BrowserSessionSnapshot,
+    BrowserSessionState,
+)
 from job_apply_pro.domain.candidate import CandidateBackup
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
 from job_apply_pro.domain.jobs import Job, JobCreate
@@ -42,3 +49,34 @@ class WorkbenchRepositoryProtocol(Protocol):
     def apply_transition(
         self, workflow_id: str, command: TransitionCommand
     ) -> WorkflowRunSnapshot: ...
+
+
+class BrowserRuntimeRepositoryProtocol(Protocol):
+    def add(self, record: BrowserSessionRecord) -> BrowserSessionRecord: ...
+
+    def get_record(self, session_id: str) -> BrowserSessionRecord | None: ...
+
+    def list_snapshots(self, workflow_id: str | None = None) -> list[BrowserSessionSnapshot]: ...
+
+    def save_observation(
+        self,
+        session_id: str,
+        state: BrowserSessionState,
+        observation: BrowserObservation,
+        *,
+        trace_path: str | None = None,
+    ) -> BrowserSessionRecord: ...
+
+    def set_state(
+        self,
+        session_id: str,
+        state: BrowserSessionState,
+        *,
+        trace_path: str | None = None,
+    ) -> BrowserSessionRecord: ...
+
+    def add_action(self, result: BrowserActionResult) -> BrowserActionResult: ...
+
+    def list_actions(self, session_id: str) -> list[BrowserActionResult]: ...
+
+    def next_action_sequence(self, session_id: str) -> int: ...

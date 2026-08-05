@@ -14,6 +14,7 @@ class RuntimeStatus(BaseModel):
     version: str
     automation_enabled: bool
     authenticated: bool = True
+    browser_runtime_available: bool = True
 
 
 @router.get("/status", response_model=RuntimeStatus)

@@ -6,6 +6,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.applications import Application, ApplicationCreate
+from job_apply_pro.domain.browser import (
+    BrowserAction,
+    BrowserActionResult,
+    BrowserEngine,
+    BrowserObservation,
+    BrowserSessionRecord,
+    BrowserSessionSnapshot,
+    BrowserSessionState,
+)
 from job_apply_pro.domain.candidate import CandidateBackup, CandidateStatus
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
 from job_apply_pro.domain.jobs import Job, JobCreate
@@ -20,6 +29,8 @@ from job_apply_pro.domain.workflow import (
 )
 from job_apply_pro.storage.models import (
     ApplicationRow,
+    BrowserActionRow,
+    BrowserSessionRow,
     CandidateProfileRow,
     JobRow,
     WorkflowCheckpointRow,
@@ -60,6 +71,31 @@ def _event_row(event: WorkflowEvent) -> WorkflowEventRow:
         verification=event.verification.value,
         retry_count=event.retry_count,
         occurred_at=event.occurred_at,
+    )
+
+
+def _browser_record(row: BrowserSessionRow, action_count: int) -> BrowserSessionRecord:
+    observation = (
+        BrowserObservation.model_validate(row.last_observation_json)
+        if row.last_observation_json is not None
+        else None
+    )
+    return BrowserSessionRecord(
+        id=row.id,
+        workflow_id=row.workflow_id,
+        engine=BrowserEngine(row.engine),
+        profile_name=row.profile_name,
+        state=BrowserSessionState(row.state),
+        current_url=row.current_url,
+        allowed_origins=row.allowed_origins_json,
+        observation=observation,
+        action_count=action_count,
+        trace_path=row.trace_path,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
+        user_data_dir=row.user_data_dir,
+        artifact_dir=row.artifact_dir,
+        headless=row.headless,
     )
 
 
@@ -262,6 +298,150 @@ class CheckpointRepository:
             encrypted_payload=row.encrypted_payload,
             created_at=_utc(row.created_at),
         )
+
+
+class BrowserRuntimeRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, record: BrowserSessionRecord) -> BrowserSessionRecord:
+        self._session.add(
+            BrowserSessionRow(
+                id=record.id,
+                workflow_id=record.workflow_id,
+                engine=record.engine.value,
+                profile_name=record.profile_name,
+                user_data_dir=record.user_data_dir,
+                artifact_dir=record.artifact_dir,
+                headless=record.headless,
+                state=record.state.value,
+                current_url=record.current_url,
+                allowed_origins_json=record.allowed_origins,
+                last_observation_json=(
+                    record.observation.model_dump(mode="json") if record.observation else None
+                ),
+                trace_path=record.trace_path,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+            )
+        )
+        self._session.commit()
+        return record
+
+    def get_record(self, session_id: str) -> BrowserSessionRecord | None:
+        row = self._session.get(BrowserSessionRow, session_id)
+        if row is None:
+            return None
+        return _browser_record(row, self._action_count(session_id))
+
+    def list_snapshots(self, workflow_id: str | None = None) -> list[BrowserSessionSnapshot]:
+        statement = select(BrowserSessionRow).order_by(BrowserSessionRow.updated_at.desc())
+        if workflow_id is not None:
+            statement = statement.where(BrowserSessionRow.workflow_id == workflow_id)
+        return [
+            BrowserSessionSnapshot.model_validate(
+                _browser_record(row, self._action_count(row.id)).model_dump()
+            )
+            for row in self._session.scalars(statement).all()
+        ]
+
+    def save_observation(
+        self,
+        session_id: str,
+        state: BrowserSessionState,
+        observation: BrowserObservation,
+        *,
+        trace_path: str | None = None,
+    ) -> BrowserSessionRecord:
+        row = self._session.get(BrowserSessionRow, session_id)
+        if row is None:
+            raise LookupError(f"Browser session {session_id} was not found")
+        row.state = state.value
+        row.current_url = observation.url
+        row.last_observation_json = observation.model_dump(mode="json")
+        if trace_path is not None:
+            row.trace_path = trace_path
+        row.updated_at = utc_now()
+        self._session.commit()
+        return _browser_record(row, self._action_count(session_id))
+
+    def set_state(
+        self,
+        session_id: str,
+        state: BrowserSessionState,
+        *,
+        trace_path: str | None = None,
+    ) -> BrowserSessionRecord:
+        row = self._session.get(BrowserSessionRow, session_id)
+        if row is None:
+            raise LookupError(f"Browser session {session_id} was not found")
+        row.state = state.value
+        if trace_path is not None:
+            row.trace_path = trace_path
+        row.updated_at = utc_now()
+        self._session.commit()
+        return _browser_record(row, self._action_count(session_id))
+
+    def add_action(self, result: BrowserActionResult) -> BrowserActionResult:
+        row = self._session.get(BrowserSessionRow, result.session_id)
+        if row is None:
+            raise LookupError(f"Browser session {result.session_id} was not found")
+        try:
+            self._session.add(
+                BrowserActionRow(
+                    id=result.id,
+                    session_id=result.session_id,
+                    sequence=result.sequence,
+                    action_json=result.action.model_dump(mode="json"),
+                    verified=result.verified,
+                    attempts=result.attempts,
+                    observation_json=result.observation.model_dump(mode="json"),
+                    error=result.error,
+                    created_at=result.created_at,
+                )
+            )
+            row.current_url = result.observation.url
+            row.last_observation_json = result.observation.model_dump(mode="json")
+            row.updated_at = result.created_at
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return result
+
+    def list_actions(self, session_id: str) -> list[BrowserActionResult]:
+        statement = (
+            select(BrowserActionRow)
+            .where(BrowserActionRow.session_id == session_id)
+            .order_by(BrowserActionRow.sequence)
+        )
+        return [
+            BrowserActionResult(
+                id=row.id,
+                session_id=row.session_id,
+                sequence=row.sequence,
+                action=BrowserAction.model_validate(row.action_json),
+                verified=row.verified,
+                attempts=row.attempts,
+                observation=BrowserObservation.model_validate(row.observation_json),
+                error=row.error,
+                created_at=_utc(row.created_at),
+            )
+            for row in self._session.scalars(statement).all()
+        ]
+
+    def next_action_sequence(self, session_id: str) -> int:
+        statement = select(func.max(BrowserActionRow.sequence)).where(
+            BrowserActionRow.session_id == session_id
+        )
+        latest = self._session.scalar(statement)
+        return 1 if latest is None else latest + 1
+
+    def _action_count(self, session_id: str) -> int:
+        statement = select(func.count(BrowserActionRow.id)).where(
+            BrowserActionRow.session_id == session_id
+        )
+        return int(self._session.scalar(statement) or 0)
 
 
 class WorkbenchRepository:

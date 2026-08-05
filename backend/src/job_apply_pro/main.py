@@ -1,5 +1,6 @@
 import secrets
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,16 +8,24 @@ from fastapi.responses import JSONResponse
 
 from job_apply_pro import __version__
 from job_apply_pro.api.router import api_router
+from job_apply_pro.api.routes.browser import shutdown_browser_worker
 from job_apply_pro.config import get_settings
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        yield
+        shutdown_browser_worker()
+
     application = FastAPI(
         title="Job Apply Pro Local API",
         version=__version__,
         docs_url="/api/docs",
         redoc_url=None,
+        lifespan=lifespan,
     )
     application.add_middleware(
         CORSMiddleware,

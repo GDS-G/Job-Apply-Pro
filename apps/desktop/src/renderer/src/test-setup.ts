@@ -12,6 +12,7 @@ const bridge: DesktopBridge = {
       checked_at: new Date(0).toISOString(),
     }),
     listWorkflows: async () => [],
+    listBrowserSessions: async () => [],
     createCandidate: async () => {
       throw new Error("Not implemented in this test.");
     },

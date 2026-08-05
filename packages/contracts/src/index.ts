@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Workbench",
-  version: "0.3.0-alpha.1",
+  name: "Browser Runtime",
+  version: "0.4.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -104,6 +104,55 @@ export interface WorkflowEvent {
   occurred_at: string;
 }
 
+export type BrowserEngine = "chromium" | "chrome" | "msedge";
+export type BrowserSessionState =
+  "STARTING" | "ACTIVE" | "USER_TAKEOVER" | "STOPPED" | "FAILED";
+
+export interface BrowserTab {
+  index: number;
+  url: string;
+  title: string;
+  active: boolean;
+}
+
+export interface BrowserObservation {
+  sequence: number;
+  url: string;
+  title: string;
+  origin: string;
+  page_type: string;
+  page_fingerprint: string;
+  tabs: BrowserTab[];
+  accessibility_snapshot: string;
+  visible_text: string;
+  controls: Record<string, unknown>[];
+  validation_errors: string[];
+  modals: string[];
+  console_errors: string[];
+  network_failures: string[];
+  upload_status: string[];
+  download_status: string[];
+  screenshot_path: string;
+  trace_path?: string | null;
+  previous_action?: string | null;
+  observed_at: string;
+}
+
+export interface BrowserSessionSnapshot {
+  id: string;
+  workflow_id: string;
+  engine: BrowserEngine;
+  profile_name: string;
+  state: BrowserSessionState;
+  current_url: string;
+  allowed_origins: string[];
+  observation?: BrowserObservation | null;
+  action_count: number;
+  trace_path?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type WorkflowControlAction =
   "ADVANCE" | "PAUSE" | "RESUME" | "RETRY" | "TAKEOVER" | "STOP";
 
@@ -197,6 +246,7 @@ export interface DesktopBridge {
   workbench: {
     getStatus(): Promise<BackendRuntimeStatus>;
     listWorkflows(): Promise<WorkflowRunSnapshot[]>;
+    listBrowserSessions(workflowId?: string): Promise<BrowserSessionSnapshot[]>;
     createCandidate(input: CandidateProfileCreate): Promise<CandidateProfile>;
     startMockWorkflow(input: MockWorkflowCreate): Promise<WorkflowRunSnapshot>;
     controlWorkflow(

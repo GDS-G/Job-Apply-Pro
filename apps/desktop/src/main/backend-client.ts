@@ -1,4 +1,5 @@
 import type {
+  BrowserSessionSnapshot,
   CandidateProfile,
   CandidateProfileCreate,
   MockWorkflowCreate,
@@ -28,6 +29,13 @@ export class BackendClient {
 
   listWorkflows(): Promise<WorkflowRunSnapshot[]> {
     return this.request("/workbench/workflows");
+  }
+
+  listBrowserSessions(workflowId?: string): Promise<BrowserSessionSnapshot[]> {
+    const query = workflowId
+      ? `?workflow_id=${encodeURIComponent(workflowId)}`
+      : "";
+    return this.request(`/browser/sessions${query}`);
   }
 
   createCandidate(input: CandidateProfileCreate): Promise<CandidateProfile> {

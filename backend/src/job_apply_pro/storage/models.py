@@ -179,6 +179,44 @@ class WorkflowCheckpointRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class BrowserSessionRow(Base):
+    __tablename__ = "browser_sessions"
+    __table_args__ = (Index("ix_browser_sessions_workflow_updated", "workflow_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(100), index=True)
+    engine: Mapped[str] = mapped_column(String(20))
+    profile_name: Mapped[str] = mapped_column(String(80))
+    user_data_dir: Mapped[str] = mapped_column(Text)
+    artifact_dir: Mapped[str] = mapped_column(Text)
+    headless: Mapped[bool] = mapped_column(Boolean)
+    state: Mapped[str] = mapped_column(String(30), index=True)
+    current_url: Mapped[str] = mapped_column(Text)
+    allowed_origins_json: Mapped[list[str]] = mapped_column(JSON)
+    last_observation_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    trace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BrowserActionRow(Base):
+    __tablename__ = "browser_actions"
+    __table_args__ = (
+        UniqueConstraint("session_id", "sequence", name="uq_browser_action_sequence"),
+        Index("ix_browser_actions_session_created", "session_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("browser_sessions.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    action_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    verified: Mapped[bool] = mapped_column(Boolean)
+    attempts: Mapped[int] = mapped_column(Integer)
+    observation_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ModelInvocationRow(Base):
     __tablename__ = "model_invocations"
 

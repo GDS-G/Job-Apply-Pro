@@ -7,7 +7,9 @@ describe("App", () => {
   it("shows the Workbench safety boundary", () => {
     render(<App />);
 
-    expect(screen.getByText("Workbench v0.3.0-alpha.1")).toBeInTheDocument();
+    expect(
+      screen.getByText("Browser Runtime v0.4.0-alpha.1"),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/production submission remains intentionally disabled/i),
     ).toBeInTheDocument();

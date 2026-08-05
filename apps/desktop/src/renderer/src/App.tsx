@@ -22,6 +22,7 @@ import {
 
 import type {
   BackendRuntimeStatus,
+  BrowserSessionSnapshot,
   CandidateProfile,
   WorkflowControlAction,
   WorkflowRunSnapshot,
@@ -63,7 +64,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Workbench alpha</span>
+        <span>Browser Runtime alpha</span>
       </div>
     </div>
   );
@@ -72,6 +73,9 @@ function AppMark() {
 export function App() {
   const [status, setStatus] = useState(initialStatus);
   const [workflows, setWorkflows] = useState<WorkflowRunSnapshot[]>([]);
+  const [browserSessions, setBrowserSessions] = useState<
+    BrowserSessionSnapshot[]
+  >([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -85,8 +89,12 @@ export function App() {
 
   const refreshWorkflows = useCallback(async () => {
     try {
-      const items = await window.jobApplyPro.workbench.listWorkflows();
+      const [items, sessions] = await Promise.all([
+        window.jobApplyPro.workbench.listWorkflows(),
+        window.jobApplyPro.workbench.listBrowserSessions(),
+      ]);
       setWorkflows(items);
+      setBrowserSessions(sessions);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -122,8 +130,8 @@ export function App() {
   }, [refreshWorkflows, status.state]);
 
   const metrics = useMemo(() => {
-    const paused = workflows.filter(
-      (item) => item.state === "USER_TAKEOVER",
+    const activeBrowsers = browserSessions.filter((item) =>
+      ["ACTIVE", "USER_TAKEOVER"].includes(item.state),
     ).length;
     const ready = workflows.filter(
       (item) => item.state === "READY_TO_SUBMIT",
@@ -144,12 +152,12 @@ export function App() {
         detail: "Submission remains locked",
       },
       {
-        label: "User takeover",
-        value: paused,
-        detail: "Safe manual checkpoints",
+        label: "Browser sessions",
+        value: activeBrowsers,
+        detail: "Isolated & allowlisted",
       },
     ];
-  }, [workflows]);
+  }, [browserSessions, workflows]);
 
   async function createProfile(form: FormData) {
     setBusy(true);
@@ -268,8 +276,10 @@ export function App() {
         <div className="workspace">
           <section className="hero-row">
             <div>
-              <span className="eyebrow">Phase 3 · Local vertical slice</span>
-              <h1>Supervised application workbench</h1>
+              <span className="eyebrow">
+                Phase 4 · Verified browser control
+              </span>
+              <h1>Supervised browser runtime</h1>
               <p>{status.message}</p>
             </div>
             <div className="hero-actions">
@@ -306,10 +316,11 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Workbench v0.3.0-alpha.1</strong>
+              <strong>Browser Runtime v0.4.0-alpha.1</strong>
               <p>
-                Live local data and authenticated IPC are enabled. Production
-                submission remains intentionally disabled.
+                Persistent, traceable browser sessions are available for
+                loopback fixtures. Production submission remains intentionally
+                disabled.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
