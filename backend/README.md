@@ -7,4 +7,6 @@ python -m pip install -e ".\backend[dev]"
 python -m alembic -c backend\alembic.ini upgrade head
 ```
 
-The Foundation build exposes health, simulated dashboard, workflow-transition, and event-history endpoints under `/api/v1`.
+The Core build exposes health, simulated dashboard, workflow-transition, event-history, candidate, job, application, encrypted-backup, and resumable-checkpoint endpoints under `/api/v1`.
+
+Candidate and checkpoint routes require `JAP_MASTER_KEY`, a base64-encoded 32-byte local key. The API never persists or returns the key. OpenAPI documentation is available at `http://127.0.0.1:8765/api/docs` while the service is running.

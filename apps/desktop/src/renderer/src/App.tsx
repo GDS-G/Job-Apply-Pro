@@ -50,7 +50,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Foundation alpha</span>
+        <span>Core alpha</span>
       </div>
     </div>
   );
@@ -156,7 +156,7 @@ export function App() {
               <Sparkles size={20} />
             </span>
             <div>
-              <strong>Foundation v0.1.0-alpha.1</strong>
+              <strong>Core v0.2.0-alpha.1</strong>
               <p>
                 This preview uses simulated activity. Live accounts and
                 production submission are intentionally disabled.

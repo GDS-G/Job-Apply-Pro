@@ -1,7 +1,7 @@
 {
-  "name": "Foundation",
-  "version": "0.1.0-alpha.1",
+  "name": "Core",
+  "version": "0.2.0-alpha.1",
   "channel": "alpha",
-  "roadmap_phases": [0, 1],
+  "roadmap_phases": [0, 1, 2],
   "production_automation_enabled": false
 }
