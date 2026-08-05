@@ -1,0 +1,7 @@
+# Architecture decision records
+
+ADRs capture durable decisions that affect architecture, security, contracts, persistence, or delivery. Accepted records are immutable; supersede them with a new ADR rather than rewriting history.
+
+- [ADR-0001: Modular local-first process architecture](0001-modular-local-first-architecture.md)
+- [ADR-0002: Build naming and semantic versioning](0002-build-naming-and-versioning.md)
+- [ADR-0003: Deterministic workflow state machine](0003-deterministic-workflow-state-machine.md)
