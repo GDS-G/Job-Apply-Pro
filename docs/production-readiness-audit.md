@@ -7,7 +7,7 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 | Requirement | Implementation evidence | Validation evidence | Result |
 | --- | --- | --- | --- |
 | Performance and stress testing | Bounded diagnostic queries, workflow limits, startup deadline | 2,000-job test under 3 seconds; packaged startup under 60 seconds; backend coverage gate at least 80% | Source/packaged candidate complete |
-| Security testing and threat model | `SECURITY.md`, `docs/threat-model.md`, strict boundaries | pnpm audit, policy-wrapped pip-audit, Gitleaks, CodeQL for Python and JavaScript/TypeScript, encryption/auth/privacy tests | Source complete; remote follow-up checks required |
+| Security testing and threat model | `SECURITY.md`, `docs/threat-model.md`, strict boundaries | pnpm audit, pip-audit, Gitleaks, CodeQL for Python and JavaScript/TypeScript, encryption/auth/privacy tests | Source complete; remote follow-up checks required |
 | Accessibility | Semantic renderer and UI Automation exposure | axe serious/critical gate plus real packaged-window inspection | Candidate complete; human contrast/keyboard review remains release-lab evidence |
 | Signed installer | Electron Builder NSIS, `forceCodeSigning=true`, Authenticode verifier | Unsigned local candidate correctly reports `NotSigned` and is rejected by metadata script | Implementation complete; signed artifact blocked by certificate |
 | Automatic updates | Explicit check/download/install state machine, signature verification, downgrade rejection | Pure policy tests and packaged UI inspection | Source complete; signed end-to-end update requires two signed versions |
@@ -19,9 +19,9 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 | Real Windows desktop validation | Bundled backend, Edge channel, NSIS candidate | Real unpacked window launch, accessibility readback, backend connection, clean shutdown | Unsigned candidate complete |
 | Required integrations | Production-disabled catalog and credential-reference adapters | Sanitized fixtures, replay, loopback reference ATS | Not production-authorized; external accounts/legal approval required |
 
-### Temporary Python advisory exception
+### Python advisory resolution
 
-The Python audit permits one machine-enforced exception: `PYSEC-2026-3552` for `cryptography==49.0.0`, expiring 2026-09-05. Its fix is assigned to unreleased 50.0.0, and the vulnerable PKCS#7 decrypt APIs are not used. The audit fails if those APIs appear, the installed version changes, the exception expires, or any unlisted advisory is found. The dependency range already permits 50.x so a fresh environment will adopt the fix once released.
+`cryptography>=50,<51` is required. Version 50.0.0 fixes `PYSEC-2026-3552`; the security workflow runs direct `pip-audit` with no advisory exceptions.
 
 ## Current release classification
 

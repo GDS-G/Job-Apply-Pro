@@ -11,7 +11,7 @@ All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 - Redacted support diagnostics covering queue, recovery, sessions, storage, portal health, workflow events, model metrics, sanitized errors, and trace metadata.
 - Controlled offline restore execution that stops and restarts the backend, verifies the reviewed SHA-256 fingerprint, and preserves the previous database.
 - Automated accessibility checks, 2,000-job diagnostic stress coverage, packaged-backend health checks, and scheduled portal replay regression.
-- An enforced 80% backend coverage floor, policy-wrapped Python dependency audit, dual-language CodeQL analysis, packaged offline-restore drill, and explicit production failure-injection/readiness matrices.
+- An enforced 80% backend coverage floor, Python dependency audit, dual-language CodeQL analysis, packaged offline-restore drill, and explicit production failure-injection/readiness matrices.
 
 ### Security
 
