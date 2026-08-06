@@ -2,6 +2,22 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.12.0-alpha.1] - Unreleased
+
+### Added
+
+- Frozen Python backend runtime and Windows NSIS packaging with unpacked-app CI smoke coverage and release-time SPDX SBOM generation.
+- Signed prerelease update checks, explicit download/install controls, and fail-closed production signing configuration.
+- Redacted support diagnostics covering queue, recovery, sessions, storage, portal health, workflow events, model metrics, sanitized errors, and trace metadata.
+- Controlled offline restore execution that stops and restarts the backend, verifies the reviewed SHA-256 fingerprint, and preserves the previous database.
+- Automated accessibility checks, 2,000-job diagnostic stress coverage, packaged-backend health checks, and scheduled portal replay regression.
+
+### Security
+
+- Production release packaging requires a signing certificate and verifies update publisher signatures.
+- Diagnostic exports omit secrets, candidate content, error values, full paths, browser artifacts, and trace contents.
+- Restore application remains outside the live HTTP API and requires a staged plan, exact fingerprint, explicit desktop confirmation, and an offline database handle.
+
 ## [0.11.0-alpha.1] - Unreleased
 
 ### Added

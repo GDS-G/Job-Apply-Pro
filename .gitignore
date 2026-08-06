@@ -2,6 +2,9 @@
 node_modules/
 out/
 dist/
+release/
+apps/desktop/backend-dist/
+.pyinstaller/
 coverage/
 *.tsbuildinfo
 

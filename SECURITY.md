@@ -66,3 +66,11 @@ OAuth access and refresh tokens must remain in the operating-system credential s
 Message sender/recipient data, subjects, bodies, reply drafts, and calendar before/after snapshots are AES-256-GCM ciphertext with record-specific authenticated context. Provider message/thread identifiers, category, correlation workflow id, timestamps, review flag, fingerprints, and audit status remain metadata so local workflows can deduplicate and recover without decrypting content.
 
 Every outbound email and calendar create/update is planned before execution. Review-required operations accept only the exact current SHA-256 fingerprint, a unique idempotency key, and an authenticated actor. The audit is persisted before the provider call and becomes `CONFIRMED` only after an immutable provider resource identifier is returned; configuration, provider, or verification failures become `FAILED`. Live adapters are disabled by default, and sanitized fixture adapters contain no credentials or real candidate/recruiter data.
+
+## Packaging, updates, recovery, and support
+
+The packaged desktop embeds a frozen backend and uses installed Microsoft Edge for browser execution. Production release configuration requires Windows code signing and fails if a certificate is unavailable. Update checks use the signed GitHub prerelease channel, do not allow downgrades, and require separate user actions to download and install. Release metadata includes an Authenticode check, SHA-256 checksums, and Node/Python dependency inventories.
+
+The live API may verify and stage a restore but cannot apply one. Electron validates the staged plan id and SHA-256 fingerprint, presents a second warning, stops the backend, invokes the offline backend command, retains the prior database, and restarts through migration. Never replace an open database or remove a `.pre-restore` copy before post-restore validation.
+
+Support diagnostics contain aggregate health, count, size, classification, and basename metadata only. They must not contain secrets, candidate fields, document text, mail/calendar content, portal content, error context values, full paths, browser screenshots, trace contents, cookies, database rows, or encryption material. The user explicitly chooses an export destination and should review the JSON before sharing it.

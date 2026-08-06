@@ -7,7 +7,7 @@ python -m pip install -e ".\backend[dev]"
 python -m alembic -c backend\alembic.ini upgrade head
 ```
 
-The Dashboard, Backup & Licensing build exposes health, runtime status, workflow controls, event history, candidate, job, application, encrypted backup and restore staging, resumable checkpoints, browser sessions, candidate knowledge, governed AI, portal, challenge, communication, follow-up, calendar plans, mutation audits, operational reporting, signed-license state, and help endpoints under `/api/v1`.
+The Production Hardening build exposes health, runtime status, workflow controls, event history, candidate, job, application, encrypted backup and restore staging, resumable checkpoints, browser sessions, candidate knowledge, governed AI, portal, challenge, communication, follow-up, calendar plans, mutation audits, operational reporting, signed-license state, redacted support diagnostics, and help endpoints under `/api/v1`. The packaged executable also owns migration, loopback serving, and offline restore commands.
 
 Browser sessions are available under `/api/v1/browser`. Session creation, observation, verified actions, action history, takeover, return, restart, and stop all use the same privileged API authentication. Production automation is locked by default, so only loopback fixture URLs are accepted.
 

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   BackendRuntimeStatus,
+  DesktopUpdateStatus,
   CandidateProfileCreate,
   ChallengeAnswerCommand,
   ChallengeSessionCreate,
@@ -85,7 +86,23 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("operations:verify-backup", backupId),
     stageRestore: (backupId: string) =>
       ipcRenderer.invoke("operations:stage-restore", backupId),
+    applyRestore: (planId: string, fingerprint: string) =>
+      ipcRenderer.invoke("operations:apply-restore", planId, fingerprint),
     listHelpTopics: () => ipcRenderer.invoke("operations:help"),
+    exportSupportDiagnostics: () =>
+      ipcRenderer.invoke("operations:export-diagnostics"),
+    getUpdateStatus: () => ipcRenderer.invoke("updates:status"),
+    checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+    downloadUpdate: () => ipcRenderer.invoke("updates:download"),
+    installUpdate: () => ipcRenderer.invoke("updates:install"),
+    onUpdateStatus: (listener: (status: DesktopUpdateStatus) => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        status: DesktopUpdateStatus,
+      ) => listener(status);
+      ipcRenderer.on("updates:status", handler);
+      return () => ipcRenderer.removeListener("updates:status", handler);
+    },
     onStatus: (listener: (status: BackendRuntimeStatus) => void) => {
       const handler = (
         _event: Electron.IpcRendererEvent,

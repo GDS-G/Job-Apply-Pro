@@ -1,6 +1,6 @@
 {
   "name": "job-apply-pro",
-  "version": "0.11.0-alpha.1",
+  "version": "0.12.0-alpha.1",
   "private": true,
   "description": "Local-first job application workflow desktop app",
   "packageManager": "pnpm@11.9.0",
@@ -16,6 +16,10 @@
     "backend:format:check": "python -m ruff format --check backend",
     "backend:typecheck": "python -m mypy backend/src backend/tests",
     "build": "pnpm -r build",
+    "package:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File backend/build_backend.ps1",
+    "package:dir": "pnpm package:backend && pnpm build && pnpm --filter @job-apply-pro/desktop package:dir",
+    "package:win": "pnpm package:backend && pnpm build && pnpm --filter @job-apply-pro/desktop package:win",
+    "release:win": "pnpm package:backend && pnpm build && pnpm --filter @job-apply-pro/desktop release:win",
     "test": "pnpm -r test && pnpm backend:test",
     "lint": "pnpm -r lint && pnpm backend:lint",
     "typecheck": "pnpm -r typecheck && pnpm backend:typecheck",

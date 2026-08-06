@@ -432,6 +432,17 @@ h1 {
   box-shadow: 0 7px 15px rgb(90 87 201 / 22%);
 }
 
+.button--danger {
+  color: #8b1d2c;
+  background: #fff4f5;
+  border: 1px solid #efb9c1;
+}
+
+.button--danger:hover {
+  background: #ffe8eb;
+  border-color: #dc8d99;
+}
+
 .foundation-banner {
   display: flex;
   align-items: center;

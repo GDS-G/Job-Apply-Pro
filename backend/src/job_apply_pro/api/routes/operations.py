@@ -17,13 +17,16 @@ from job_apply_pro.domain.operations import (
     RestoreCreate,
     RestorePlan,
 )
+from job_apply_pro.domain.support import SupportDiagnostics
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.backup import BackupError, BackupService
 from job_apply_pro.services.licensing import LicenseService, help_topics
 from job_apply_pro.services.operations import OperationsService
+from job_apply_pro.services.support import SupportService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.operations_repository import OperationsRepository
+from job_apply_pro.storage.support_repository import SupportRepository
 
 router = APIRouter(prefix="/operations", tags=["operations"])
 SessionDependency = Annotated[Session, Depends(get_session)]
@@ -55,6 +58,23 @@ def get_operations_service(
 
 BackupServiceDependency = Annotated[BackupService, Depends(get_backup_service)]
 OperationsServiceDependency = Annotated[OperationsService, Depends(get_operations_service)]
+
+
+def get_support_service(session: SessionDependency, cipher: CipherDependency) -> SupportService:
+    settings = get_settings()
+    operations = OperationsRepository(session)
+    backups = BackupService(
+        operations,
+        cipher,
+        database_url=settings.database_url,
+        document_dir=settings.document_data_dir,
+        backup_dir=settings.backup_data_dir,
+        staging_dir=settings.restore_staging_dir,
+    )
+    return SupportService(SupportRepository(session), operations, backups, settings)
+
+
+SupportServiceDependency = Annotated[SupportService, Depends(get_support_service)]
 
 
 def _backup_error(error: Exception) -> HTTPException:
@@ -136,3 +156,8 @@ def license_state() -> LicenseState:
 @router.get("/help", response_model=list[HelpTopic])
 def get_help_topics() -> list[HelpTopic]:
     return help_topics()
+
+
+@router.get("/diagnostics", response_model=SupportDiagnostics)
+def support_diagnostics(service: SupportServiceDependency) -> SupportDiagnostics:
+    return service.diagnostics()

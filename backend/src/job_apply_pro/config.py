@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     browser_data_dir: Path = Path("./var/browser")
     browser_artifact_dir: Path = Path("./var/browser-artifacts")
     browser_headless: bool = True
+    browser_engine: Literal["chromium", "chrome", "msedge"] = "chromium"
     document_data_dir: Path = Path("./var/documents")
     document_max_bytes: int = Field(default=10_485_760, ge=1_024, le=52_428_800)
     ai_config_json: SecretStr | None = None

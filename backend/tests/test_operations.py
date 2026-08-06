@@ -2,6 +2,7 @@ import base64
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import SecretStr
@@ -21,7 +22,7 @@ from job_apply_pro.domain.operations import (
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
-from job_apply_pro.services.backup import BackupService
+from job_apply_pro.services.backup import BackupError, BackupService
 from job_apply_pro.services.licensing import LicenseService, help_topics
 from job_apply_pro.services.operations import OperationsService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
@@ -86,6 +87,47 @@ def test_encrypted_backup_integrity_and_selective_restore(tmp_path: Path) -> Non
     )
     assert applied.status is RestoreStatus.APPLIED
     assert document.read_text(encoding="utf-8") == "encrypted-document-envelope"
+    session.close()
+
+
+def test_offline_restore_rejects_changed_fingerprint_and_missing_stage(
+    tmp_path: Path,
+) -> None:
+    session, database_url = _file_session(tmp_path / "app.db")
+    documents = tmp_path / "documents"
+    documents.mkdir()
+    (documents / "resume.enc").write_text("encrypted", encoding="utf-8")
+    service = BackupService(
+        OperationsRepository(session),
+        SensitiveDataCipher(StaticKeyProvider(b"b" * 32)),
+        database_url=database_url,
+        document_dir=documents,
+        backup_dir=tmp_path / "backups",
+        staging_dir=tmp_path / "restore-staging",
+    )
+    manifest = service.create(BackupCreate(label="Failure injection"))
+    plan = service.stage_restore(manifest.id, RestoreCreate(categories={BackupCategory.DOCUMENTS}))
+
+    with pytest.raises(ValueError, match="changed after review"):
+        service.apply_offline(
+            plan.id,
+            RestoreConfirmation(
+                fingerprint="0" * 64,
+                confirmation_phrase=BackupService.RESTORE_PHRASE,
+            ),
+        )
+
+    staged = Path(plan.staged_path)
+    (staged / "documents" / "resume.enc").unlink()
+    (staged / "documents").rmdir()
+    with pytest.raises(BackupError, match="missing"):
+        service.apply_offline(
+            plan.id,
+            RestoreConfirmation(
+                fingerprint=plan.fingerprint,
+                confirmation_phrase=BackupService.RESTORE_PHRASE,
+            ),
+        )
     session.close()
 
 

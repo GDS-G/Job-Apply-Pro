@@ -16,6 +16,8 @@ export interface BackendSupervisorOptions {
   apiToken: string;
   masterKey: string;
   databaseUrl: string;
+  backendExecutable?: string;
+  browserEngine?: "chromium" | "chrome" | "msedge";
   pythonPath?: string;
 }
 
@@ -50,26 +52,16 @@ export class BackendSupervisor {
     if (this.child !== null) return;
     this.stopping = false;
     this.update("starting", "Preparing the encrypted local workspace…");
-    const pythonPath = this.options.pythonPath ?? this.resolvePython();
-    const environment = {
-      ...process.env,
-      JAP_API_TOKEN: this.options.apiToken,
-      JAP_MASTER_KEY: this.options.masterKey,
-      JAP_DATABASE_URL: this.options.databaseUrl,
-      JAP_BROWSER_DATA_DIR: join(this.options.dataRoot, "browser"),
-      JAP_BROWSER_ARTIFACT_DIR: join(
-        this.options.dataRoot,
-        "browser-artifacts",
-      ),
-      JAP_DOCUMENT_DATA_DIR: join(this.options.dataRoot, "documents"),
-      JAP_BACKUP_DATA_DIR: join(this.options.dataRoot, "backups"),
-      JAP_RESTORE_STAGING_DIR: join(this.options.dataRoot, "restore-staging"),
-      PYTHONUNBUFFERED: "1",
-    };
+    const packagedBackend = this.options.backendExecutable;
+    const executable =
+      packagedBackend ?? this.options.pythonPath ?? this.resolvePython();
+    const environment = this.runtimeEnvironment();
 
     const migrationExit = await this.runToCompletion(
-      pythonPath,
-      ["-m", "alembic", "-c", "backend/alembic.ini", "upgrade", "head"],
+      executable,
+      packagedBackend
+        ? ["migrate"]
+        : ["-m", "alembic", "-c", "backend/alembic.ini", "upgrade", "head"],
       environment,
     );
     if (migrationExit !== 0) {
@@ -81,18 +73,20 @@ export class BackendSupervisor {
     }
 
     this.child = spawn(
-      pythonPath,
-      [
-        "-m",
-        "uvicorn",
-        "job_apply_pro.main:app",
-        "--app-dir",
-        "backend/src",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8765",
-      ],
+      executable,
+      packagedBackend
+        ? ["serve"]
+        : [
+            "-m",
+            "uvicorn",
+            "job_apply_pro.main:app",
+            "--app-dir",
+            "backend/src",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8765",
+          ],
       {
         cwd: this.options.projectRoot,
         env: environment,
@@ -119,8 +113,43 @@ export class BackendSupervisor {
       this.backupScheduleTimer = null;
     }
     this.child?.kill();
-    this.child = null;
     this.update("stopped", "Local backend stopped.");
+  }
+
+  async applyOfflineRestore(
+    planId: string,
+    fingerprint: string,
+  ): Promise<void> {
+    this.update(
+      "starting",
+      "Stopping the backend for verified offline restore…",
+    );
+    await this.stopAndWait();
+    const packagedBackend = this.options.backendExecutable;
+    const executable =
+      packagedBackend ?? this.options.pythonPath ?? this.resolvePython();
+    const result = await this.runToCompletion(
+      executable,
+      packagedBackend
+        ? ["restore", "--plan-id", planId, "--fingerprint", fingerprint]
+        : [
+            "-m",
+            "job_apply_pro.desktop_entry",
+            "restore",
+            "--plan-id",
+            planId,
+            "--fingerprint",
+            fingerprint,
+          ],
+      this.runtimeEnvironment(),
+    );
+    if (result !== 0) {
+      await this.start();
+      throw new Error(
+        "The offline restore was rejected or failed. Existing data remains recoverable; export diagnostics before retrying.",
+      );
+    }
+    await this.start();
   }
 
   markDegraded(message: string): void {
@@ -154,6 +183,54 @@ export class BackendSupervisor {
     };
     runDue();
     this.backupScheduleTimer = setInterval(runDue, 60_000);
+  }
+
+  private async stopAndWait(): Promise<void> {
+    const child = this.child;
+    this.stop();
+    if (child === null || child.exitCode !== null) return;
+    const exited = await Promise.race([
+      new Promise<boolean>((resolve) =>
+        child.once("exit", () => resolve(true)),
+      ),
+      delay(5_000).then(() => false),
+    ]);
+    if (exited) return;
+    child.kill("SIGKILL");
+    const forceExited = await Promise.race([
+      new Promise<boolean>((resolve) =>
+        child.once("exit", () => resolve(true)),
+      ),
+      delay(2_000).then(() => false),
+    ]);
+    if (!forceExited && child.exitCode === null && child.signalCode === null) {
+      this.update(
+        "degraded",
+        "The backend could not be stopped; restore was not attempted.",
+      );
+      throw new Error(
+        "The local backend could not be stopped safely. Restore was not attempted.",
+      );
+    }
+  }
+
+  private runtimeEnvironment(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      JAP_API_TOKEN: this.options.apiToken,
+      JAP_MASTER_KEY: this.options.masterKey,
+      JAP_DATABASE_URL: this.options.databaseUrl,
+      JAP_BROWSER_DATA_DIR: join(this.options.dataRoot, "browser"),
+      JAP_BROWSER_ARTIFACT_DIR: join(
+        this.options.dataRoot,
+        "browser-artifacts",
+      ),
+      JAP_DOCUMENT_DATA_DIR: join(this.options.dataRoot, "documents"),
+      JAP_BACKUP_DATA_DIR: join(this.options.dataRoot, "backups"),
+      JAP_RESTORE_STAGING_DIR: join(this.options.dataRoot, "restore-staging"),
+      JAP_BROWSER_ENGINE: this.options.browserEngine ?? "chromium",
+      PYTHONUNBUFFERED: "1",
+    };
   }
 
   private resolvePython(): string {

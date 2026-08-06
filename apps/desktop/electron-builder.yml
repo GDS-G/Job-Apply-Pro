@@ -1,0 +1,36 @@
+appId: com.jobapplypro.desktop
+productName: Job Apply Pro
+asar: true
+npmRebuild: false
+directories:
+  output: ../../release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: backend-dist/job-apply-pro-backend
+    to: backend
+    filter:
+      - "**/*"
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  verifyUpdateCodeSignature: true
+  artifactName: Job-Apply-Pro-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+publish:
+  provider: github
+  owner: GDS-G
+  repo: Job-Apply-Pro
+  releaseType: prerelease

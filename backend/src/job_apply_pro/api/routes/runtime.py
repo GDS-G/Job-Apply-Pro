@@ -20,6 +20,7 @@ class RuntimeStatus(BaseModel):
     portal_vertical_slice_available: bool = True
     communication_scheduling_available: bool = True
     operations_dashboard_available: bool = True
+    production_hardening_available: bool = True
 
 
 @router.get("/status", response_model=RuntimeStatus)

@@ -5,6 +5,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.browser import get_browser_service
+from job_apply_pro.config import get_settings
+from job_apply_pro.domain.browser import BrowserEngine
 from job_apply_pro.domain.portals import (
     PortalAdapterDefinition,
     PortalKind,
@@ -61,6 +63,7 @@ def get_portal_service(
         runs=PortalRunRepository(session),
         browser=get_browser_service(session, cipher),
         cipher=cipher,
+        default_browser_engine=BrowserEngine(get_settings().browser_engine),
     )
 
 

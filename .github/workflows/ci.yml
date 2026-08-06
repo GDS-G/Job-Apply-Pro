@@ -52,3 +52,22 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Package bundled backend
+        run: pnpm package:backend
+
+      - name: Smoke-test bundled backend
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_packaged_backend.ps1
+
+      - name: Package unpacked Windows application
+        run: pnpm --filter @job-apply-pro/desktop package:dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload package smoke artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-apply-pro-windows-unpacked
+          path: release/win-unpacked
+          retention-days: 7
+          if-no-files-found: error

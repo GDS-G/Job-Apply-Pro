@@ -25,6 +25,7 @@ import type {
   PortalAdapterDefinition,
   ReferencePortalRunCreate,
   RestorePlan,
+  SupportDiagnostics,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -330,6 +331,10 @@ export class BackendClient {
 
   listHelpTopics(): Promise<HelpTopic[]> {
     return this.request("/operations/help");
+  }
+
+  getSupportDiagnostics(): Promise<SupportDiagnostics> {
+    return this.request("/operations/diagnostics", {}, 30_000);
   }
 
   private async request<T>(
