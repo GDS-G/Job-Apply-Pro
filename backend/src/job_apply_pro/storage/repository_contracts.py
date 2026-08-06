@@ -21,6 +21,7 @@ from job_apply_pro.domain.knowledge import (
     EvidenceSource,
     RetrievalChunkRecord,
 )
+from job_apply_pro.domain.portals import PortalRunSnapshot
 from job_apply_pro.domain.workbench import WorkflowRunSnapshot
 from job_apply_pro.domain.workflow import TransitionCommand
 
@@ -35,6 +36,8 @@ class JobRepositoryProtocol(Protocol):
     def add(self, command: JobCreate) -> Job: ...
 
     def get(self, job_id: str) -> Job | None: ...
+
+    def find_by_identity(self, source: str, external_id: str) -> Job | None: ...
 
 
 class ApplicationRepositoryProtocol(Protocol):
@@ -132,3 +135,21 @@ class AIGatewayRepositoryProtocol(Protocol):
     def get_cache(self, key: str) -> AICacheRecord | None: ...
 
     def upsert_cache(self, record: AICacheRecord) -> AICacheRecord: ...
+
+
+class PortalRunRepositoryProtocol(Protocol):
+    def save(self, run: PortalRunSnapshot) -> PortalRunSnapshot: ...
+
+    def get(self, run_id: str) -> PortalRunSnapshot | None: ...
+
+    def list_runs(self) -> list[PortalRunSnapshot]: ...
+
+    def add_job_analysis(
+        self,
+        *,
+        job_id: str,
+        profile_id: str,
+        requirements: list[str],
+        score: float,
+        explanation: dict[str, object],
+    ) -> None: ...

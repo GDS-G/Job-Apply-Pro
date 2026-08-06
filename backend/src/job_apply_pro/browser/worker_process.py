@@ -339,16 +339,32 @@ class BrowserWorker:
         controls_raw: list[dict[str, object]] = page.locator(
             "input,select,textarea,button,a,[role]"
         ).evaluate_all(
-            """els => els.slice(0, 100).map((el, index) => ({
-              index,
-              tag: el.tagName.toLowerCase(),
-              type: el.getAttribute('type') || '',
-              role: el.getAttribute('role') || '',
-              name: el.getAttribute('aria-label') || el.getAttribute('name') || '',
-              text: (el.innerText || '').trim().slice(0, 200),
-              required: el.hasAttribute('required'),
-              disabled: el.hasAttribute('disabled')
-            }))"""
+            """els => els.slice(0, 100).map((el, index) => {
+              const id = el.getAttribute('id') || '';
+              const explicitLabel = id
+                ? document.querySelector(`label[for="${CSS.escape(id)}"]`)
+                : null;
+              const wrappingLabel = el.closest('label');
+              return {
+                index,
+                tag: el.tagName.toLowerCase(),
+                type: el.getAttribute('type') || '',
+                role: el.getAttribute('role') || '',
+                name: el.getAttribute('aria-label') || el.getAttribute('name') || '',
+                label: (
+                  el.getAttribute('aria-label') ||
+                  explicitLabel?.innerText ||
+                  wrappingLabel?.innerText ||
+                  ''
+                ).trim().slice(0, 300),
+                text: (el.innerText || '').trim().slice(0, 200),
+                href: el.getAttribute('href') || '',
+                canonicalField: el.getAttribute('data-canonical-field') || '',
+                accept: el.getAttribute('accept') || '',
+                required: el.hasAttribute('required'),
+                disabled: el.hasAttribute('disabled')
+              };
+            })"""
         )
         form_signatures = page.locator("form").evaluate_all(
             "els => els.map(el => Array.from(el.elements).map(c => c.name || c.id || c.type))"

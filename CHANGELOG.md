@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.7.0-alpha.1] - Unreleased
+
+### Added
+
+- Typed reference ATS adapter with loopback JSON discovery, browser-observed job identity validation, capability declaration, canonical field mapping, and strong confirmation rules.
+- Complete persisted workflow from search, extraction, deduplication, fit scoring, eligibility, and resume selection through multi-page form completion, upload verification, review, confirmed fixture submission, and tracking.
+- Portal-run, job-requirement, fit-score, workflow-event, browser-action, screenshot, confirmation-evidence, and trace persistence.
+- Authenticated `/api/v1/portals` prepare, list, read, and confirm endpoints plus validated Electron IPC and a supervised desktop portal panel.
+- Deterministic real-Playwright regression fixture covering job reuse, evidence-backed qualification, required fields, upload, approval mismatch, confirmation code, trace creation, and cleanup.
+- Alembic migration `20260805_0006` for portal-run evidence.
+
+### Security
+
+- Reference ATS discovery and submission reject every non-loopback origin regardless of the broader automation setting.
+- Encrypted resumes are decrypted only into a session-scoped upload directory, which is removed immediately after verified upload and again on stop.
+- Submission requires an exact persisted review fingerprint and explicit phrase; a click alone can never produce `SUBMISSION_CONFIRMED`.
+- Production portal automation, production submission, email, and calendar integrations remain disabled.
+
 ## [0.6.0-alpha.1] - Unreleased
 
 ### Added
