@@ -6,10 +6,17 @@ from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.browser import get_browser_service
 from job_apply_pro.domain.portals import (
+    PortalAdapterDefinition,
+    PortalKind,
+    PortalPageMatch,
+    PortalPageProbe,
+    PortalRegressionMetric,
+    PortalReplayCase,
     PortalRunSnapshot,
     ReferencePortalRunCreate,
     SubmissionApproval,
 )
+from job_apply_pro.portals.catalog import PortalCatalog, PortalCatalogError
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.core import CoreService
 from job_apply_pro.services.portals import (
@@ -60,6 +67,13 @@ def get_portal_service(
 PortalServiceDependency = Annotated[ReferencePortalService, Depends(get_portal_service)]
 
 
+def get_portal_catalog() -> PortalCatalog:
+    return PortalCatalog()
+
+
+PortalCatalogDependency = Annotated[PortalCatalog, Depends(get_portal_catalog)]
+
+
 def _http_error(error: Exception) -> HTTPException:
     if isinstance(error, LookupError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
@@ -72,6 +86,41 @@ def _http_error(error: Exception) -> HTTPException:
     if isinstance(error, IntegrityError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Portal record conflict")
     raise error
+
+
+@router.get("/catalog", response_model=list[PortalAdapterDefinition])
+def list_portal_catalog(catalog: PortalCatalogDependency) -> list[PortalAdapterDefinition]:
+    return catalog.definitions()
+
+
+@router.get("/catalog/{portal}", response_model=PortalAdapterDefinition)
+def get_portal_definition(
+    portal: PortalKind, catalog: PortalCatalogDependency
+) -> PortalAdapterDefinition:
+    try:
+        return catalog.get(portal)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/identify", response_model=PortalPageMatch)
+def identify_portal_page(
+    probe: PortalPageProbe, catalog: PortalCatalogDependency
+) -> PortalPageMatch:
+    try:
+        return catalog.identify(**probe.model_dump())
+    except PortalCatalogError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/replays/validate", response_model=list[PortalRegressionMetric])
+def validate_portal_replays(
+    cases: list[PortalReplayCase], catalog: PortalCatalogDependency
+) -> list[PortalRegressionMetric]:
+    try:
+        return catalog.run_replays(cases)
+    except PortalCatalogError as error:
+        raise _http_error(error) from error
 
 
 @router.post(

@@ -2,6 +2,22 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.9.0-alpha.1] - Unreleased
+
+### Added
+
+- Typed generic-agent portal definitions for LinkedIn, Indeed, Monster, CareerBuilder, Dice, ZipRecruiter, Glassdoor, company careers sites, Workday, Taleo, and Greenhouse.
+- Per-portal domain boundaries, capability declarations, page fingerprints, confirmation rules, limitations, support status, and adapter versions.
+- Authenticated portal catalog, page-identification, and replay-validation APIs.
+- Sanitized replay corpus with per-portal fingerprint accuracy and confirmation false-positive metrics.
+- Desktop portal health cards that distinguish replay validation from production enablement.
+
+### Security
+
+- All Phase 9 portal definitions remain production-disabled and cannot execute live actions.
+- Weak fingerprints, unknown page types, unsanitized replays, and identifier-free confirmation signals fail closed.
+- The loopback Reference ATS remains the only executable submission integration.
+
 ## [0.8.0-alpha.1] - Unreleased
 
 ### Added

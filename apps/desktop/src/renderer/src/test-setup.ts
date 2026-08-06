@@ -33,6 +33,7 @@ const bridge: DesktopBridge = {
       throw new Error("Not implemented in this test.");
     },
     listPortalRuns: async () => [],
+    listPortalCatalog: async () => [],
     prepareReferencePortal: async () => {
       throw new Error("Not implemented in this test.");
     },

@@ -8,7 +8,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Challenge Framework v0.8.0-alpha.1"),
+      screen.getByText("Portal Adapter Expansion v0.9.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/production submission is disabled/i),

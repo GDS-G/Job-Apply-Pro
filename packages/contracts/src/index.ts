@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Challenge Framework",
-  version: "0.8.0-alpha.1",
+  name: "Portal Adapter Expansion",
+  version: "0.9.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -160,7 +160,51 @@ export type PortalCapability =
   | "MULTI_PAGE_FORM"
   | "DOCUMENT_UPLOAD"
   | "SUBMISSION"
-  | "CONFIRMATION";
+  | "CONFIRMATION"
+  | "LOGIN"
+  | "MFA"
+  | "CAPTCHA"
+  | "QUESTIONNAIRE"
+  | "ASSESSMENT"
+  | "SAVED_JOBS";
+
+export type PortalKind =
+  | "REFERENCE_ATS"
+  | "LINKEDIN"
+  | "INDEED"
+  | "MONSTER"
+  | "CAREERBUILDER"
+  | "DICE"
+  | "ZIPRECRUITER"
+  | "GLASSDOOR"
+  | "COMPANY_CAREERS"
+  | "WORKDAY"
+  | "TALEO"
+  | "GREENHOUSE";
+
+export interface PortalFingerprintRule {
+  page_type: string;
+  required_signals: string[];
+  capability: PortalCapability;
+}
+
+export interface PortalAdapterDefinition {
+  kind: PortalKind;
+  display_name: string;
+  domains: string[];
+  strategy: "NATIVE_ADAPTER" | "GENERIC_AGENT";
+  capabilities: PortalCapability[];
+  fingerprints: PortalFingerprintRule[];
+  confirmation: {
+    page_types: string[];
+    required_text_patterns: string[];
+    require_identifier: boolean;
+  };
+  support_status: "REPLAY_VALIDATED" | "LIVE_VALIDATION_REQUIRED" | "DISABLED";
+  production_enabled: boolean;
+  limitations: string[];
+  adapter_version: string;
+}
 
 export interface PortalQualification {
   score: number;
@@ -502,6 +546,7 @@ export interface DesktopBridge {
       action: WorkflowControlAction,
     ): Promise<WorkflowRunSnapshot>;
     listPortalRuns(): Promise<PortalRunSnapshot[]>;
+    listPortalCatalog(): Promise<PortalAdapterDefinition[]>;
     prepareReferencePortal(
       input: ReferencePortalRunCreate,
     ): Promise<PortalRunSnapshot>;

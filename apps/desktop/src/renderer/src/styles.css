@@ -1127,6 +1127,36 @@ h1 {
   font-size: 10px;
 }
 
+.adapter-health {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
+.adapter-health__item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e8ebf2;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.adapter-health__item div,
+.adapter-health__item small {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #7f899d;
+  font-size: 9px;
+}
+
+.adapter-health__item strong {
+  color: #3d4659;
+  font-size: 10px;
+}
+
 .challenge-workspace {
   display: grid;
   grid-template-columns: minmax(240px, 0.7fr) minmax(340px, 1.3fr);
@@ -1197,6 +1227,9 @@ h1 {
   }
   .portal-grid {
     grid-template-columns: 1fr;
+  }
+  .adapter-health {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .challenge-workspace {
     grid-template-columns: 1fr;

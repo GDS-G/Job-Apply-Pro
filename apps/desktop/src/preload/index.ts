@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
     controlWorkflow: (workflowId: string, action: WorkflowControlAction) =>
       ipcRenderer.invoke("workbench:control", workflowId, action),
     listPortalRuns: () => ipcRenderer.invoke("portals:list-runs"),
+    listPortalCatalog: () => ipcRenderer.invoke("portals:list-catalog"),
     prepareReferencePortal: (input: ReferencePortalRunCreate) =>
       ipcRenderer.invoke("portals:prepare-reference", input),
     confirmReferencePortal: (runId: string, reviewFingerprint: string) =>

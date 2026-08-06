@@ -53,4 +53,8 @@ CAPTCHA solving is never delegated to a model or third-party solver. Detection r
 
 Questionnaire and assessment suggestions use only decrypted candidate contact fields or answer-library entries that are approved, locked, and permitted for applications. Legal attestations and signatures cannot be completed through the challenge API. Every answer is followed by a browser-state verification. A changed page fingerprint invalidates prior verification during recovery, and completion requires the fresh review fingerprint plus explicit `COMPLETE CHALLENGE` confirmation.
 
-The Challenge Framework remains a development build. Real portal automation and application submission are intentionally not authorized.
+## Portal catalog boundary
+
+Phase 9 catalog entries are declarative generic-agent workflows, not permission to access live accounts. Definitions constrain known domains, capabilities, fingerprints, confirmation signals, limitations, and replay status. Every entry has `production_enabled=false`. Unknown or weak page fingerprints fail closed, confirmation requires both approved text and an identifier, and sanitized replays contain no credentials, cookies, candidate data, or live job records.
+
+The Portal Adapter Expansion remains a development build. Real portal automation and application submission are intentionally not authorized.
