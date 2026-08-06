@@ -47,4 +47,10 @@ Imported document files remain encrypted at rest. For an approved upload, the br
 
 The reference ATS adapter is deliberately restricted to `localhost`, `127.0.0.1`, and `::1`. Discovery responses and browser-observed job identity must agree. A run stops at `READY_TO_SUBMIT` with a persisted page fingerprint. Submission is an elevated action and proceeds only when the desktop supplies the exact fingerprint and explicit `SUBMIT REFERENCE APPLICATION` phrase. A click is recorded as `SUBMISSION_ATTEMPTED`; `SUBMISSION_CONFIRMED` requires a supported confirmation page and parsed confirmation code. Missing or changed evidence becomes `SUBMISSION_UNCERTAIN`, never confirmed.
 
-The Portal Vertical Slice remains a development build. Real portal automation and application submission are intentionally not authorized.
+## Challenge boundary
+
+CAPTCHA solving is never delegated to a model or third-party solver. Detection records the provider and page fingerprint, transitions the workflow to `CAPTCHA_REQUIRED`, preserves its prior state, and waits for direct user intervention. Resume is accepted only after a fresh browser observation shows that the CAPTCHA is absent.
+
+Questionnaire and assessment suggestions use only decrypted candidate contact fields or answer-library entries that are approved, locked, and permitted for applications. Legal attestations and signatures cannot be completed through the challenge API. Every answer is followed by a browser-state verification. A changed page fingerprint invalidates prior verification during recovery, and completion requires the fresh review fingerprint plus explicit `COMPLETE CHALLENGE` confirmation.
+
+The Challenge Framework remains a development build. Real portal automation and application submission are intentionally not authorized.

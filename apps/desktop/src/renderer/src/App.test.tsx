@@ -8,13 +8,16 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Portal Vertical Slice v0.7.0-alpha.1"),
+      screen.getByText("Challenge Framework v0.8.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/production submission is disabled/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/reference ATS vertical slice/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /challenge framework/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /create encrypted profile/i }),

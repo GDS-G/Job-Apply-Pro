@@ -2,6 +2,25 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.8.0-alpha.1] - Unreleased
+
+### Added
+
+- Durable CAPTCHA, questionnaire, quiz, and timed-assessment sessions with typed detection, question extraction, visible-timer synchronization, persisted events, and Alembic migration `20260805_0007`.
+- Verified answer execution for text, select, checkbox, and true/false controls, with required, option, and character-limit validation.
+- Candidate answer suggestions restricted to encrypted contact facts and locked approved application answer-library records.
+- Provider-independent fast-text, strong-reasoning, multimodal, long-context, cache, and low-confidence escalation recommendations for the governed AI Gateway.
+- Recovery refresh that re-observes the browser, detects challenge drift, invalidates stale verification evidence, and preserves answer values for supervised re-verification.
+- Authenticated `/api/v1/challenges` routes, validated Electron IPC, and a desktop challenge panel for detection, answers, CAPTCHA handoff, review, and completion.
+- Real-Playwright assessment and CAPTCHA fixtures covering timer capture, answer verification, explicit completion, saved-state resume, events, authentication, and repeatable migrations.
+
+### Security
+
+- CAPTCHA and legal/signature fields require direct user intervention; no solver credentials or bypass service are accepted.
+- Challenge completion requires the exact current review fingerprint and fixed confirmation phrase.
+- Page changes invalidate previously verified answers during recovery, and model routing remains advisory behind the AI Gateway.
+- Production portal automation, production submission, email, and calendar integrations remain disabled.
+
 ## [0.7.0-alpha.1] - Unreleased
 
 ### Added

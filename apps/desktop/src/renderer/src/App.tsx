@@ -28,6 +28,8 @@ import type {
   BrowserSessionSnapshot,
   CandidateKnowledgeSnapshot,
   CandidateProfile,
+  ChallengeAnswerSuggestion,
+  ChallengeSessionSnapshot,
   PortalRunSnapshot,
   WorkflowControlAction,
   WorkflowRunSnapshot,
@@ -72,7 +74,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Portal vertical slice</span>
+        <span>Challenge framework</span>
       </div>
     </div>
   );
@@ -85,6 +87,12 @@ export function App() {
     BrowserSessionSnapshot[]
   >([]);
   const [portalRuns, setPortalRuns] = useState<PortalRunSnapshot[]>([]);
+  const [challengeSessions, setChallengeSessions] = useState<
+    ChallengeSessionSnapshot[]
+  >([]);
+  const [challengeSuggestions, setChallengeSuggestions] = useState<
+    ChallengeAnswerSuggestion[]
+  >([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -101,14 +109,16 @@ export function App() {
 
   const refreshWorkflows = useCallback(async () => {
     try {
-      const [items, sessions, runs] = await Promise.all([
+      const [items, sessions, runs, challenges] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
         window.jobApplyPro.workbench.listPortalRuns(),
+        window.jobApplyPro.workbench.listChallengeSessions(),
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
       setPortalRuns(runs);
+      setChallengeSessions(challenges);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -328,7 +338,89 @@ export function App() {
     }
   }
 
+  async function detectChallenge() {
+    if (!selected) return;
+    const browser = browserSessions.find(
+      (item) => item.workflow_id === selected.workflow_id,
+    );
+    if (!browser) {
+      setError("This workflow has no browser session to inspect.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const challenge = await window.jobApplyPro.workbench.detectChallenge({
+        workflow_id: selected.workflow_id,
+        browser_session_id: browser.id,
+      });
+      setChallengeSessions((current) => [
+        challenge,
+        ...current.filter((item) => item.id !== challenge.id),
+      ]);
+      setChallengeSuggestions(
+        await window.jobApplyPro.workbench.getChallengeSuggestions(
+          challenge.id,
+        ),
+      );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function answerChallenge(sessionId: string, form: FormData) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await window.jobApplyPro.workbench.answerChallenge(
+        sessionId,
+        {
+          question_id: String(form.get("question_id")),
+          value: String(form.get("value")),
+        },
+      );
+      setChallengeSessions((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function finishChallenge(challenge: ChallengeSessionSnapshot) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated =
+        challenge.status === "INTERVENTION_REQUIRED"
+          ? await window.jobApplyPro.workbench.completeChallengeIntervention(
+              challenge.id,
+              challenge.detection.page_fingerprint,
+            )
+          : await window.jobApplyPro.workbench.completeChallenge(
+              challenge.id,
+              challenge.review_fingerprint ?? "",
+            );
+      setChallengeSessions((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      await refreshWorkflows();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const latestPortalRun = portalRuns[0] ?? null;
+  const activeChallenge =
+    challengeSessions.find(
+      (item) => item.workflow_id === selected?.workflow_id,
+    ) ?? null;
 
   return (
     <div className="shell">
@@ -388,7 +480,7 @@ export function App() {
           <section className="hero-row">
             <div>
               <span className="eyebrow">
-                Phase 7 · Complete portal workflow
+                Phase 8 · Supervised challenge handling
               </span>
               <h1>Supervised application workbench</h1>
               <p>{status.message}</p>
@@ -427,7 +519,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Portal Vertical Slice v0.7.0-alpha.1</strong>
+              <strong>Challenge Framework v0.8.0-alpha.1</strong>
               <p>
                 Search, qualification, document selection, verified form fill,
                 upload, confirmation-gated submission, and tracking now run as
@@ -825,6 +917,153 @@ export function App() {
                   <div className="empty-state empty-state--compact">
                     Import and approve a resume, then provide a running
                     reference ATS fixture origin.
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="panel challenge-panel">
+            <div className="panel__header">
+              <div>
+                <h2>Challenge framework</h2>
+                <p>
+                  CAPTCHA intervention, questionnaires, and timed assessments
+                </p>
+              </div>
+              <ListChecks size={19} />
+            </div>
+            <div className="challenge-workspace">
+              <div className="challenge-summary">
+                {activeChallenge ? (
+                  <>
+                    <span className="status-pill status-pill--safe">
+                      {activeChallenge.detection.kind} ·{" "}
+                      {activeChallenge.status}
+                    </span>
+                    <strong>
+                      {activeChallenge.questions.length} detected questions
+                    </strong>
+                    <p>
+                      {activeChallenge.remaining_seconds == null
+                        ? "No visible timer"
+                        : `${activeChallenge.remaining_seconds}s remaining`}
+                    </p>
+                    {activeChallenge.status === "INTERVENTION_REQUIRED" ? (
+                      <button
+                        className="button button--primary"
+                        disabled={busy}
+                        onClick={() => void finishChallenge(activeChallenge)}
+                        type="button"
+                      >
+                        <ShieldCheck size={16} /> I completed the CAPTCHA
+                      </button>
+                    ) : null}
+                    {activeChallenge.status === "REVIEW_REQUIRED" ? (
+                      <button
+                        className="button button--primary"
+                        disabled={busy}
+                        onClick={() => void finishChallenge(activeChallenge)}
+                        type="button"
+                      >
+                        <ShieldCheck size={16} /> Confirm challenge completion
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      Inspect the selected workflow’s active browser page and
+                      create a durable challenge checkpoint.
+                    </p>
+                    <button
+                      className="button button--primary"
+                      disabled={busy || !selected}
+                      onClick={() => void detectChallenge()}
+                      type="button"
+                    >
+                      <Search size={16} /> Detect challenge
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="challenge-questions">
+                {activeChallenge?.questions.map((question) => {
+                  const answer = activeChallenge.answers.find(
+                    (item) => item.question_id === question.id,
+                  );
+                  const suggestion = challengeSuggestions.find(
+                    (item) => item.question_id === question.id,
+                  );
+                  return (
+                    <form
+                      action={(form) =>
+                        void answerChallenge(activeChallenge.id, form)
+                      }
+                      className="challenge-question"
+                      key={question.id}
+                    >
+                      <input
+                        name="question_id"
+                        type="hidden"
+                        value={question.id}
+                      />
+                      <label>
+                        {question.prompt}
+                        {question.required ? " *" : ""}
+                        {question.options.length ? (
+                          <select
+                            defaultValue={
+                              answer?.value ?? suggestion?.value ?? ""
+                            }
+                            disabled={
+                              busy ||
+                              question.legal_attestation ||
+                              question.signature_required
+                            }
+                            name="value"
+                          >
+                            <option value="">Choose an answer</option>
+                            {question.options.filter(Boolean).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            defaultValue={
+                              answer?.value ?? suggestion?.value ?? ""
+                            }
+                            disabled={
+                              busy ||
+                              question.legal_attestation ||
+                              question.signature_required
+                            }
+                            maxLength={question.character_limit ?? undefined}
+                            name="value"
+                          />
+                        )}
+                      </label>
+                      {question.legal_attestation ||
+                      question.signature_required ? (
+                        <small>
+                          Direct user action is required for this field.
+                        </small>
+                      ) : (
+                        <button
+                          className="button button--secondary"
+                          disabled={busy}
+                          type="submit"
+                        >
+                          <Check size={14} /> Verify answer
+                        </button>
+                      )}
+                    </form>
+                  );
+                }) ?? (
+                  <div className="empty-state empty-state--compact">
+                    Challenge questions and verified answers will appear here.
                   </div>
                 )}
               </div>

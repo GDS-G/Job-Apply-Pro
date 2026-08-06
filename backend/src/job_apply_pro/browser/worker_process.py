@@ -271,6 +271,12 @@ class BrowserWorker:
             locator = self._locator(page, action.locator)
             if action.kind is BrowserActionKind.CLICK:
                 locator.click(timeout=timeout)
+                if (
+                    action.verification.kind is VerificationKind.URL_CONTAINS
+                    and action.verification.value
+                ):
+                    expected = action.verification.value
+                    page.wait_for_url(lambda url: expected in url, timeout=timeout)
             elif action.kind is BrowserActionKind.FILL:
                 locator.fill(action.value or "", timeout=timeout)
             elif action.kind is BrowserActionKind.SELECT:
@@ -310,6 +316,8 @@ class BrowserWorker:
             return locator.is_visible()
         if rule.kind is VerificationKind.VALUE_EQUALS:
             return rule.value is not None and locator.input_value() == rule.value
+        if rule.kind is VerificationKind.CHECKED_EQUALS:
+            return locator.is_checked() is (rule.value != "false")
         return False
 
     def _observe(self, session: WorkerSession) -> BrowserObservation:
@@ -345,12 +353,17 @@ class BrowserWorker:
                 ? document.querySelector(`label[for="${CSS.escape(id)}"]`)
                 : null;
               const wrappingLabel = el.closest('label');
+              const fieldset = el.closest('fieldset');
+              const legend = fieldset?.querySelector(':scope > legend');
               return {
                 index,
+                id,
                 tag: el.tagName.toLowerCase(),
                 type: el.getAttribute('type') || '',
                 role: el.getAttribute('role') || '',
                 name: el.getAttribute('aria-label') || el.getAttribute('name') || '',
+                fieldName: el.getAttribute('name') || '',
+                groupLabel: (legend?.textContent || '').trim().slice(0, 300),
                 label: (
                   el.getAttribute('aria-label') ||
                   explicitLabel?.innerText ||
@@ -361,6 +374,15 @@ class BrowserWorker:
                 href: el.getAttribute('href') || '',
                 canonicalField: el.getAttribute('data-canonical-field') || '',
                 accept: el.getAttribute('accept') || '',
+                value: 'value' in el ? String(el.value).slice(0, 1000) : '',
+                checked: 'checked' in el ? Boolean(el.checked) : false,
+                maxLength: 'maxLength' in el && el.maxLength > 0 ? el.maxLength : null,
+                options: el.tagName.toLowerCase() === 'select'
+                  ? Array.from(el.options).slice(0, 100).map(option => ({
+                      value: option.value,
+                      label: option.textContent?.trim().slice(0, 300) || option.value
+                    }))
+                  : [],
                 required: el.hasAttribute('required'),
                 disabled: el.hasAttribute('disabled')
               };

@@ -7,6 +7,11 @@ import type {
   CandidateKnowledgeSnapshot,
   CandidateProfile,
   CandidateProfileCreate,
+  ChallengeAnswerCommand,
+  ChallengeAnswerSuggestion,
+  ChallengeModelRoute,
+  ChallengeSessionCreate,
+  ChallengeSessionSnapshot,
   MockWorkflowCreate,
   PortalRunSnapshot,
   ReferencePortalRunCreate,
@@ -144,6 +149,89 @@ export class BackendClient {
           review_fingerprint: reviewFingerprint,
           confirmation_phrase: "SUBMIT REFERENCE APPLICATION",
         }),
+      },
+      120_000,
+    );
+  }
+
+  listChallengeSessions(
+    workflowId?: string,
+  ): Promise<ChallengeSessionSnapshot[]> {
+    const query = workflowId
+      ? `?workflow_id=${encodeURIComponent(workflowId)}`
+      : "";
+    return this.request(`/challenges/sessions${query}`);
+  }
+
+  detectChallenge(
+    input: ChallengeSessionCreate,
+  ): Promise<ChallengeSessionSnapshot> {
+    return this.request(
+      "/challenges/detect",
+      { method: "POST", body: JSON.stringify(input) },
+      120_000,
+    );
+  }
+
+  getChallengeSuggestions(
+    sessionId: string,
+  ): Promise<ChallengeAnswerSuggestion[]> {
+    return this.request(
+      `/challenges/sessions/${encodeURIComponent(sessionId)}/suggestions`,
+    );
+  }
+
+  getChallengeModelRoutes(sessionId: string): Promise<ChallengeModelRoute[]> {
+    return this.request(
+      `/challenges/sessions/${encodeURIComponent(sessionId)}/model-routes`,
+    );
+  }
+
+  refreshChallenge(sessionId: string): Promise<ChallengeSessionSnapshot> {
+    return this.request(
+      `/challenges/sessions/${encodeURIComponent(sessionId)}/refresh`,
+      { method: "POST" },
+      120_000,
+    );
+  }
+
+  answerChallenge(
+    sessionId: string,
+    input: ChallengeAnswerCommand,
+  ): Promise<ChallengeSessionSnapshot> {
+    return this.request(
+      `/challenges/sessions/${encodeURIComponent(sessionId)}/answers`,
+      { method: "POST", body: JSON.stringify(input) },
+      120_000,
+    );
+  }
+
+  completeChallenge(
+    sessionId: string,
+    reviewFingerprint: string,
+  ): Promise<ChallengeSessionSnapshot> {
+    return this.request(
+      `/challenges/sessions/${encodeURIComponent(sessionId)}/complete`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          review_fingerprint: reviewFingerprint,
+          confirmation_phrase: "COMPLETE CHALLENGE",
+        }),
+      },
+      120_000,
+    );
+  }
+
+  completeChallengeIntervention(
+    sessionId: string,
+    priorFingerprint: string,
+  ): Promise<ChallengeSessionSnapshot> {
+    return this.request(
+      `/challenges/sessions/${encodeURIComponent(sessionId)}/intervention-complete`,
+      {
+        method: "POST",
+        body: JSON.stringify({ prior_fingerprint: priorFingerprint }),
       },
       120_000,
     );

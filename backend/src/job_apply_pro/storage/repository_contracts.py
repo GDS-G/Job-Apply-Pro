@@ -10,6 +10,7 @@ from job_apply_pro.domain.browser import (
     BrowserSessionState,
 )
 from job_apply_pro.domain.candidate import CandidateBackup
+from job_apply_pro.domain.challenges import ChallengeEvent, ChallengeSessionSnapshot
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
 from job_apply_pro.domain.jobs import Job, JobCreate
 from job_apply_pro.domain.knowledge import (
@@ -153,3 +154,17 @@ class PortalRunRepositoryProtocol(Protocol):
         score: float,
         explanation: dict[str, object],
     ) -> None: ...
+
+
+class ChallengeRepositoryProtocol(Protocol):
+    def save(self, snapshot: ChallengeSessionSnapshot) -> ChallengeSessionSnapshot: ...
+
+    def get(self, session_id: str) -> ChallengeSessionSnapshot | None: ...
+
+    def list_sessions(self, workflow_id: str | None = None) -> list[ChallengeSessionSnapshot]: ...
+
+    def add_event(self, event: ChallengeEvent) -> ChallengeEvent: ...
+
+    def list_events(self, session_id: str) -> list[ChallengeEvent]: ...
+
+    def next_event_sequence(self, session_id: str) -> int: ...

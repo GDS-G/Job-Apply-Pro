@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   BackendRuntimeStatus,
   CandidateProfileCreate,
+  ChallengeAnswerCommand,
+  ChallengeSessionCreate,
   MockWorkflowCreate,
   ReferencePortalRunCreate,
   WorkflowControlAction,
@@ -37,6 +39,29 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("portals:prepare-reference", input),
     confirmReferencePortal: (runId: string, reviewFingerprint: string) =>
       ipcRenderer.invoke("portals:confirm-reference", runId, reviewFingerprint),
+    listChallengeSessions: (workflowId?: string) =>
+      ipcRenderer.invoke("challenges:list", workflowId),
+    detectChallenge: (input: ChallengeSessionCreate) =>
+      ipcRenderer.invoke("challenges:detect", input),
+    getChallengeSuggestions: (sessionId: string) =>
+      ipcRenderer.invoke("challenges:suggestions", sessionId),
+    getChallengeModelRoutes: (sessionId: string) =>
+      ipcRenderer.invoke("challenges:model-routes", sessionId),
+    refreshChallenge: (sessionId: string) =>
+      ipcRenderer.invoke("challenges:refresh", sessionId),
+    answerChallenge: (sessionId: string, input: ChallengeAnswerCommand) =>
+      ipcRenderer.invoke("challenges:answer", sessionId, input),
+    completeChallenge: (sessionId: string, reviewFingerprint: string) =>
+      ipcRenderer.invoke("challenges:complete", sessionId, reviewFingerprint),
+    completeChallengeIntervention: (
+      sessionId: string,
+      priorFingerprint: string,
+    ) =>
+      ipcRenderer.invoke(
+        "challenges:intervention-complete",
+        sessionId,
+        priorFingerprint,
+      ),
     onStatus: (listener: (status: BackendRuntimeStatus) => void) => {
       const handler = (
         _event: Electron.IpcRendererEvent,
