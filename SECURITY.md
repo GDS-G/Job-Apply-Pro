@@ -57,4 +57,12 @@ Questionnaire and assessment suggestions use only decrypted candidate contact fi
 
 Phase 9 catalog entries are declarative generic-agent workflows, not permission to access live accounts. Definitions constrain known domains, capabilities, fingerprints, confirmation signals, limitations, and replay status. Every entry has `production_enabled=false`. Unknown or weak page fingerprints fail closed, confirmation requires both approved text and an identifier, and sanitized replays contain no credentials, cookies, candidate data, or live job records.
 
-The Portal Adapter Expansion remains a development build. Real portal automation and application submission are intentionally not authorized.
+Job Apply Pro remains a development build. Real portal automation and application submission are intentionally not authorized.
+
+## Communication and calendar boundary
+
+OAuth access and refresh tokens must remain in the operating-system credential store. The renderer may receive provider status, granted-scope names, expiration time, and a non-secret account hint, but never a token, client secret, API session, or generic provider proxy. SQLite stores only an opaque credential reference; live adapters resolve it inside the privileged process immediately before a bounded provider request.
+
+Message sender/recipient data, subjects, bodies, reply drafts, and calendar before/after snapshots are AES-256-GCM ciphertext with record-specific authenticated context. Provider message/thread identifiers, category, correlation workflow id, timestamps, review flag, fingerprints, and audit status remain metadata so local workflows can deduplicate and recover without decrypting content.
+
+Every outbound email and calendar create/update is planned before execution. Review-required operations accept only the exact current SHA-256 fingerprint, a unique idempotency key, and an authenticated actor. The audit is persisted before the provider call and becomes `CONFIRMED` only after an immutable provider resource identifier is returned; configuration, provider, or verification failures become `FAILED`. Live adapters are disabled by default, and sanitized fixture adapters contain no credentials or real candidate/recruiter data.

@@ -374,6 +374,95 @@ class ChallengeEventRow(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class CommunicationRecordRow(Base):
+    __tablename__ = "communication_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "provider_message_id", name="uq_communication_provider_message"
+        ),
+        Index("ix_communication_received", "received_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    provider_message_id: Mapped[str] = mapped_column(String(500))
+    provider_thread_id: Mapped[str] = mapped_column(String(500), index=True)
+    category: Mapped[str] = mapped_column(String(50), index=True)
+    workflow_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    requires_review: Mapped[bool] = mapped_column(Boolean)
+    encrypted_analysis: Mapped[str] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OutboundDraftRow(Base):
+    __tablename__ = "outbound_drafts"
+    __table_args__ = (Index("ix_outbound_drafts_workflow_updated", "workflow_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("communication_records.id"), index=True)
+    workflow_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    provider_thread_id: Mapped[str] = mapped_column(String(500))
+    category: Mapped[str] = mapped_column(String(50))
+    policy: Mapped[str] = mapped_column(String(30))
+    document_version_ids_json: Mapped[list[str]] = mapped_column(JSON)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CalendarMutationPlanRow(Base):
+    __tablename__ = "calendar_mutation_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    workflow_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CommunicationMutationAuditRow(Base):
+    __tablename__ = "communication_mutation_audits"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_communication_mutation_idempotency"),
+        Index("ix_communication_mutation_status_occurred", "status", "occurred_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    resource_id: Mapped[str] = mapped_column(String(100), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(200))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    confirmed_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    provider_resource_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FollowUpRow(Base):
+    __tablename__ = "communication_follow_ups"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_communication_follow_up_dedupe"),
+        Index("ix_communication_follow_up_due", "status", "due_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(100), index=True)
+    reason: Mapped[str] = mapped_column(String(500))
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    channel: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ErrorRecordRow(Base):
     __tablename__ = "error_records"
 

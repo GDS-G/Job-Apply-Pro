@@ -213,6 +213,15 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
           requiredText(workflowIdValue, "Workflow id", 100),
         ),
   );
+  ipcMain.handle("communications:integrations", () =>
+    supervisor.client.listIntegrationHealth(),
+  );
+  ipcMain.handle("communications:records", () =>
+    supervisor.client.listCommunicationRecords(),
+  );
+  ipcMain.handle("communications:daily-summary", () =>
+    supervisor.client.getDailyCommunicationSummary(),
+  );
   ipcMain.handle("challenges:detect", (_event, value: unknown) =>
     supervisor.client.detectChallenge(challengeInput(value)),
   );

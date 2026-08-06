@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Portal Adapter Expansion",
-  version: "0.9.0-alpha.1",
+  name: "Communication & Scheduling",
+  version: "0.10.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -367,6 +367,87 @@ export interface ChallengeModelRoute {
   escalation_reason?: string | null;
 }
 
+export type IntegrationProvider =
+  "GMAIL" | "OUTLOOK" | "GOOGLE_CALENDAR" | "OUTLOOK_CALENDAR";
+export type IntegrationStatus =
+  "NOT_CONFIGURED" | "AUTHORIZATION_REQUIRED" | "CONNECTED" | "ERROR";
+export type MessageCategory =
+  | "RECRUITER_INQUIRY"
+  | "INTERVIEW_REQUEST"
+  | "SCREENING_REQUEST"
+  | "ASSESSMENT_INVITATION"
+  | "APPLICATION_CONFIRMATION"
+  | "STATUS_UPDATE"
+  | "REJECTION"
+  | "OFFER"
+  | "JOB_ALERT"
+  | "NEWSLETTER"
+  | "SPAM_OR_UNRELATED";
+
+export interface IntegrationHealth {
+  provider: IntegrationProvider;
+  status: IntegrationStatus;
+  message: string;
+  read_enabled: boolean;
+  write_enabled: boolean;
+  credential_reference?: string | null;
+}
+
+export interface NormalizedMessage {
+  provider: IntegrationProvider;
+  provider_message_id: string;
+  provider_thread_id: string;
+  sender: string;
+  recipients: string[];
+  subject: string;
+  body_text: string;
+  received_at: string;
+  attachment_names: string[];
+  referenced_identifiers: string[];
+  referenced_urls: string[];
+}
+
+export interface CommunicationRecord {
+  id: string;
+  analysis: {
+    message: NormalizedMessage;
+    classification: {
+      category: MessageCategory;
+      confidence: number;
+      matched_signals: string[];
+      requires_review: boolean;
+    };
+    correlation: {
+      workflow_id?: string | null;
+      confidence: number;
+      matched_signals: string[];
+      requires_review: boolean;
+    };
+    reply_draft: {
+      subject: string;
+      body_text: string;
+      category: MessageCategory;
+      requires_review: boolean;
+      auto_send_allowed: boolean;
+      evidence: string[];
+    };
+    proposed_times: string[];
+    time_proposal_requires_review: boolean;
+  };
+  received_at: string;
+  created_at: string;
+}
+
+export interface DailyCommunicationSummary {
+  generated_at: string;
+  analyzed_messages: number;
+  review_required: number;
+  scheduled_follow_ups: number;
+  due_follow_ups: number;
+  planned_mutations: number;
+  confirmed_mutations: number;
+}
+
 export type DocumentKind =
   | "RESUME"
   | "COVER_LETTER"
@@ -577,6 +658,9 @@ export interface DesktopBridge {
       sessionId: string,
       priorFingerprint: string,
     ): Promise<ChallengeSessionSnapshot>;
+    listIntegrationHealth(): Promise<IntegrationHealth[]>;
+    listCommunicationRecords(): Promise<CommunicationRecord[]>;
+    getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
     onStatus(listener: (status: BackendRuntimeStatus) => void): () => void;
   };
 }

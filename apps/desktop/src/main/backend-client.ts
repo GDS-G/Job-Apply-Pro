@@ -12,6 +12,9 @@ import type {
   ChallengeModelRoute,
   ChallengeSessionCreate,
   ChallengeSessionSnapshot,
+  CommunicationRecord,
+  DailyCommunicationSummary,
+  IntegrationHealth,
   MockWorkflowCreate,
   PortalRunSnapshot,
   PortalAdapterDefinition,
@@ -240,6 +243,18 @@ export class BackendClient {
       },
       120_000,
     );
+  }
+
+  listIntegrationHealth(): Promise<IntegrationHealth[]> {
+    return this.request("/communications/integrations");
+  }
+
+  listCommunicationRecords(): Promise<CommunicationRecord[]> {
+    return this.request("/communications/records");
+  }
+
+  getDailyCommunicationSummary(): Promise<DailyCommunicationSummary> {
+    return this.request("/communications/daily-summary");
   }
 
   private async request<T>(

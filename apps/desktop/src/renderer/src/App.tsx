@@ -4,12 +4,14 @@ import {
   AlertTriangle,
   Bot,
   BriefcaseBusiness,
+  CalendarDays,
   Check,
   CircleStop,
   FileText,
   Gauge,
   LayoutDashboard,
   ListChecks,
+  Mail,
   Pause,
   Play,
   RefreshCw,
@@ -30,6 +32,9 @@ import type {
   CandidateProfile,
   ChallengeAnswerSuggestion,
   ChallengeSessionSnapshot,
+  CommunicationRecord,
+  DailyCommunicationSummary,
+  IntegrationHealth,
   PortalAdapterDefinition,
   PortalRunSnapshot,
   WorkflowControlAction,
@@ -75,7 +80,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Portal adapter expansion</span>
+        <span>Communication & scheduling</span>
       </div>
     </div>
   );
@@ -97,6 +102,14 @@ export function App() {
   const [challengeSuggestions, setChallengeSuggestions] = useState<
     ChallengeAnswerSuggestion[]
   >([]);
+  const [integrationHealth, setIntegrationHealth] = useState<
+    IntegrationHealth[]
+  >([]);
+  const [communications, setCommunications] = useState<CommunicationRecord[]>(
+    [],
+  );
+  const [communicationSummary, setCommunicationSummary] =
+    useState<DailyCommunicationSummary | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -113,18 +126,33 @@ export function App() {
 
   const refreshWorkflows = useCallback(async () => {
     try {
-      const [items, sessions, runs, challenges, adapters] = await Promise.all([
+      const [
+        items,
+        sessions,
+        runs,
+        challenges,
+        adapters,
+        integrations,
+        records,
+        summary,
+      ] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
         window.jobApplyPro.workbench.listPortalRuns(),
         window.jobApplyPro.workbench.listChallengeSessions(),
         window.jobApplyPro.workbench.listPortalCatalog(),
+        window.jobApplyPro.workbench.listIntegrationHealth(),
+        window.jobApplyPro.workbench.listCommunicationRecords(),
+        window.jobApplyPro.workbench.getDailyCommunicationSummary(),
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
       setPortalRuns(runs);
       setChallengeSessions(challenges);
       setPortalCatalog(adapters);
+      setIntegrationHealth(integrations);
+      setCommunications(records);
+      setCommunicationSummary(summary);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -201,12 +229,12 @@ export function App() {
         detail: "Unverified facts stay locked out",
       },
       {
-        label: "Browser sessions",
-        value: activeBrowsers,
-        detail: "Isolated & allowlisted",
+        label: "Messages analyzed",
+        value: communicationSummary?.analyzed_messages ?? 0,
+        detail: `${communicationSummary?.review_required ?? 0} need review · ${activeBrowsers} browsers`,
       },
     ];
-  }, [browserSessions, knowledge, workflows]);
+  }, [browserSessions, communicationSummary, knowledge, workflows]);
 
   async function createProfile(form: FormData) {
     setBusy(true);
@@ -451,6 +479,10 @@ export function App() {
           <button className="nav-item" type="button">
             <Bot size={18} /> <span>Agents</span>
           </button>
+          <button className="nav-item" type="button">
+            <Mail size={18} /> <span>Communications</span>{" "}
+            <b>{communications.length}</b>
+          </button>
         </nav>
         <div className="sidebar__footer">
           <div className="safety-card">
@@ -458,8 +490,8 @@ export function App() {
               <ShieldCheck size={18} /> <strong>Supervised mode</strong>
             </div>
             <p>
-              Production submission is disabled. The loopback reference ATS
-              requires an explicit review confirmation.
+              Production submission and provider writes are disabled. Every
+              email or calendar mutation requires an exact review fingerprint.
             </p>
           </div>
           <button className="nav-item" type="button">
@@ -486,7 +518,7 @@ export function App() {
           <section className="hero-row">
             <div>
               <span className="eyebrow">
-                Phase 9 · Replay-validated portal catalog
+                Phase 10 · Encrypted communications and scheduling
               </span>
               <h1>Supervised application workbench</h1>
               <p>{status.message}</p>
@@ -525,11 +557,11 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Portal Adapter Expansion v0.9.0-alpha.1</strong>
+              <strong>Communication & Scheduling v0.10.0-alpha.1</strong>
               <p>
-                Search, qualification, document selection, verified form fill,
-                upload, confirmation-gated submission, and tracking now run as
-                one persisted loopback reference workflow.
+                Gmail, Outlook, Google Calendar, and Outlook Calendar now share
+                normalized contracts, encrypted local records, conflict-aware
+                plans, and confirmation-gated mutation audits.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -1089,6 +1121,76 @@ export function App() {
                   </div>
                 )}
               </div>
+            </div>
+          </section>
+
+          <section className="panel communications-panel">
+            <div className="panel__header">
+              <div>
+                <h2>Communication & scheduling</h2>
+                <p>
+                  Encrypted message correlation, review-only replies, provider
+                  health, and audited calendar changes
+                </p>
+              </div>
+              <Mail size={19} />
+            </div>
+            <div className="integration-grid">
+              {integrationHealth.map((integration) => (
+                <article
+                  className="integration-card"
+                  key={integration.provider}
+                >
+                  <div>
+                    {integration.provider.includes("CALENDAR") ? (
+                      <CalendarDays size={17} />
+                    ) : (
+                      <Mail size={17} />
+                    )}
+                    <strong>{integration.provider.replaceAll("_", " ")}</strong>
+                  </div>
+                  <span
+                    className={`status-pill ${
+                      integration.status === "CONNECTED"
+                        ? "status-pill--safe"
+                        : "status-pill--warning"
+                    }`}
+                  >
+                    {integration.status.replaceAll("_", " ")}
+                  </span>
+                  <small>{integration.message}</small>
+                </article>
+              ))}
+            </div>
+            <div className="communication-list">
+              {communications.length ? (
+                communications.slice(0, 5).map((record) => (
+                  <article key={record.id}>
+                    <span>
+                      {record.analysis.classification.category.replaceAll(
+                        "_",
+                        " ",
+                      )}
+                    </span>
+                    <div>
+                      <strong>{record.analysis.message.subject}</strong>
+                      <small>
+                        {record.analysis.correlation.workflow_id
+                          ? `Matched ${record.analysis.correlation.workflow_id}`
+                          : "Manual correlation review required"}
+                      </small>
+                    </div>
+                    <time>
+                      {new Date(record.received_at).toLocaleDateString()}
+                    </time>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state empty-state--compact">
+                  No provider messages have been imported. OAuth remains
+                  disabled until credentials are configured in Settings.
+                </div>
+              )}
             </div>
           </section>
 

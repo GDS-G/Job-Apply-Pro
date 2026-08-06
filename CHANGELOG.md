@@ -2,6 +2,22 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.10.0-alpha.1] - Unreleased
+
+### Added
+
+- Normalized Gmail and Outlook message contracts, deterministic classification, application correlation, recruiter-response drafts, and attachment/version verification.
+- Encrypted communication analyses and outbound draft payloads plus durable calendar plans, follow-up schedules, and mutation audits in Alembic migration `20260805_0008`.
+- Fingerprinted, idempotent send and calendar mutation gates with provider-issued confirmation identifiers and fail-closed disabled adapters.
+- Google Calendar and Outlook Calendar conflict ranking with time-zone, working-hour, attendee, meeting-link, and before/after event evidence.
+- Sanitized Gmail, Outlook, and calendar replay adapters, authenticated Communication API routes, daily summaries, and desktop provider-health and message-review views.
+
+### Security
+
+- OAuth tokens are represented only by opaque credential references and must resolve through an operating-system credential broker; tokens never cross renderer IPC or enter SQLite.
+- Message bodies, subjects, recipients, reply text, calendar details, and prior-event snapshots are authenticated ciphertext at rest.
+- Live provider reads and writes are disabled by default. Every write requires an exact persisted fingerprint and idempotency key, and remains unconfirmed until the provider returns an immutable resource identifier.
+
 ## [0.9.0-alpha.1] - Unreleased
 
 ### Added

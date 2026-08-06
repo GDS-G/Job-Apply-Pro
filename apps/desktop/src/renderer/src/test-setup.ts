@@ -58,6 +58,25 @@ const bridge: DesktopBridge = {
     completeChallengeIntervention: async () => {
       throw new Error("Not implemented in this test.");
     },
+    listIntegrationHealth: async () => [
+      {
+        provider: "GMAIL",
+        status: "NOT_CONFIGURED",
+        message: "OAuth is not configured",
+        read_enabled: false,
+        write_enabled: false,
+      },
+    ],
+    listCommunicationRecords: async () => [],
+    getDailyCommunicationSummary: async () => ({
+      generated_at: new Date(0).toISOString(),
+      analyzed_messages: 0,
+      review_required: 0,
+      scheduled_follow_ups: 0,
+      due_follow_ups: 0,
+      planned_mutations: 0,
+      confirmed_mutations: 0,
+    }),
     onStatus: () => () => undefined,
   },
 };

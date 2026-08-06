@@ -8,16 +8,21 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Portal Adapter Expansion v0.9.0-alpha.1"),
+      screen.getByText("Communication & Scheduling v0.10.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/production submission is disabled/i),
+      screen.getByText(
+        /production submission and provider writes are disabled/i,
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/reference ATS vertical slice/i),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: /challenge framework/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /communication & scheduling/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /create encrypted profile/i }),

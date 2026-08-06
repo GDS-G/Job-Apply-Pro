@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     document_data_dir: Path = Path("./var/documents")
     document_max_bytes: int = Field(default=10_485_760, ge=1_024, le=52_428_800)
     ai_config_json: SecretStr | None = None
+    communication_config_json: SecretStr | None = None
 
     def ensure_runtime_directories(self) -> None:
         if self.database_url.startswith("sqlite:///./"):
