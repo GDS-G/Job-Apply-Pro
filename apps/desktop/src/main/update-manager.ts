@@ -2,14 +2,13 @@ import electronUpdater from "electron-updater";
 
 import type { DesktopUpdateStatus } from "@job-apply-pro/contracts";
 
+import {
+  initialUpdateStatus,
+  safeUpdateErrorMessage,
+} from "./update-policy.js";
+
 const { autoUpdater } = electronUpdater;
 type UpdateListener = (status: DesktopUpdateStatus) => void;
-
-function safeMessage(error: unknown): string {
-  const message =
-    error instanceof Error ? error.message : "Update operation failed.";
-  return message.replace(/https?:\/\/\S+/gi, "[redacted-url]").slice(0, 500);
-}
 
 export class UpdateManager {
   private listeners = new Set<UpdateListener>();
@@ -19,14 +18,7 @@ export class UpdateManager {
     private readonly packaged: boolean,
     currentVersion: string,
   ) {
-    this.current = {
-      state: packaged ? "IDLE" : "DISABLED",
-      current_version: currentVersion,
-      message: packaged
-        ? "Secure update checks are available."
-        : "Updates are disabled for development builds.",
-      checked_at: new Date().toISOString(),
-    };
+    this.current = initialUpdateStatus(packaged, currentVersion);
     if (!packaged) return;
 
     autoUpdater.autoDownload = false;
@@ -64,7 +56,7 @@ export class UpdateManager {
       ),
     );
     autoUpdater.on("error", (error) =>
-      this.update("ERROR", safeMessage(error)),
+      this.update("ERROR", safeUpdateErrorMessage(error)),
     );
   }
 
@@ -83,7 +75,7 @@ export class UpdateManager {
     try {
       await autoUpdater.checkForUpdates();
     } catch (error) {
-      this.update("ERROR", safeMessage(error));
+      this.update("ERROR", safeUpdateErrorMessage(error));
     }
     return this.current;
   }
@@ -94,7 +86,7 @@ export class UpdateManager {
     try {
       await autoUpdater.downloadUpdate();
     } catch (error) {
-      this.update("ERROR", safeMessage(error));
+      this.update("ERROR", safeUpdateErrorMessage(error));
     }
     return this.current;
   }

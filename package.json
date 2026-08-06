@@ -11,7 +11,7 @@
   "scripts": {
     "desktop:dev": "pnpm --filter @job-apply-pro/desktop dev",
     "backend:dev": "python -m alembic -c backend/alembic.ini upgrade head && python -m uvicorn job_apply_pro.main:app --app-dir backend/src --host 127.0.0.1 --port 8765 --reload",
-    "backend:test": "python -m pytest backend/tests",
+    "backend:test": "python -m pytest backend/tests --cov=job_apply_pro --cov-fail-under=80 --cov-report=term-missing:skip-covered",
     "backend:lint": "python -m ruff check backend",
     "backend:format:check": "python -m ruff format --check backend",
     "backend:typecheck": "python -m mypy backend/src backend/tests",

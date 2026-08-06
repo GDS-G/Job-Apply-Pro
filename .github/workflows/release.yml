@@ -43,6 +43,10 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) { throw "WIN_CSC_KEY_PASSWORD is required" }
       - run: pnpm install --frozen-lockfile
       - run: python -m pip install -e ".\backend[dev]"
+      - run: python -m playwright install chromium
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
       - run: pnpm test
       - name: Build and sign NSIS release candidate
         run: pnpm release:win

@@ -97,4 +97,4 @@ pnpm test
 pnpm build
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [docs/adr](docs/adr) before extending the architecture.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [the production-readiness audit](docs/production-readiness-audit.md), [the failure-injection matrix](docs/failure-injection-matrix.md), and [docs/adr](docs/adr) before extending the architecture.

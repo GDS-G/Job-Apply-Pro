@@ -1,0 +1,18 @@
+{
+  "exceptions": [
+    {
+      "advisory_id": "PYSEC-2026-3552",
+      "package": "cryptography",
+      "allowed_versions": ["49.0.0"],
+      "expires_on": "2026-09-05",
+      "reason": "The upstream fix is assigned to unreleased cryptography 50.0.0. The advisory applies only to PKCS#7 EnvelopedData decryption; Job Apply Pro uses AES-GCM and Ed25519 and has no PKCS#7 decrypt path.",
+      "tracking_url": "https://github.com/pyca/cryptography/security/advisories/GHSA-g6cj-pr64-35w5",
+      "scan_paths": ["backend/src", "backend/tests"],
+      "forbidden_substrings": [
+        "pkcs7_decrypt_der",
+        "pkcs7_decrypt_pem",
+        "pkcs7_decrypt_smime"
+      ]
+    }
+  ]
+}
