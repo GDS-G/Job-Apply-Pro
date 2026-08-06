@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { initialUpdateStatus, safeUpdateErrorMessage } from "./update-policy.js";
+import {
+  initialUpdateStatus,
+  safeUpdateErrorMessage,
+} from "./update-policy.js";
 
 describe("update policy", () => {
   it("redacts release URLs and bounds update errors", () => {
