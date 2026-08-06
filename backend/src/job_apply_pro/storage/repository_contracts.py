@@ -1,5 +1,6 @@
 from typing import Protocol
 
+from job_apply_pro.domain.ai import AICacheRecord, AIInvocationRecord
 from job_apply_pro.domain.applications import Application, ApplicationCreate
 from job_apply_pro.domain.browser import (
     BrowserActionResult,
@@ -123,3 +124,11 @@ class CandidateKnowledgeRepositoryProtocol(Protocol):
     def delete_chunk(self, source_type: str, source_id: str) -> None: ...
 
     def list_chunks(self, profile_id: str) -> list[RetrievalChunkRecord]: ...
+
+
+class AIGatewayRepositoryProtocol(Protocol):
+    def add_invocation(self, invocation: AIInvocationRecord) -> AIInvocationRecord: ...
+
+    def get_cache(self, key: str) -> AICacheRecord | None: ...
+
+    def upsert_cache(self, record: AICacheRecord) -> AICacheRecord: ...

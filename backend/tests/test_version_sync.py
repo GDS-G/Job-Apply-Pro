@@ -14,12 +14,12 @@ def test_release_metadata_is_synchronized() -> None:
         (root / "packages" / "contracts" / "package.json").read_text(encoding="utf-8")
     )
 
-    assert version == __version__ == "0.5.0-alpha.1"
+    assert version == __version__ == "0.6.0-alpha.1"
     assert build == {
-        "name": "Candidate Knowledge",
+        "name": "AI Gateway",
         "version": version,
         "channel": "alpha",
-        "roadmap_phases": [0, 1, 2, 3, 4, 5],
+        "roadmap_phases": [0, 1, 2, 3, 4, 5, 6],
         "production_automation_enabled": False,
     }
     assert workspace["version"] == desktop["version"] == contracts["version"] == version

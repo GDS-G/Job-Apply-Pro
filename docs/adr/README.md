@@ -13,3 +13,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0009: Verified browser observations and recovery](0009-verified-browser-observations-and-recovery.md)
 - [ADR-0010: Encrypted evidence-backed candidate knowledge](0010-encrypted-evidence-backed-candidate-knowledge.md)
 - [ADR-0011: Keyed hybrid retrieval and locked-fact precedence](0011-keyed-hybrid-retrieval-and-locked-fact-precedence.md)
+- [ADR-0012: Provider-independent governed AI Gateway](0012-provider-independent-governed-ai-gateway.md)
+- [ADR-0013: AI privacy, prompts, validation, and caching](0013-ai-privacy-prompts-validation-and-caching.md)

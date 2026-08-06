@@ -27,6 +27,14 @@ Candidate originals are stored only as authenticated ciphertext beneath the conf
 
 Every extracted claim begins as `PROPOSED`. Verification is an explicit authenticated user action, conflicting locked canonical facts fail closed, and answer-library entries must cite locked verified claims from the same profile. Legacy `.doc` conversion is not performed inside the application because invoking a general office parser would expand the trusted execution surface.
 
+## AI gateway boundary
+
+All model traffic passes through the AI Gateway. Application services and agents must not instantiate provider SDKs or call model endpoints directly. External provider endpoints require HTTPS; local llama.cpp endpoints require loopback. API keys exist only in the secret-valued runtime configuration and are never returned by status/registry APIs, persisted in invocation records, cached with outputs, or written to logs.
+
+Every request declares task type, prompt and schema versions, privacy classification, consent, source/profile versions, timeout, budget, retry/fallback policy, and cache behavior. External calls require explicit consent. Highly Sensitive and Restricted data are blocked from external providers; Routine and Employment Sensitive payloads receive field and identifier redaction where practical. Portal/user content is enclosed as untrusted data and cannot become system policy.
+
+Structured responses and tool arguments are JSON-Schema validated. Tools must be declared by both the versioned prompt and request. Model output is not executable authority, cannot authorize submission, and cannot replace locked candidate facts. Cache values are context-bound ciphertext; cache keys and invocation logs contain hashes/version metadata rather than prompts or candidate plaintext.
+
 ## Browser runtime boundary
 
 Browser automation runs in a separate Playwright process behind a constrained JSON-lines protocol. Every session has an explicit origin allowlist; while `production_automation_enabled` is false, only loopback fixture origins are accepted. Actions declare their target, preconditions, intended result, timeout, verification, retry limit, permission, and confirmation state. Elevated actions fail closed without confirmed approval.

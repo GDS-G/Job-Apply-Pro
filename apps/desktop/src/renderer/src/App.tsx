@@ -68,7 +68,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Candidate Knowledge alpha</span>
+        <span>AI Gateway alpha</span>
       </div>
     </div>
   );
@@ -334,8 +334,8 @@ export function App() {
         <div className="workspace">
           <section className="hero-row">
             <div>
-              <span className="eyebrow">Phase 5 · Evidence-backed profile</span>
-              <h1>Candidate knowledge workbench</h1>
+              <span className="eyebrow">Phase 6 · Governed model access</span>
+              <h1>Supervised AI workbench</h1>
               <p>{status.message}</p>
             </div>
             <div className="hero-actions">
@@ -372,14 +372,15 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Candidate Knowledge v0.5.0-alpha.1</strong>
+              <strong>AI Gateway v0.6.0-alpha.1</strong>
               <p>
-                Imported documents are encrypted, extracted facts require
-                review, and only locked evidence can feed reusable answers.
+                Provider-independent routing, privacy policy, strict schemas,
+                encrypted caching, and six bounded agent roles now sit above
+                locked candidate evidence.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
-              Local & encrypted
+              Governed & supervised
             </span>
           </section>
 

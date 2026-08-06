@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Candidate Knowledge build
+## AI Gateway build
 
-The active milestone is **Candidate Knowledge `v0.5.0-alpha.1`**. It adds encrypted resume/document import, bounded PDF/DOCX/RTF/text extraction, evidence-linked candidate claims, explicit fact review and locking, reproducible experience calculations, resume variants, approved answer provenance, and privacy-preserving hybrid retrieval to the Workbench, Core, and Browser Runtime builds.
+The active milestone is **AI Gateway `v0.6.0-alpha.1`**. It adds one provider-independent boundary for OpenAI-compatible cloud providers, secondary compatible providers, and local llama.cpp servers; governed model routing; multimodal input; bounded function calls; strict structured output; embeddings and reranking; encrypted version-aware caching; cost/retry/fallback controls; privacy classification and redaction; six initial agent roles; and an evaluation harness.
 
-Extracted facts always start as proposals and cannot become authoritative until a user verifies and locks them. Generated or imported text cannot overwrite a locked fact. Browser automation still operates only against explicit loopback allowlists, and this build does not submit applications or connect to production email, calendar, AI, or job-portal accounts.
+Application services never call provider SDKs directly. External calls require an enabled routing policy and explicit consent; highly sensitive and restricted data are blocked from external providers. Model output is validated before persistence or use and cannot overwrite a locked candidate fact. Browser automation remains loopback-only, and this build does not submit applications or connect to production email, calendar, or job-portal accounts.
 
 ## Architecture
 
@@ -15,6 +15,7 @@ apps/desktop              Electron main/preload + sandboxed React renderer
 backend/src/job_apply_pro FastAPI API, workflow domain, services, and storage
 backend/src/job_apply_pro/browser Isolated Playwright JSON-lines worker and client
 backend/src/job_apply_pro/documents Bounded document extractors and strict claim proposals
+backend/src/job_apply_pro/ai Provider adapters, registry, prompts, privacy, and routing
 packages/contracts        Versioned TypeScript contracts shared by desktop code
 backend/migrations        Alembic-managed SQLite schema
 docs/adr                  Architecture decision records
@@ -72,6 +73,8 @@ The API listens only on `127.0.0.1:8765` by default.
 Browser profiles default to `var/browser`, while screenshots and Playwright traces default to `var/browser-artifacts`. Encrypted candidate originals default to `var/documents` and are limited to 10 MiB per import. These paths are ignored by Git. Configure them with `JAP_BROWSER_DATA_DIR`, `JAP_BROWSER_ARTIFACT_DIR`, `JAP_DOCUMENT_DATA_DIR`, and `JAP_DOCUMENT_MAX_BYTES`; set `JAP_BROWSER_HEADLESS=false` only for supervised local debugging.
 
 The Candidate Knowledge API is under `/api/v1/knowledge`. Supported imports are PDF, DOCX, RTF, TXT, and Markdown. Legacy binary `.doc` files must be converted with a trusted local office tool before import.
+
+The AI Gateway API is under `/api/v1/ai`. Provider secrets, model definitions, and routing policies are supplied as local JSON through `JAP_AI_CONFIG_JSON`; never commit that value. External endpoints require HTTPS, local endpoints require loopback, and an empty configuration leaves the gateway safely `not_configured`.
 
 ## Validation
 
