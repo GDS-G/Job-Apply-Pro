@@ -222,6 +222,46 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
   ipcMain.handle("communications:daily-summary", () =>
     supervisor.client.getDailyCommunicationSummary(),
   );
+  ipcMain.handle("operations:dashboard", () =>
+    supervisor.client.getOperationsDashboard(),
+  );
+  ipcMain.handle("operations:backups", () => supervisor.client.listBackups());
+  ipcMain.handle("operations:backup-schedules", () =>
+    supervisor.client.listBackupSchedules(),
+  );
+  ipcMain.handle("operations:create-backup", (_event, labelValue: unknown) =>
+    supervisor.client.createBackup(
+      requiredText(labelValue, "Backup label", 200),
+    ),
+  );
+  ipcMain.handle(
+    "operations:create-backup-schedule",
+    (_event, labelValue: unknown, intervalValue: unknown) => {
+      if (
+        typeof intervalValue !== "number" ||
+        !Number.isInteger(intervalValue) ||
+        intervalValue < 1 ||
+        intervalValue > 720
+      ) {
+        throw new TypeError("Backup interval must be 1 to 720 whole hours.");
+      }
+      return supervisor.client.createBackupSchedule(
+        requiredText(labelValue, "Backup schedule label", 200),
+        intervalValue,
+      );
+    },
+  );
+  ipcMain.handle("operations:verify-backup", (_event, backupIdValue: unknown) =>
+    supervisor.client.verifyBackup(
+      requiredText(backupIdValue, "Backup id", 100),
+    ),
+  );
+  ipcMain.handle("operations:stage-restore", (_event, backupIdValue: unknown) =>
+    supervisor.client.stageRestore(
+      requiredText(backupIdValue, "Backup id", 100),
+    ),
+  );
+  ipcMain.handle("operations:help", () => supervisor.client.listHelpTopics());
   ipcMain.handle("challenges:detect", (_event, value: unknown) =>
     supervisor.client.detectChallenge(challengeInput(value)),
   );

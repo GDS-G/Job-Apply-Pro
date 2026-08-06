@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 import type {
+  BackupManifest,
+  BackupSchedule,
+  BackupVerification,
   BrowserSessionSnapshot,
   CandidateClaim,
   CandidateKnowledgeSnapshot,
@@ -15,10 +18,13 @@ import type {
   CommunicationRecord,
   DailyCommunicationSummary,
   IntegrationHealth,
+  HelpTopic,
   MockWorkflowCreate,
+  OperationsDashboard,
   PortalRunSnapshot,
   PortalAdapterDefinition,
   ReferencePortalRunCreate,
+  RestorePlan,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -255,6 +261,75 @@ export class BackendClient {
 
   getDailyCommunicationSummary(): Promise<DailyCommunicationSummary> {
     return this.request("/communications/daily-summary");
+  }
+
+  getOperationsDashboard(): Promise<OperationsDashboard> {
+    return this.request("/operations/dashboard");
+  }
+
+  listBackups(): Promise<BackupManifest[]> {
+    return this.request("/operations/backups");
+  }
+
+  listBackupSchedules(): Promise<BackupSchedule[]> {
+    return this.request("/operations/backup-schedules");
+  }
+
+  createBackup(label: string): Promise<BackupManifest> {
+    return this.request("/operations/backups", {
+      method: "POST",
+      body: JSON.stringify({
+        label,
+        categories: ["DATABASE", "DOCUMENTS"],
+      }),
+    });
+  }
+
+  createBackupSchedule(
+    label: string,
+    intervalHours: number,
+  ): Promise<BackupSchedule> {
+    return this.request("/operations/backup-schedules", {
+      method: "POST",
+      body: JSON.stringify({
+        label,
+        categories: ["DATABASE", "DOCUMENTS"],
+        interval_hours: intervalHours,
+        enabled: true,
+      }),
+    });
+  }
+
+  runDueBackupSchedules(): Promise<BackupManifest[]> {
+    return this.request(
+      "/operations/backup-schedules/run-due",
+      {
+        method: "POST",
+      },
+      120_000,
+    );
+  }
+
+  verifyBackup(backupId: string): Promise<BackupVerification> {
+    return this.request(
+      `/operations/backups/${encodeURIComponent(backupId)}/verify`,
+      { method: "POST" },
+    );
+  }
+
+  stageRestore(backupId: string): Promise<RestorePlan> {
+    return this.request(
+      `/operations/backups/${encodeURIComponent(backupId)}/restore-plans`,
+      {
+        method: "POST",
+        body: JSON.stringify({ categories: ["DATABASE", "DOCUMENTS"] }),
+      },
+      120_000,
+    );
+  }
+
+  listHelpTopics(): Promise<HelpTopic[]> {
+    return this.request("/operations/help");
   }
 
   private async request<T>(

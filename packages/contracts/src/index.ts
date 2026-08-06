@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Communication & Scheduling",
-  version: "0.10.0-alpha.1",
+  name: "Dashboard, Backup & Licensing",
+  version: "0.11.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -448,6 +448,150 @@ export interface DailyCommunicationSummary {
   confirmed_mutations: number;
 }
 
+export type BackupCategory = "DATABASE" | "DOCUMENTS";
+export type BackupStatus = "CREATING" | "VERIFIED" | "FAILED";
+export type RestoreStatus = "STAGED" | "APPLIED" | "FAILED";
+export type LicenseStatus =
+  | "DEVELOPMENT"
+  | "ACTIVE"
+  | "GRACE_PERIOD"
+  | "EXPIRED"
+  | "INVALID"
+  | "NOT_CONFIGURED";
+
+export interface BackupEntry {
+  category: BackupCategory;
+  relative_path: string;
+  size_bytes: number;
+  sha256: string;
+}
+
+export interface BackupManifest {
+  id: string;
+  format_version: number;
+  application_version: string;
+  schema_revision: string;
+  label: string;
+  categories: BackupCategory[];
+  entries: BackupEntry[];
+  encryption_key_id: string;
+  archive_path: string;
+  archive_sha256: string;
+  archive_size_bytes: number;
+  status: BackupStatus;
+  created_at: string;
+  verified_at?: string | null;
+}
+
+export interface BackupVerification {
+  backup_id: string;
+  valid: boolean;
+  reasons: string[];
+  verified_entries: number;
+  verified_at: string;
+}
+
+export interface BackupSchedule {
+  id: string;
+  label: string;
+  categories: BackupCategory[];
+  interval_hours: number;
+  enabled: boolean;
+  next_run_at: string;
+  last_run_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RestorePlan {
+  id: string;
+  backup_id: string;
+  categories: BackupCategory[];
+  staged_path: string;
+  file_count: number;
+  fingerprint: string;
+  status: RestoreStatus;
+  created_at: string;
+  applied_at?: string | null;
+}
+
+export interface LicenseState {
+  status: LicenseStatus;
+  message: string;
+  entitlement?: {
+    license_id: string;
+    subject: string;
+    device_public_key: string;
+    features: string[];
+    issued_at: string;
+    expires_at: string;
+    offline_grace_days: number;
+  } | null;
+  recovery_allowed: boolean;
+  payment_enabled: boolean;
+}
+
+export interface HelpTopic {
+  id: string;
+  title: string;
+  summary: string;
+  steps: string[];
+  context: string;
+}
+
+export interface OperationsDashboard {
+  generated_at: string;
+  applications: {
+    jobs_discovered: number;
+    applications_total: number;
+    submission_attempted: number;
+    submission_confirmed: number;
+    tracking_active: number;
+    failed: number;
+    duplicated: number;
+    interviews_received: number;
+    offers_received: number;
+    recruiter_messages: number;
+  };
+  models: {
+    invocations: number;
+    successful: number;
+    failed: number;
+    input_tokens: number;
+    output_tokens: number;
+    cost_micros: number;
+    average_latency_ms: number;
+    by_provider: Record<string, number>;
+  };
+  portals: {
+    portal: string;
+    support_status: string;
+    production_enabled: boolean;
+    run_count: number;
+    limitations: string[];
+  }[];
+  application_report: {
+    workflow_id: string;
+    employer: string;
+    title: string;
+    state: string;
+    submission_attempted: boolean;
+    submission_confirmed: boolean;
+    updated_at: string;
+  }[];
+  interview_report: {
+    communication_id: string;
+    workflow_id?: string | null;
+    category: string;
+    sender: string;
+    subject: string;
+    received_at: string;
+  }[];
+  backup_count: number;
+  latest_backup?: BackupManifest | null;
+  license: LicenseState;
+}
+
 export type DocumentKind =
   | "RESUME"
   | "COVER_LETTER"
@@ -661,6 +805,17 @@ export interface DesktopBridge {
     listIntegrationHealth(): Promise<IntegrationHealth[]>;
     listCommunicationRecords(): Promise<CommunicationRecord[]>;
     getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
+    getOperationsDashboard(): Promise<OperationsDashboard>;
+    listBackups(): Promise<BackupManifest[]>;
+    listBackupSchedules(): Promise<BackupSchedule[]>;
+    createBackup(label: string): Promise<BackupManifest>;
+    createBackupSchedule(
+      label: string,
+      intervalHours: number,
+    ): Promise<BackupSchedule>;
+    verifyBackup(backupId: string): Promise<BackupVerification>;
+    stageRestore(backupId: string): Promise<RestorePlan>;
+    listHelpTopics(): Promise<HelpTopic[]>;
     onStatus(listener: (status: BackendRuntimeStatus) => void): () => void;
   };
 }

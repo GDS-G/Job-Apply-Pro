@@ -2,6 +2,22 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.11.0-alpha.1] - Unreleased
+
+### Added
+
+- Audit-reconciled application, interview, model-cost, and portal-health dashboard metrics with explicit attempted-versus-confirmed submission reporting.
+- Versioned outer-encrypted local backups with consistent SQLite snapshots, encrypted document inclusion, archive and per-entry SHA-256 verification, persisted schedules, and fail-closed cloud-provider boundaries.
+- Integrity-gated selective restore staging with stable review fingerprints and an offline-only application gate that preserves the prior database before replacement.
+- Ed25519 signed entitlement verification, offline grace evaluation, fail-closed payment-provider interfaces, and recovery-focused in-app help.
+- Authenticated operations APIs plus sandboxed desktop controls for backup creation, verification, scheduling, restore staging, reports, licensing state, and tutorials.
+
+### Security
+
+- Backup archives are encrypted before leaving application storage and reject tampering, unsafe paths, missing entries, and authentication failures.
+- Restore application is unavailable through the live HTTP and renderer boundary; an exact staged fingerprint and fixed confirmation phrase are required by the offline service.
+- Expired, invalid, absent, or development licenses retain backup verification and recovery access. Device identity uses a public-key field rather than mutable hardware addresses.
+
 ## [0.10.0-alpha.1] - Unreleased
 
 ### Added

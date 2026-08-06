@@ -463,6 +463,44 @@ class FollowUpRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class BackupManifestRow(Base):
+    __tablename__ = "backup_manifests"
+    __table_args__ = (Index("ix_backup_manifests_status_created", "status", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    archive_path: Mapped[str] = mapped_column(Text)
+    archive_sha256: Mapped[str] = mapped_column(String(64))
+    manifest_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BackupScheduleRow(Base):
+    __tablename__ = "backup_schedules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    label: Mapped[str] = mapped_column(String(200))
+    categories_json: Mapped[list[str]] = mapped_column(JSON)
+    interval_hours: Mapped[int] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean, index=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RestorePlanRow(Base):
+    __tablename__ = "restore_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    backup_id: Mapped[str] = mapped_column(ForeignKey("backup_manifests.id"), index=True)
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    plan_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ErrorRecordRow(Base):
     __tablename__ = "error_records"
 

@@ -27,6 +27,8 @@ import {
 
 import type {
   BackendRuntimeStatus,
+  BackupManifest,
+  BackupSchedule,
   BrowserSessionSnapshot,
   CandidateKnowledgeSnapshot,
   CandidateProfile,
@@ -35,8 +37,11 @@ import type {
   CommunicationRecord,
   DailyCommunicationSummary,
   IntegrationHealth,
+  HelpTopic,
+  OperationsDashboard,
   PortalAdapterDefinition,
   PortalRunSnapshot,
+  RestorePlan,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -80,7 +85,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Communication & scheduling</span>
+        <span>Dashboard, backup & licensing</span>
       </div>
     </div>
   );
@@ -110,6 +115,13 @@ export function App() {
   );
   const [communicationSummary, setCommunicationSummary] =
     useState<DailyCommunicationSummary | null>(null);
+  const [operations, setOperations] = useState<OperationsDashboard | null>(
+    null,
+  );
+  const [backups, setBackups] = useState<BackupManifest[]>([]);
+  const [backupSchedules, setBackupSchedules] = useState<BackupSchedule[]>([]);
+  const [restorePlan, setRestorePlan] = useState<RestorePlan | null>(null);
+  const [helpTopics, setHelpTopics] = useState<HelpTopic[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -135,6 +147,10 @@ export function App() {
         integrations,
         records,
         summary,
+        operationsSnapshot,
+        backupItems,
+        scheduleItems,
+        topics,
       ] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
@@ -144,6 +160,10 @@ export function App() {
         window.jobApplyPro.workbench.listIntegrationHealth(),
         window.jobApplyPro.workbench.listCommunicationRecords(),
         window.jobApplyPro.workbench.getDailyCommunicationSummary(),
+        window.jobApplyPro.workbench.getOperationsDashboard(),
+        window.jobApplyPro.workbench.listBackups(),
+        window.jobApplyPro.workbench.listBackupSchedules(),
+        window.jobApplyPro.workbench.listHelpTopics(),
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
@@ -153,6 +173,10 @@ export function App() {
       setIntegrationHealth(integrations);
       setCommunications(records);
       setCommunicationSummary(summary);
+      setOperations(operationsSnapshot);
+      setBackups(backupItems);
+      setBackupSchedules(scheduleItems);
+      setHelpTopics(topics);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -249,6 +273,67 @@ export function App() {
       });
       setProfile(created);
       setProfileId(created.id);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createEncryptedBackup() {
+    setBusy(true);
+    setError(null);
+    try {
+      const backup = await window.jobApplyPro.workbench.createBackup(
+        "Manual desktop backup",
+      );
+      setBackups((current) => [backup, ...current]);
+      await refreshWorkflows();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyEncryptedBackup(backupId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await window.jobApplyPro.workbench.verifyBackup(backupId);
+      if (!result.valid) {
+        throw new Error(
+          `Backup verification failed: ${result.reasons.join(", ")}`,
+        );
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createDailyBackupSchedule() {
+    setBusy(true);
+    setError(null);
+    try {
+      const schedule = await window.jobApplyPro.workbench.createBackupSchedule(
+        "Daily encrypted backup",
+        24,
+      );
+      setBackupSchedules((current) => [schedule, ...current]);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stageLatestRestore(backupId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setRestorePlan(await window.jobApplyPro.workbench.stageRestore(backupId));
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -557,7 +642,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Communication & Scheduling v0.10.0-alpha.1</strong>
+              <strong>Dashboard, Backup & Licensing v0.11.0-alpha.1</strong>
               <p>
                 Gmail, Outlook, Google Calendar, and Outlook Calendar now share
                 normalized contracts, encrypted local records, conflict-aware
@@ -1121,6 +1206,189 @@ export function App() {
                   </div>
                 )}
               </div>
+            </div>
+          </section>
+
+          <section className="panel operations-panel">
+            <div className="panel__header">
+              <div>
+                <h2>Operations, recovery & licensing</h2>
+                <p>
+                  Audit-reconciled reports, model cost, encrypted backups, and
+                  recovery-safe entitlement status
+                </p>
+              </div>
+              <ShieldCheck size={19} />
+            </div>
+            <div className="operations-grid">
+              <article className="operations-card">
+                <span>Confirmed / attempted</span>
+                <strong>
+                  {operations?.applications.submission_confirmed ?? 0} /{" "}
+                  {operations?.applications.submission_attempted ?? 0}
+                </strong>
+                <small>
+                  Attempts never count as independently confirmed submissions.
+                </small>
+              </article>
+              <article className="operations-card">
+                <span>Interviews / offers</span>
+                <strong>
+                  {operations?.applications.interviews_received ?? 0} /{" "}
+                  {operations?.applications.offers_received ?? 0}
+                </strong>
+                <small>Derived from correlated encrypted communications.</small>
+              </article>
+              <article className="operations-card">
+                <span>Model cost</span>
+                <strong>
+                  $
+                  {((operations?.models.cost_micros ?? 0) / 1_000_000).toFixed(
+                    4,
+                  )}
+                </strong>
+                <small>
+                  {operations?.models.input_tokens ?? 0} input ·{" "}
+                  {operations?.models.output_tokens ?? 0} output tokens
+                </small>
+              </article>
+              <article className="operations-card">
+                <span>License</span>
+                <strong>{operations?.license.status ?? "LOADING"}</strong>
+                <small>
+                  Recovery allowed:{" "}
+                  {operations?.license.recovery_allowed ? "yes" : "no"}
+                </small>
+              </article>
+            </div>
+            <div className="backup-workspace">
+              <div>
+                <strong>Encrypted local backups</strong>
+                <p>
+                  Outer-encrypted archives include a versioned manifest and
+                  per-entry SHA-256 integrity hashes.
+                </p>
+                <div className="hero-actions">
+                  <button
+                    className="button button--primary"
+                    disabled={busy}
+                    onClick={() => void createEncryptedBackup()}
+                    type="button"
+                  >
+                    <ShieldCheck size={15} /> Create verified backup
+                  </button>
+                  <button
+                    className="button button--secondary"
+                    disabled={busy || backups.length === 0}
+                    onClick={() =>
+                      backups[0] && void verifyEncryptedBackup(backups[0].id)
+                    }
+                    type="button"
+                  >
+                    <Check size={15} /> Verify latest
+                  </button>
+                  <button
+                    className="button button--secondary"
+                    disabled={busy || backups.length === 0}
+                    onClick={() =>
+                      backups[0] && void stageLatestRestore(backups[0].id)
+                    }
+                    type="button"
+                  >
+                    <RotateCcw size={15} /> Stage restore
+                  </button>
+                  <button
+                    className="button button--secondary"
+                    disabled={busy || backupSchedules.length > 0}
+                    onClick={() => void createDailyBackupSchedule()}
+                    type="button"
+                  >
+                    <CalendarDays size={15} /> Schedule daily
+                  </button>
+                </div>
+              </div>
+              <div className="backup-status">
+                {backups[0] ? (
+                  <>
+                    <span className="status-pill status-pill--safe">
+                      {backups[0].status}
+                    </span>
+                    <strong>{backups[0].label}</strong>
+                    <small>
+                      {backups[0].entries.length} entries ·{" "}
+                      {(backups[0].archive_size_bytes / 1024).toFixed(1)} KiB ·
+                      schema {backups[0].schema_revision}
+                    </small>
+                    <small>
+                      {backupSchedules[0]
+                        ? `Next scheduled backup: ${new Date(
+                            backupSchedules[0].next_run_at,
+                          ).toLocaleString()}`
+                        : "No automatic backup schedule is configured."}
+                    </small>
+                    {restorePlan && (
+                      <small>
+                        Restore {restorePlan.status.toLowerCase()}:{" "}
+                        {restorePlan.file_count} files · fingerprint{" "}
+                        {restorePlan.fingerprint.slice(0, 12)}…
+                      </small>
+                    )}
+                  </>
+                ) : (
+                  <small>No local backup has been created yet.</small>
+                )}
+              </div>
+            </div>
+            <div className="operations-reports">
+              <article>
+                <strong>Application report</strong>
+                <div className="operations-report-list">
+                  {operations?.application_report.slice(0, 5).map((row) => (
+                    <div key={row.workflow_id}>
+                      <span>
+                        {row.employer} · {row.title}
+                      </span>
+                      <small>
+                        {row.state} · attempted{" "}
+                        {row.submission_attempted ? "yes" : "no"} · confirmed{" "}
+                        {row.submission_confirmed ? "yes" : "no"}
+                      </small>
+                    </div>
+                  )) ?? null}
+                  {operations?.application_report.length === 0 && (
+                    <small>
+                      No application evidence has been recorded yet.
+                    </small>
+                  )}
+                </div>
+              </article>
+              <article>
+                <strong>Interview and recruiter report</strong>
+                <div className="operations-report-list">
+                  {operations?.interview_report.slice(0, 5).map((row) => (
+                    <div key={row.communication_id}>
+                      <span>{row.subject}</span>
+                      <small>
+                        {row.category} · {row.sender} ·{" "}
+                        {new Date(row.received_at).toLocaleDateString()}
+                      </small>
+                    </div>
+                  )) ?? null}
+                  {operations?.interview_report.length === 0 && (
+                    <small>
+                      No correlated recruiter activity has been recorded yet.
+                    </small>
+                  )}
+                </div>
+              </article>
+            </div>
+            <div className="help-grid">
+              {helpTopics.slice(0, 4).map((topic) => (
+                <article key={topic.id}>
+                  <strong>{topic.title}</strong>
+                  <small>{topic.summary}</small>
+                </article>
+              ))}
             </div>
           </section>
 

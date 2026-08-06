@@ -18,3 +18,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0014: Reference ATS confirmed-submission boundary](0014-reference-ats-confirmed-submission-boundary.md)
 - [ADR-0015: Durable supervised challenge sessions](0015-durable-supervised-challenge-sessions.md)
 - [ADR-0016: Production-disabled portal catalog and replay contracts](0016-production-disabled-portal-catalog.md)
+- [ADR-0017: Encrypted provider and mutation boundary](0017-encrypted-provider-mutation-boundary.md)
+- [ADR-0018: Encrypted operational recovery and entitlement boundary](0018-encrypted-operational-recovery-and-entitlement-boundary.md)

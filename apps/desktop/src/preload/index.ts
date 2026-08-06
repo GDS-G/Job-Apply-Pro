@@ -69,6 +69,23 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("communications:records"),
     getDailyCommunicationSummary: () =>
       ipcRenderer.invoke("communications:daily-summary"),
+    getOperationsDashboard: () => ipcRenderer.invoke("operations:dashboard"),
+    listBackups: () => ipcRenderer.invoke("operations:backups"),
+    listBackupSchedules: () =>
+      ipcRenderer.invoke("operations:backup-schedules"),
+    createBackup: (label: string) =>
+      ipcRenderer.invoke("operations:create-backup", label),
+    createBackupSchedule: (label: string, intervalHours: number) =>
+      ipcRenderer.invoke(
+        "operations:create-backup-schedule",
+        label,
+        intervalHours,
+      ),
+    verifyBackup: (backupId: string) =>
+      ipcRenderer.invoke("operations:verify-backup", backupId),
+    stageRestore: (backupId: string) =>
+      ipcRenderer.invoke("operations:stage-restore", backupId),
+    listHelpTopics: () => ipcRenderer.invoke("operations:help"),
     onStatus: (listener: (status: BackendRuntimeStatus) => void) => {
       const handler = (
         _event: Electron.IpcRendererEvent,

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     document_max_bytes: int = Field(default=10_485_760, ge=1_024, le=52_428_800)
     ai_config_json: SecretStr | None = None
     communication_config_json: SecretStr | None = None
+    backup_data_dir: Path = Path("./var/backups")
+    restore_staging_dir: Path = Path("./var/restore-staging")
+    license_public_key: SecretStr | None = None
+    signed_license_json: SecretStr | None = None
 
     def ensure_runtime_directories(self) -> None:
         if self.database_url.startswith("sqlite:///./"):
@@ -37,6 +41,8 @@ class Settings(BaseSettings):
         self.browser_data_dir.mkdir(parents=True, exist_ok=True)
         self.browser_artifact_dir.mkdir(parents=True, exist_ok=True)
         self.document_data_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_data_dir.mkdir(parents=True, exist_ok=True)
+        self.restore_staging_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

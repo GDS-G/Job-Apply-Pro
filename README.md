@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Communication & Scheduling build
+## Dashboard, Backup & Licensing build
 
-The active milestone is **Communication & Scheduling `v0.10.0-alpha.1`**. It adds provider-independent Gmail, Outlook, Google Calendar, and Outlook Calendar boundaries; normalized message classification and application correlation; review-first replies; exact document-version attachment checks; conflict-aware scheduling; deduplicated follow-ups; daily summaries; and a durable audit trail for every attempted provider mutation.
+The active milestone is **Dashboard, Backup & Licensing `v0.11.0-alpha.1`**. It adds audit-reconciled application and interview reports, model-cost and portal-health metrics, versioned encrypted local backups, persisted schedules, integrity verification, selective restore staging, an offline restore gate, signed Ed25519 entitlement interfaces, and in-app recovery help.
 
-Application services never call provider SDKs directly. Provider adapters receive opaque OS-keychain credential references, while message and calendar content is encrypted in SQLite. An outbound email or calendar mutation requires the exact persisted fingerprint and idempotency key, and is recorded as confirmed only after a configured provider returns an immutable identifier. Live portal, email, and calendar accounts remain disabled by default.
+Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is deliberately excluded from the live API: the app stages and fingerprints restore plans, while final application requires an offline process and exact confirmation. License state never blocks backup verification, staging, or offline recovery. Optional cloud-backup and payment providers remain fail-closed interfaces until explicitly configured.
 
 ## Architecture
 

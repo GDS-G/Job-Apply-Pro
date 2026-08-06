@@ -1284,6 +1284,118 @@ h1 {
   font-size: 9px;
 }
 
+.operations-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 18px;
+}
+
+.operations-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #e8ebf2;
+  border-radius: 11px;
+  background: #fafbfc;
+}
+
+.operations-card span,
+.operations-card small,
+.backup-workspace p,
+.backup-status small,
+.help-grid small {
+  color: #7f899d;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.operations-card strong {
+  color: #3d4659;
+  font-size: 20px;
+}
+
+.backup-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
+  gap: 16px;
+  padding: 0 18px 18px;
+}
+
+.backup-workspace > div,
+.operations-reports > article,
+.help-grid article {
+  padding: 15px;
+  border: 1px solid #e8ebf2;
+  border-radius: 11px;
+  background: #fafbfc;
+}
+
+.operations-reports {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
+.operations-reports > article {
+  display: grid;
+  gap: 10px;
+}
+
+.operations-report-list,
+.operations-report-list > div {
+  display: grid;
+  gap: 5px;
+}
+
+.operations-report-list > div {
+  padding-top: 8px;
+  border-top: 1px solid #e8ebf2;
+}
+
+.operations-report-list span,
+.operations-reports strong {
+  color: #3d4659;
+  font-size: 10px;
+}
+
+.operations-report-list small {
+  color: #7f899d;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.backup-workspace p {
+  margin: 7px 0 12px;
+}
+
+.backup-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
+.help-grid article {
+  display: grid;
+  gap: 6px;
+}
+
+.help-grid strong,
+.backup-workspace strong {
+  color: #3d4659;
+  font-size: 10px;
+}
+
 @media (max-width: 1160px) {
   .shell {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -1308,6 +1420,16 @@ h1 {
   }
   .integration-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .operations-grid,
+  .help-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .backup-workspace {
+    grid-template-columns: 1fr;
+  }
+  .operations-reports {
+    grid-template-columns: 1fr;
   }
   .queue-item {
     grid-template-columns:

@@ -77,6 +77,61 @@ const bridge: DesktopBridge = {
       planned_mutations: 0,
       confirmed_mutations: 0,
     }),
+    getOperationsDashboard: async () => ({
+      generated_at: new Date(0).toISOString(),
+      applications: {
+        jobs_discovered: 0,
+        applications_total: 0,
+        submission_attempted: 0,
+        submission_confirmed: 0,
+        tracking_active: 0,
+        failed: 0,
+        duplicated: 0,
+        interviews_received: 0,
+        offers_received: 0,
+        recruiter_messages: 0,
+      },
+      models: {
+        invocations: 0,
+        successful: 0,
+        failed: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_micros: 0,
+        average_latency_ms: 0,
+        by_provider: {},
+      },
+      portals: [],
+      application_report: [],
+      interview_report: [],
+      backup_count: 0,
+      latest_backup: null,
+      license: {
+        status: "DEVELOPMENT",
+        message: "Development entitlement",
+        recovery_allowed: true,
+        payment_enabled: false,
+      },
+    }),
+    listBackups: async () => [],
+    listBackupSchedules: async () => [],
+    createBackup: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    createBackupSchedule: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    verifyBackup: async () => ({
+      backup_id: "backup-test",
+      valid: true,
+      reasons: [],
+      verified_entries: 0,
+      verified_at: new Date(0).toISOString(),
+    }),
+    stageRestore: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    listHelpTopics: async () => [],
     onStatus: () => () => undefined,
   },
 };
