@@ -1,10 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from job_apply_pro.api.routes.communications import get_communication_service
+from job_apply_pro.config import get_settings
 from job_apply_pro.domain.communications import (
     CalendarEventSnapshot,
     CalendarMutationCreate,
@@ -31,10 +34,12 @@ from job_apply_pro.integrations.configuration import (
     CommunicationConfigurationError,
     build_communication_configuration,
 )
+from job_apply_pro.main import create_app
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.communications import CommunicationService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
+from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.models import CommunicationRecordRow
 
 
@@ -166,6 +171,66 @@ def test_analysis_and_draft_payloads_are_encrypted_at_rest(session: Session) -> 
     listed = service.list_records()
     assert listed == [record]
     assert service.tracking_statuses()[0].workflow_id == workflow.workflow_id
+
+
+def test_provider_message_sync_imports_once_and_reports_duplicates(session: Session) -> None:
+    adapter = FixtureMessageProvider(IntegrationProvider.GMAIL, [_message()])
+    service = _service(session, message_provider=adapter)
+
+    first = service.sync_provider_messages(
+        IntegrationProvider.GMAIL,
+        since=datetime(2026, 8, 1, tzinfo=UTC),
+        workflows=[],
+    )
+    second = service.sync_provider_messages(
+        IntegrationProvider.GMAIL,
+        since=None,
+        workflows=[],
+    )
+
+    assert first.fetched_count == first.imported_count == 1
+    assert first.duplicate_count == 0
+    assert second.fetched_count == second.duplicate_count == 1
+    assert second.imported_count == 0
+    assert second.record_ids == first.record_ids
+    with pytest.raises(ValueError, match="mail provider"):
+        service.sync_provider_messages(
+            IntegrationProvider.GOOGLE_CALENDAR,
+            since=None,
+            workflows=[],
+        )
+
+
+def test_provider_message_sync_api_returns_sanitized_counts(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service(
+        session,
+        message_provider=FixtureMessageProvider(IntegrationProvider.GMAIL, [_message()]),
+    )
+    monkeypatch.setenv("JAP_API_TOKEN", "provider-sync-token")
+    get_settings.cache_clear()
+    app = create_app()
+    app.dependency_overrides[get_communication_service] = lambda: service
+    app.dependency_overrides[get_session] = lambda: session
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/api/v1/communications/providers/GMAIL/messages/sync",
+            headers={"X-Job-Apply-Pro-Token": "provider-sync-token"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "provider": "GMAIL",
+            "fetched_count": 1,
+            "imported_count": 1,
+            "duplicate_count": 0,
+            "record_ids": response.json()["record_ids"],
+        }
+        assert len(response.json()["record_ids"]) == 1
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
 
 
 def test_fingerprinted_send_is_audited_and_idempotent(session: Session) -> None:

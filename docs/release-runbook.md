@@ -61,7 +61,7 @@ Install the unsigned candidate only on an isolated test workstation. Verify firs
 
 ## Signed publication
 
-1. Tag the exact approved commit `v0.16.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref.
+1. Tag the exact approved commit `v0.17.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref.
 2. The workflow tests, builds, requires the certificate, signs the NSIS installer, generates an SPDX JSON SBOM, verifies Authenticode, creates SHA-256 checksums and dependency inventories, and only then publishes a prerelease.
 3. Download the published installer on a clean supported Windows workstation. Verify `Get-AuthenticodeSignature` reports `Valid`, the subject is the expected publisher, and the SHA-256 value matches `SHA256SUMS.txt`.
 4. Install, launch, perform the smoke workflow, and confirm the update metadata resolves to the same signed artifact.

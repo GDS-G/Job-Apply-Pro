@@ -284,6 +284,16 @@ class CommunicationRecord(BaseModel):
     created_at: datetime
 
 
+class ProviderMessageSyncResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    provider: IntegrationProvider
+    fetched_count: int = Field(ge=0, le=1_000)
+    imported_count: int = Field(ge=0, le=1_000)
+    duplicate_count: int = Field(ge=0, le=1_000)
+    record_ids: list[str] = Field(default_factory=list, max_length=1_000)
+
+
 class DraftCreate(BaseModel):
     model_config = ConfigDict(frozen=True)
 

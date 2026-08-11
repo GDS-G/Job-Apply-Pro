@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -27,12 +28,14 @@ from job_apply_pro.domain.communications import (
     OAuthAuthorizationState,
     OAuthCallbackResult,
     OutboundDraft,
+    ProviderMessageSyncResult,
     SchedulingPlanRequest,
     SchedulingRecommendation,
 )
 from job_apply_pro.integrations.communications import (
     CalendarProviderAdapter,
     MessageProviderAdapter,
+    ProviderMutationError,
     ProviderNotConfiguredError,
 )
 from job_apply_pro.integrations.configuration import (
@@ -213,6 +216,34 @@ def list_communication_records(
     workflow_id: Annotated[str | None, Query(max_length=100)] = None,
 ) -> list[CommunicationRecord]:
     return service.search_records(query=query, category=category, workflow_id=workflow_id)
+
+
+@router.post(
+    "/providers/{provider}/messages/sync",
+    response_model=ProviderMessageSyncResult,
+)
+def sync_provider_messages(
+    provider: IntegrationProvider,
+    service: ServiceDependency,
+    session: SessionDependency,
+    since: Annotated[datetime | None, Query()] = None,
+) -> ProviderMessageSyncResult:
+    try:
+        return service.sync_provider_messages(
+            provider,
+            since=since,
+            workflows=WorkbenchRepository(session).list_snapshots(),
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    except ProviderNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+    except ProviderMutationError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
 
 @router.post("/drafts", response_model=OutboundDraft, status_code=201)

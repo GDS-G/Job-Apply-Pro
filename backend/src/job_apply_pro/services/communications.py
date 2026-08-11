@@ -36,6 +36,7 @@ from job_apply_pro.domain.communications import (
     NormalizedMessage,
     OutboundDraft,
     OutboundPolicy,
+    ProviderMessageSyncResult,
     ReplyDraft,
     SchedulingRecommendation,
     SchedulingRequest,
@@ -355,6 +356,45 @@ class CommunicationService:
                 received_at=message.received_at,
                 created_at=now,
             )
+        )
+
+    def sync_provider_messages(
+        self,
+        provider: IntegrationProvider,
+        *,
+        since: datetime | None,
+        workflows: list[WorkflowRunSnapshot],
+    ) -> ProviderMessageSyncResult:
+        if provider not in {IntegrationProvider.GMAIL, IntegrationProvider.OUTLOOK}:
+            raise ValueError("Message synchronization requires a mail provider")
+        if since is not None and (since.tzinfo is None or since.utcoffset() is None):
+            raise ValueError("Message synchronization time must include a UTC offset")
+        repository = self._require_repository()
+        existing_ids = {
+            record.analysis.message.provider_message_id
+            for record in repository.list_records()
+            if record.analysis.message.provider is provider
+        }
+        messages = self._message_adapters[provider].list_messages(since=since)
+        record_ids: list[str] = []
+        imported_count = 0
+        for message in messages:
+            if message.provider is not provider:
+                raise ProviderMutationError(
+                    "Provider returned a message for the wrong account type"
+                )
+            is_new = message.provider_message_id not in existing_ids
+            record = self.analyze_and_save(message, workflows)
+            record_ids.append(record.id)
+            if is_new:
+                existing_ids.add(message.provider_message_id)
+                imported_count += 1
+        return ProviderMessageSyncResult(
+            provider=provider,
+            fetched_count=len(messages),
+            imported_count=imported_count,
+            duplicate_count=len(messages) - imported_count,
+            record_ids=record_ids,
         )
 
     def list_records(self) -> list[CommunicationRecord]:

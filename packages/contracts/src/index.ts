@@ -546,6 +546,14 @@ export interface CommunicationRecord {
   created_at: string;
 }
 
+export interface ProviderMessageSyncResult {
+  provider: IntegrationProvider;
+  fetched_count: number;
+  imported_count: number;
+  duplicate_count: number;
+  record_ids: string[];
+}
+
 export interface DailyCommunicationSummary {
   generated_at: string;
   analyzed_messages: number;
@@ -1099,6 +1107,9 @@ export interface DesktopBridge {
     revokeProviderAuthorization(
       provider: IntegrationProvider,
     ): Promise<OAuthAuthorizationState>;
+    syncProviderMessages(
+      provider: IntegrationProvider,
+    ): Promise<ProviderMessageSyncResult>;
     listCommunicationRecords(): Promise<CommunicationRecord[]>;
     getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
     getOperationsDashboard(): Promise<OperationsDashboard>;

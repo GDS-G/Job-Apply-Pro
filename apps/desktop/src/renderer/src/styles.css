@@ -557,6 +557,32 @@ h1 {
   cursor: pointer;
 }
 
+.provider-sync-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  color: #255d45;
+  font-size: 11px;
+  background: #edf8f2;
+  border: 1px solid #b9dec9;
+  border-radius: 10px;
+}
+
+.provider-sync-status span {
+  flex: 1;
+}
+
+.provider-sync-status button {
+  display: grid;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  place-items: center;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

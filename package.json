@@ -1,6 +1,6 @@
 {
   "name": "job-apply-pro",
-  "version": "0.16.0-alpha.1",
+  "version": "0.17.0-alpha.1",
   "private": true,
   "description": "Local-first job application workflow desktop app",
   "packageManager": "pnpm@11.21.0",
