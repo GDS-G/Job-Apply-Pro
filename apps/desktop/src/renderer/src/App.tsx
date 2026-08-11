@@ -716,7 +716,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Production Hardening v0.12.0-alpha.1</strong>
+              <strong>Maintenance Refresh v0.12.1-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Production Hardening `v0.12.0-alpha.1`. This is an alpha build: real portal submission and live mail/calendar writes remain disabled by default.
+This guide applies to Maintenance Refresh `v0.12.1-alpha.1`. This is an alpha build: real portal submission and live mail/calendar writes remain disabled by default.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.12.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.12.1-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.

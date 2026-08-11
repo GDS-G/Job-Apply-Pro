@@ -2,6 +2,22 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.12.1-alpha.1] - Unreleased
+
+### Changed
+
+- Refreshed the supported Node 24 and pnpm 11 development baseline, including Node 24 type declarations, accessibility tooling, icons, linting, and DOM test matchers.
+- Re-aligned the desktop and contracts test workspaces to the newest Vite 7 versions supported by `electron-vite@5`; unsupported Vite 8 and Node 26 peer graphs are no longer auto-installed.
+- Validated FastAPI 0.141, mypy 2, ReportLab 5, and Starlette's `httpx2` test client while retaining bounded dependency ranges.
+- Moved GitHub checkout, Node setup, and Python setup workflows to their current Node 24-compatible major releases.
+- Grouped future Dependabot minor and patch updates by ecosystem and capped simultaneous pull-request volume.
+
+### Security
+
+- Raised the PyPDF floor to 6.15.0 to exclude releases affected by `PYSEC-2026-3655` and `PYSEC-2026-3656`.
+- Retained all production-disabled portal/provider boundaries and fail-closed signing requirements while refreshing audited build dependencies.
+- Required the same coverage, package smoke, dependency-audit, secret-scan, and dual-language CodeQL gates as the production-hardening candidate.
+
 ## [0.12.0-alpha.1] - Unreleased
 
 ### Added

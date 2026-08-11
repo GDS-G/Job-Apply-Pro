@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Production Hardening",
-  version: "0.12.0-alpha.1",
+  name: "Maintenance Refresh",
+  version: "0.12.1-alpha.1",
   channel: "alpha",
 } as const;
 

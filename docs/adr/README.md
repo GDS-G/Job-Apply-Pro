@@ -20,3 +20,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0016: Production-disabled portal catalog and replay contracts](0016-production-disabled-portal-catalog.md)
 - [ADR-0017: Encrypted provider and mutation boundary](0017-encrypted-provider-mutation-boundary.md)
 - [ADR-0018: Encrypted operational recovery and entitlement boundary](0018-encrypted-operational-recovery-and-entitlement-boundary.md)
+- [ADR-0019: Production packaging, updates, and diagnostics](0019-production-packaging-updates-and-diagnostics.md)
+- [ADR-0020: Versioned dependency maintenance baseline](0020-versioned-dependency-maintenance-baseline.md)
