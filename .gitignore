@@ -1,0 +1,39 @@
+# Node
+node_modules/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python
+.venv/
+.venv-dev/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Runtime data
+var/
+artifacts/
+playwright-report/
+test-results/
+*.sqlite
+*.sqlite3
+*.db
+
+# Local secrets and settings
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Local model assets are managed outside source control.
+models/*/

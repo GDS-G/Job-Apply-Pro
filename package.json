@@ -1,0 +1,25 @@
+{
+  "name": "job-apply-pro",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Local-first job application workflow desktop app",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "desktop:dev": "pnpm --filter @job-apply-pro/desktop dev",
+    "backend:dev": "python -m alembic -c backend/alembic.ini upgrade head && python -m uvicorn job_apply_pro.main:app --app-dir backend/src --host 127.0.0.1 --port 8765 --reload",
+    "backend:test": "python -m pytest backend/tests",
+    "backend:lint": "python -m ruff check backend",
+    "backend:format:check": "python -m ruff format --check backend",
+    "backend:typecheck": "python -m mypy backend/src backend/tests",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test && pnpm backend:test",
+    "lint": "pnpm -r lint && pnpm backend:lint",
+    "typecheck": "pnpm -r typecheck && pnpm backend:typecheck",
+    "format": "pnpm -r format && python -m ruff format backend",
+    "format:check": "pnpm -r format:check && pnpm backend:format:check"
+  }
+}

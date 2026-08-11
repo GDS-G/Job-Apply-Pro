@@ -1,0 +1,7 @@
+{
+  "name": "Foundation",
+  "version": "0.1.0-alpha.1",
+  "channel": "alpha",
+  "roadmap_phases": [0, 1],
+  "production_automation_enabled": false
+}
