@@ -116,6 +116,33 @@ const bridge: DesktopBridge = {
       planned_mutations: 0,
       confirmed_mutations: 0,
     }),
+    getDesktopNotificationStatus: async () => ({
+      native_enabled: false,
+      native_supported: true,
+      poll_interval_seconds: 60,
+      active_notifications: [],
+      delivered_count: 0,
+      last_checked_at: new Date(0).toISOString(),
+      last_error: null,
+    }),
+    refreshDesktopNotifications: async () => ({
+      native_enabled: false,
+      native_supported: true,
+      poll_interval_seconds: 60,
+      active_notifications: [],
+      delivered_count: 0,
+      last_checked_at: new Date(0).toISOString(),
+      last_error: null,
+    }),
+    setNativeNotificationsEnabled: async (enabled) => ({
+      native_enabled: enabled,
+      native_supported: true,
+      poll_interval_seconds: 60,
+      active_notifications: [],
+      delivered_count: 0,
+      last_checked_at: new Date(0).toISOString(),
+      last_error: null,
+    }),
     getOperationsDashboard: async () => ({
       generated_at: new Date(0).toISOString(),
       applications: {
@@ -175,19 +202,19 @@ const bridge: DesktopBridge = {
     exportSupportDiagnostics: async () => null,
     getUpdateStatus: async () => ({
       state: "DISABLED",
-      current_version: "0.14.0-alpha.1",
+      current_version: "0.19.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     checkForUpdates: async () => ({
       state: "DISABLED",
-      current_version: "0.14.0-alpha.1",
+      current_version: "0.19.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     downloadUpdate: async () => ({
       state: "DISABLED",
-      current_version: "0.14.0-alpha.1",
+      current_version: "0.19.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
@@ -195,12 +222,14 @@ const bridge: DesktopBridge = {
     onUpdateStatus: (listener) => {
       listener({
         state: "DISABLED",
-        current_version: "0.14.0-alpha.1",
+        current_version: "0.19.0-alpha.1",
         message: "Updates are disabled for development builds.",
         checked_at: new Date(0).toISOString(),
       });
       return () => undefined;
     },
+    onDesktopNotificationStatus: () => () => undefined,
+    onDesktopNotificationActivated: () => () => undefined,
     onStatus: () => () => undefined,
   },
 };

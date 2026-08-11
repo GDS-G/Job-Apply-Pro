@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Provider Configuration Control v0.18.0-alpha.1"),
+      screen.getByText("Actionable Desktop Notifications v0.19.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -135,5 +135,51 @@ describe("App", () => {
       await screen.findByText(/configuration imported for 1 provider/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/gmail\.readonly/i)).not.toBeInTheDocument();
+  });
+
+  it("enables privacy-safe native notifications from the in-app center", async () => {
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "getDesktopNotificationStatus",
+    ).mockResolvedValue({
+      native_enabled: false,
+      native_supported: true,
+      poll_interval_seconds: 60,
+      active_notifications: [
+        {
+          id: "workflow:one:MFA_REQUIRED:0",
+          kind: "MFA_REQUIRED",
+          title: "Sign-in verification required",
+          body: "Open Job Apply Pro to review the protected local details.",
+          destination: "WORKFLOWS",
+          severity: "warning",
+          occurred_at: new Date(0).toISOString(),
+        },
+      ],
+      delivered_count: 0,
+      last_checked_at: new Date(0).toISOString(),
+      last_error: null,
+    });
+    const enable = vi
+      .spyOn(window.jobApplyPro.workbench, "setNativeNotificationsEnabled")
+      .mockResolvedValue({
+        native_enabled: true,
+        native_supported: true,
+        poll_interval_seconds: 60,
+        active_notifications: [],
+        delivered_count: 1,
+        last_checked_at: new Date(0).toISOString(),
+        last_error: null,
+      });
+
+    render(<App />);
+    expect(
+      await screen.findByText("Sign-in verification required"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /enable/i }));
+
+    expect(enable).toHaveBeenCalledWith(true);
+    expect(await screen.findByText("WINDOWS ALERTS ON")).toBeInTheDocument();
+    expect(screen.queryByText(/Secret Employer/i)).not.toBeInTheDocument();
   });
 });

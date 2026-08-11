@@ -1,16 +1,19 @@
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 
-import { app, BrowserWindow, dialog, shell } from "electron";
+import { app, BrowserWindow, dialog, Notification, shell } from "electron";
 
 import { BackendSupervisor } from "./backend-supervisor.js";
 import { loadOrCreateMasterKey } from "./secret-store.js";
+import { DesktopNotificationManager } from "./notification-manager.js";
+import { FileNotificationStateStore } from "./notification-state-store.js";
 import { registerWorkbenchIpc } from "./workbench-ipc.js";
 import { UpdateManager } from "./update-manager.js";
 
 const isDevelopment = !app.isPackaged;
 let backendSupervisor: BackendSupervisor | null = null;
 let updateManager: UpdateManager | null = null;
+let notificationManager: DesktopNotificationManager | null = null;
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -107,15 +110,75 @@ app
         : {}),
     });
     updateManager = new UpdateManager(app.isPackaged, app.getVersion());
-    registerWorkbenchIpc(backendSupervisor, updateManager);
+    notificationManager = new DesktopNotificationManager(
+      async () => {
+        if (!backendSupervisor || !updateManager) {
+          throw new Error("Desktop services are not initialized.");
+        }
+        const [workflows, challenges, communications, followUps, backups] =
+          await Promise.all([
+            backendSupervisor.client.listWorkflows(),
+            backendSupervisor.client.listChallengeSessions(),
+            backendSupervisor.client.listCommunicationRecords(),
+            backendSupervisor.client.listFollowUps(),
+            backendSupervisor.client.listBackups(),
+          ]);
+        return {
+          workflows,
+          challenges,
+          communications,
+          followUps,
+          backups,
+          updateStatus: updateManager.status,
+        };
+      },
+      new FileNotificationStateStore(
+        join(userDataPath, "notification-state.json"),
+      ),
+      {
+        isSupported: () => Notification.isSupported(),
+        show: (item, onActivate) => {
+          const notification = new Notification({
+            title: item.title,
+            body: item.body,
+            silent: true,
+            timeoutType: "default",
+          });
+          notification.once("click", onActivate);
+          notification.show();
+        },
+      },
+      (item) => {
+        const window = BrowserWindow.getAllWindows()[0] ?? createMainWindow();
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+        const deliver = () =>
+          window.webContents.send("notifications:activated", item.destination);
+        if (window.webContents.isLoading()) {
+          window.webContents.once("did-finish-load", deliver);
+        } else {
+          deliver();
+        }
+      },
+    );
+    await notificationManager.initialize();
+    registerWorkbenchIpc(backendSupervisor, updateManager, notificationManager);
     backendSupervisor.onStatus((status) => {
       for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send("workbench:status", status);
       }
+      if (status.state === "ready") void notificationManager?.refresh();
     });
     updateManager.onStatus((status) => {
       for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send("updates:status", status);
+      }
+      void notificationManager?.refresh();
+    });
+    notificationManager.onStatus((status) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send("notifications:status", status);
       }
     });
     createMainWindow();
@@ -142,4 +205,7 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => backendSupervisor?.stop());
+app.on("before-quit", () => {
+  notificationManager?.stop();
+  backendSupervisor?.stop();
+});

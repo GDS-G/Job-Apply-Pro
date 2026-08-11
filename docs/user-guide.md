@@ -1,15 +1,23 @@
 # Job Apply Pro user guide
 
-This guide applies to Provider Configuration Control `v0.18.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization.
+This guide applies to Actionable Desktop Notifications `v0.19.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.18.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.19.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
 
 The packaged browser runtime uses Microsoft Edge. Keep Windows and Edge supported and updated.
+
+## Review and enable notifications
+
+The **Actionable notifications** panel always shows current local action alerts. It covers sign-in verification, CAPTCHA and other user intervention, approaching assessment deadlines, stopped or expired workflows, recruiter/interview/offer messages, due follow-ups, backup failures, and update failures. Select an in-app alert to move to the relevant workflow, challenge, communication, or operations section. Confirmed upcoming-interview reminders require a later calendar-state source and are not claimed by this build.
+
+Native Windows delivery is off by default. Select **Enable** in the notification panel to opt in. The preference and stable delivered-event identifiers are stored in a bounded local state file; message bodies and account details are not stored there. The app checks once per minute, retains at most 50 active alerts, and shows no more than five new native alerts during one refresh. Selecting a Windows notification focuses Job Apply Pro and opens a fixed workbench section.
+
+Notification wording is intentionally generic. Windows can display notifications on a locked screen or retain them in Notification Center, so native text never includes employer or job names, candidate data, message senders or subjects, follow-up reasons, diagnostics, passwords, tokens, or security codes. If Windows notifications are unavailable or disabled, in-app alerts continue to work. Use **Disable** to stop future native delivery. Windows Focus Assist, locked-screen display, click activation, and sleep/resume behavior remain part of the physical release-lab checklist.
 
 ## Connect email and calendars
 

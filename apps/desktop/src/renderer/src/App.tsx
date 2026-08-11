@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  Bell,
   Bot,
   BriefcaseBusiness,
   CalendarDays,
@@ -37,6 +38,8 @@ import type {
   CommunicationRecord,
   DailyCommunicationSummary,
   DesktopUpdateStatus,
+  DesktopNotificationDestination,
+  DesktopNotificationStatus,
   HelpTopic,
   IntegrationHealth,
   IntegrationProvider,
@@ -137,6 +140,8 @@ export function App() {
   const [updateStatus, setUpdateStatus] = useState<DesktopUpdateStatus | null>(
     null,
   );
+  const [notificationStatus, setNotificationStatus] =
+    useState<DesktopNotificationStatus | null>(null);
   const [diagnosticPath, setDiagnosticPath] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
@@ -178,6 +183,7 @@ export function App() {
         scheduleItems,
         topics,
         desktopUpdate,
+        desktopNotifications,
       ] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
@@ -194,6 +200,7 @@ export function App() {
         window.jobApplyPro.workbench.listBackupSchedules(),
         window.jobApplyPro.workbench.listHelpTopics(),
         window.jobApplyPro.workbench.getUpdateStatus(),
+        window.jobApplyPro.workbench.getDesktopNotificationStatus(),
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
@@ -210,6 +217,7 @@ export function App() {
       setBackupSchedules(scheduleItems);
       setHelpTopics(topics);
       setUpdateStatus(desktopUpdate);
+      setNotificationStatus(desktopNotifications);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -320,6 +328,52 @@ export function App() {
     }
   }, []);
 
+  const focusNotificationDestination = useCallback(
+    (destination: DesktopNotificationDestination) => {
+      const targets: Record<DesktopNotificationDestination, string> = {
+        WORKFLOWS: "workflow-queue",
+        CHALLENGES: "challenge-framework",
+        COMMUNICATIONS: "communication-scheduling",
+        OPERATIONS: "operations-recovery",
+      };
+      document.getElementById(targets[destination])?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    },
+    [],
+  );
+
+  const setNativeNotificationsEnabled = useCallback(
+    async (enabled: boolean) => {
+      setBusy(true);
+      try {
+        setNotificationStatus(
+          await window.jobApplyPro.workbench.setNativeNotificationsEnabled(
+            enabled,
+          ),
+        );
+        setError(null);
+      } catch (caught) {
+        setError(readableError(caught));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
+  const refreshDesktopNotifications = useCallback(async () => {
+    try {
+      setNotificationStatus(
+        await window.jobApplyPro.workbench.refreshDesktopNotifications(),
+      );
+      setError(null);
+    } catch (caught) {
+      setError(readableError(caught));
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
     void window.jobApplyPro.workbench.getStatus().then((next) => {
@@ -340,6 +394,22 @@ export function App() {
   useEffect(
     () => window.jobApplyPro.workbench.onUpdateStatus(setUpdateStatus),
     [],
+  );
+
+  useEffect(
+    () =>
+      window.jobApplyPro.workbench.onDesktopNotificationStatus(
+        setNotificationStatus,
+      ),
+    [],
+  );
+
+  useEffect(
+    () =>
+      window.jobApplyPro.workbench.onDesktopNotificationActivated(
+        focusNotificationDestination,
+      ),
+    [focusNotificationDestination],
   );
 
   useEffect(() => {
@@ -975,7 +1045,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Provider Configuration Control v0.18.0-alpha.1</strong>
+              <strong>Actionable Desktop Notifications v0.19.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1038,8 +1108,95 @@ export function App() {
             ))}
           </section>
 
+          <section
+            className="panel notification-panel"
+            id="desktop-notifications"
+          >
+            <div className="panel__header">
+              <div>
+                <h2>Actionable notifications</h2>
+                <p>
+                  Privacy-safe in-app alerts with optional native Windows
+                  delivery
+                </p>
+              </div>
+              <div className="notification-actions">
+                <span
+                  className={`status-pill ${notificationStatus?.native_enabled ? "status-pill--safe" : "status-pill--warning"}`}
+                >
+                  {notificationStatus?.native_enabled
+                    ? "WINDOWS ALERTS ON"
+                    : "WINDOWS ALERTS OFF"}
+                </span>
+                <button
+                  className="button button--secondary"
+                  disabled={
+                    busy || notificationStatus?.native_supported === false
+                  }
+                  onClick={() =>
+                    void setNativeNotificationsEnabled(
+                      !(notificationStatus?.native_enabled ?? false),
+                    )
+                  }
+                  type="button"
+                >
+                  <Bell size={14} />
+                  {notificationStatus?.native_enabled ? "Disable" : "Enable"}
+                </button>
+                <button
+                  aria-label="Refresh notifications"
+                  className="text-button"
+                  onClick={() => void refreshDesktopNotifications()}
+                  type="button"
+                >
+                  <RefreshCw size={13} /> Refresh
+                </button>
+              </div>
+            </div>
+            {notificationStatus?.native_supported === false ? (
+              <div className="notification-support-warning" role="status">
+                Native notifications are unavailable on this system. In-app
+                alerts remain available.
+              </div>
+            ) : null}
+            {notificationStatus?.last_error ? (
+              <div className="notification-support-warning" role="status">
+                {notificationStatus.last_error}
+              </div>
+            ) : null}
+            <div className="notification-list">
+              {notificationStatus?.active_notifications.length ? (
+                notificationStatus.active_notifications
+                  .slice(0, 8)
+                  .map((notification) => (
+                    <button
+                      className={`notification-item notification-item--${notification.severity}`}
+                      key={notification.id}
+                      onClick={() =>
+                        focusNotificationDestination(notification.destination)
+                      }
+                      type="button"
+                    >
+                      <Bell size={16} />
+                      <span>
+                        <strong>{notification.title}</strong>
+                        <small>{notification.body}</small>
+                      </span>
+                      <time>
+                        {new Date(notification.occurred_at).toLocaleString()}
+                      </time>
+                    </button>
+                  ))
+              ) : (
+                <div className="empty-state empty-state--compact">
+                  No action notifications are active.
+                </div>
+              )}
+            </div>
+          </section>
+
           <section className="content-grid">
-            <article className="panel panel--queue">
+            <article className="panel panel--queue" id="workflow-queue">
               <div className="panel__header">
                 <div>
                   <h2>Durable workflow queue</h2>
@@ -1679,7 +1836,7 @@ export function App() {
             </div>
           </section>
 
-          <section className="panel challenge-panel">
+          <section className="panel challenge-panel" id="challenge-framework">
             <div className="panel__header">
               <div>
                 <h2>Challenge framework</h2>
@@ -1826,7 +1983,7 @@ export function App() {
             </div>
           </section>
 
-          <section className="panel operations-panel">
+          <section className="panel operations-panel" id="operations-recovery">
             <div className="panel__header">
               <div>
                 <h2>Operations, recovery & licensing</h2>
@@ -2069,7 +2226,10 @@ export function App() {
             </div>
           </section>
 
-          <section className="panel communications-panel">
+          <section
+            className="panel communications-panel"
+            id="communication-scheduling"
+          >
             <div className="panel__header">
               <div>
                 <h2>Communication & scheduling</h2>
