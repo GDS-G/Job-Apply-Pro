@@ -5,3 +5,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0001: Modular local-first process architecture](0001-modular-local-first-architecture.md)
 - [ADR-0002: Build naming and semantic versioning](0002-build-naming-and-versioning.md)
 - [ADR-0003: Deterministic workflow state machine](0003-deterministic-workflow-state-machine.md)
+- [ADR-0004: Local encryption and key boundaries](0004-local-encryption-and-key-boundaries.md)
+- [ADR-0005: Core data and repository boundaries](0005-core-data-and-repository-boundaries.md)

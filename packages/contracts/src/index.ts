@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Foundation",
-  version: "0.1.0-alpha.1",
+  name: "Core",
+  version: "0.2.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -39,6 +39,57 @@ export const workflowStates = [
 export type WorkflowState = (typeof workflowStates)[number];
 export type VerificationResult =
   "NOT_REQUIRED" | "PASSED" | "FAILED" | "UNCERTAIN";
+
+export type CandidateStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
+
+export interface ContactDetails {
+  full_name: string;
+  email: string;
+  phone?: string | null;
+  address?: string | null;
+}
+
+export interface CandidateProfile {
+  id: string;
+  display_name: string;
+  contact: ContactDetails;
+  status: CandidateStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Job {
+  id: string;
+  source: string;
+  external_id: string;
+  employer: string;
+  title: string;
+  location?: string | null;
+  source_url?: string | null;
+  description_hash: string;
+  discovered_at: string;
+}
+
+export interface Application {
+  id: string;
+  workflow_id: string;
+  profile_id: string;
+  job_id: string;
+  state: WorkflowState;
+  selected_document_version_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowCheckpoint {
+  id: string;
+  workflow_id: string;
+  sequence: number;
+  state: WorkflowState;
+  page_fingerprint: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
 
 export interface HealthResponse {
   status: "ok" | "degraded";

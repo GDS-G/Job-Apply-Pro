@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Foundation build
+## Core build
 
-The active foundation milestone is **Foundation `v0.1.0-alpha.1`**. It establishes the modern monorepo, secure Electron shell, React dashboard, FastAPI service, shared workflow contracts, SQLite migration, starter tests, CI, and engineering governance.
+The active milestone is **Core `v0.2.0-alpha.1`**. It extends the modern Foundation with the durable candidate, document, job, application, model-invocation, error, and workflow-checkpoint data model. Sensitive candidate and checkpoint data is stored in authenticated AES-256-GCM envelopes.
 
-This build intentionally uses a simulated workflow queue. It does not submit real applications or connect to production email, calendar, AI, or job-portal accounts.
+This build still uses a simulated workflow queue. It does not submit real applications or connect to production email, calendar, AI, or job-portal accounts.
 
 ## Architecture
 
@@ -19,6 +19,16 @@ docs/adr                  Architecture decision records
 ```
 
 Electron is the presentation and local process boundary. FastAPI owns business logic and persistence. The renderer never receives Node.js access; its preload exposes a minimal typed bridge. Workflow state transitions are validated by deterministic domain rules before persistence.
+
+## Local encryption key
+
+Before using candidate or checkpoint APIs, set `JAP_MASTER_KEY` to a base64-encoded 32-byte value. Generate one locally:
+
+```powershell
+python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+```
+
+The key is never committed, persisted by the application, or returned by an API. Backups contain ciphertext and require the same key to restore. Losing the key makes protected records unrecoverable.
 
 ## Prerequisites
 
