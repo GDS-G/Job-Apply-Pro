@@ -67,6 +67,7 @@ class DocumentExtraction(BaseModel):
     blocks: list[LayoutBlock] = Field(max_length=5_000)
     page_count: int = Field(ge=1, le=500)
     character_count: int = Field(ge=0, le=200_000)
+    warnings: list[str] = Field(default_factory=list, max_length=100)
 
 
 class CandidateDocument(BaseModel):

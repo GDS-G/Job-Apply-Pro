@@ -7,6 +7,7 @@ import type {
   BackupVerification,
   BrowserSessionSnapshot,
   CandidateClaim,
+  CandidateDocumentImportResult,
   CandidateKnowledgeSnapshot,
   CandidateProfile,
   CandidateProfileCreate,
@@ -80,7 +81,7 @@ export class BackendClient {
   async importResume(
     profileId: string,
     filePath: string,
-  ): Promise<CandidateKnowledgeSnapshot> {
+  ): Promise<CandidateDocumentImportResult> {
     const data = await readFile(filePath);
     const form = new FormData();
     form.append("file", new Blob([data]), basename(filePath));
@@ -88,11 +89,16 @@ export class BackendClient {
     form.append("display_name", basename(filePath));
     form.append("variant_label", "General");
     form.append("is_primary", "false");
-    await this.request(
-      `/knowledge/profiles/${encodeURIComponent(profileId)}/documents`,
-      { method: "POST", body: form },
-    );
-    return this.getCandidateKnowledge(profileId);
+    const imported = await this.request<{
+      extraction: CandidateDocumentImportResult["extraction"];
+    }>(`/knowledge/profiles/${encodeURIComponent(profileId)}/documents`, {
+      method: "POST",
+      body: form,
+    });
+    return {
+      snapshot: await this.getCandidateKnowledge(profileId),
+      extraction: imported.extraction,
+    };
   }
 
   reviewCandidateClaim(

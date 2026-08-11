@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Document Generation & Retention `v0.15.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, reviews scopes, and completes provider authorization.
+This guide applies to Document Ingestion Resilience `v0.16.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, reviews scopes, and completes provider authorization.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.15.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.16.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -34,7 +34,18 @@ After configuration, select **Review & connect**, verify the provider host and d
 
 ## Generate and retain application documents
 
-Import source resumes and supporting material in PDF, DOCX, RTF, TXT, or Markdown form. Review every proposed claim before approving it. Tailored generation ignores proposed, rejected, superseded, unlocked, or profile-only claims.
+Import source resumes and supporting material in DOC, DOCX, PDF, RTF, TXT, or Markdown form. Review every proposed claim before approving it. Tailored generation ignores proposed, rejected, superseded, unlocked, or profile-only claims.
+
+Legacy DOC and scanned-PDF support are opt-in because they invoke local document tools. Install LibreOffice and/or Tesseract from their official distributions, then configure exact absolute executable paths in the Windows user environment and restart Job Apply Pro. Do not enter command lines or portal credentials:
+
+```text
+JAP_DOCUMENT_LEGACY_CONVERTER_PATH=C:\Program Files\LibreOffice\program\soffice.exe
+JAP_DOCUMENT_OCR_ENABLED=true
+JAP_DOCUMENT_OCR_TESSERACT_PATH=C:\Program Files\Tesseract-OCR\tesseract.exe
+JAP_DOCUMENT_OCR_LANGUAGE=eng
+```
+
+DOC conversion uses a disposable LibreOffice profile, fixed arguments, a timeout, and a bounded DOCX output that is validated and parsed again. OCR runs only on PDF pages without meaningful ordinary text, is limited to 25 pages by default, and displays extraction notes when pages are skipped or text remains incomplete. Treat OCR text as proposed evidence and compare it with the source image before approval.
 
 1. Create or select an application whose job title and requirements have been persisted.
 2. In **Candidate documents & evidence**, open **Tailored document review** and select the application.
@@ -46,7 +57,7 @@ Import source resumes and supporting material in PDF, DOCX, RTF, TXT, or Markdow
 
 When a supported portal verifies the displayed upload filename and later observes an identifier-backed submission confirmation, it retains the exact document version, SHA-256 digest, role, and upload fingerprint with the application. This is evidence of which local file version was submitted; it is not a copy of a portal password, browser cookie, or employer response. If the portal filename or digest differs, retention fails closed and the submission must be reviewed manually.
 
-Current limitations: legacy binary `.doc` requires conversion with a trusted local office tool; image-only/scanned documents do not yet have an OCR fallback; deterministic token matching is conservative; and advanced visual templates are not yet implemented.
+Current limitations: LibreOffice and Tesseract are not bundled; OCR language data must be installed locally; complex multi-column reading order remains conservative; deterministic token matching is conservative; and advanced visual templates are not yet implemented.
 
 ## Run a supervised portal validation
 

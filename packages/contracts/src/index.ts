@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Document Generation & Retention",
-  version: "0.15.0-alpha.1",
+  name: "Document Ingestion Resilience",
+  version: "0.16.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -845,6 +845,28 @@ export interface CandidateKnowledgeSnapshot {
   answers: AnswerLibraryEntry[];
 }
 
+export interface DocumentLayoutBlock {
+  index: number;
+  page?: number | null;
+  kind: string;
+  style?: string | null;
+  text: string;
+}
+
+export interface DocumentExtraction {
+  parser: string;
+  plain_text: string;
+  blocks: DocumentLayoutBlock[];
+  page_count: number;
+  character_count: number;
+  warnings: string[];
+}
+
+export interface CandidateDocumentImportResult {
+  snapshot: CandidateKnowledgeSnapshot;
+  extraction: DocumentExtraction;
+}
+
 export interface TailoredDocumentRequest {
   application_id: string;
   kind: "RESUME" | "COVER_LETTER";
@@ -1007,7 +1029,7 @@ export interface DesktopBridge {
     ): Promise<CandidateKnowledgeSnapshot>;
     selectAndImportResume(
       profileId: string,
-    ): Promise<CandidateKnowledgeSnapshot | null>;
+    ): Promise<CandidateDocumentImportResult | null>;
     reviewCandidateClaim(
       claimId: string,
       approved: boolean,

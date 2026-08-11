@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     browser_engine: Literal["chromium", "chrome", "msedge"] = "chromium"
     document_data_dir: Path = Path("./var/documents")
     document_max_bytes: int = Field(default=10_485_760, ge=1_024, le=52_428_800)
+    document_legacy_converter_path: Path | None = None
+    document_conversion_timeout_seconds: int = Field(default=30, ge=5, le=120)
+    document_ocr_enabled: bool = False
+    document_ocr_tesseract_path: Path | None = None
+    document_ocr_language: str = Field(default="eng", pattern=r"^[A-Za-z0-9_.+-]{1,40}$")
+    document_ocr_dpi: int = Field(default=200, ge=100, le=400)
+    document_ocr_max_pages: int = Field(default=25, ge=1, le=100)
+    document_ocr_page_timeout_seconds: int = Field(default=30, ge=5, le=120)
     ai_config_json: SecretStr | None = None
     communication_config_json: SecretStr | None = None
     backup_data_dir: Path = Path("./var/backups")

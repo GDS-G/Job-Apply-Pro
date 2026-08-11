@@ -319,7 +319,7 @@ export function registerWorkbenchIpc(
       filters: [
         {
           name: "Candidate documents",
-          extensions: ["pdf", "docx", "rtf", "txt", "md"],
+          extensions: ["doc", "docx", "pdf", "rtf", "txt", "md"],
         },
       ],
     });

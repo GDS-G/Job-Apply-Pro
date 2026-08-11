@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Document Generation & Retention"
+    BUILD_NAME = "Document Ingestion Resilience"
 
     def __init__(
         self,

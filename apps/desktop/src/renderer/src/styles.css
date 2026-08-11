@@ -525,6 +525,38 @@ h1 {
   cursor: pointer;
 }
 
+.warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  color: #75551c;
+  background: #fff9e9;
+  border: 1px solid #ead8a6;
+  border-radius: 11px;
+}
+
+.warning-banner div {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  font-size: 10px;
+}
+
+.warning-banner strong {
+  font-size: 11px;
+}
+
+.warning-banner button {
+  color: #75551c;
+  font-size: 10px;
+  font-weight: 700;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

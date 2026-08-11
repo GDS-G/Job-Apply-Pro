@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Document Generation & Retention",
+        build="Document Ingestion Resilience",
         environment=settings.environment,
     )

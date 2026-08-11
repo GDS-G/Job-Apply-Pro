@@ -147,6 +147,7 @@ export function App() {
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ingestionWarnings, setIngestionWarnings] = useState<string[]>([]);
 
   const selected =
     workflows.find((workflow) => workflow.workflow_id === selectedId) ??
@@ -507,9 +508,12 @@ export function App() {
     setBusy(true);
     setError(null);
     try {
-      const snapshot =
+      const result =
         await window.jobApplyPro.workbench.selectAndImportResume(profileId);
-      if (snapshot) setKnowledge(snapshot);
+      if (result) {
+        setKnowledge(result.snapshot);
+        setIngestionWarnings(result.extraction.warnings);
+      }
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -907,7 +911,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Document Generation & Retention v0.15.0-alpha.1</strong>
+              <strong>Document Ingestion Resilience v0.16.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -929,6 +933,19 @@ export function App() {
                 </span>
               </div>
               <button onClick={() => setError(null)} type="button">
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+
+          {ingestionWarnings.length ? (
+            <div className="warning-banner" role="status">
+              <AlertTriangle size={17} />
+              <div>
+                <strong>Document imported with extraction notes</strong>
+                <span>{ingestionWarnings.join(" ")}</span>
+              </div>
+              <button onClick={() => setIngestionWarnings([])} type="button">
                 Dismiss
               </button>
             </div>
