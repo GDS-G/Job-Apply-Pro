@@ -83,6 +83,14 @@ const bridge: DesktopBridge = {
         granted_scopes: [],
       },
     ],
+    getProviderConfigurationStatus: async () => ({
+      source: "NOT_CONFIGURED",
+      providers: [],
+      automatic_categories: [],
+      updated_at: null,
+    }),
+    selectAndImportProviderConfiguration: async () => null,
+    clearProviderConfiguration: async () => null,
     startProviderAuthorization: async () => {
       throw new Error("OAuth client is not configured in this test.");
     },

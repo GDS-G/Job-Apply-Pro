@@ -17,6 +17,7 @@ import type {
 } from "@job-apply-pro/contracts";
 
 import type { BackendSupervisor } from "./backend-supervisor.js";
+import { readProviderConfigurationFile } from "./provider-configuration-file.js";
 import type { UpdateManager } from "./update-manager.js";
 
 const actions = new Set<WorkflowControlAction>([
@@ -459,6 +460,73 @@ export function registerWorkbenchIpc(
   ipcMain.handle("communications:integrations", () =>
     supervisor.client.listIntegrationHealth(),
   );
+  ipcMain.handle("communications:configuration", () =>
+    supervisor.client.getProviderConfigurationStatus(),
+  );
+  ipcMain.handle("communications:configuration-import", async (event) => {
+    const selection = await dialog.showOpenDialog({
+      title: "Import provider configuration",
+      properties: ["openFile"],
+      filters: [{ name: "JSON configuration", extensions: ["json"] }],
+    });
+    const filePath = selection.filePaths[0];
+    if (selection.canceled || !filePath) return null;
+    const configurationJson = await readProviderConfigurationFile(filePath);
+    const preview =
+      await supervisor.client.validateProviderConfiguration(configurationJson);
+    const providers = preview.providers
+      .map(
+        (provider) =>
+          `${provider.provider.replaceAll("_", " ")}: ${provider.requested_scopes.length} scopes, ${provider.write_enabled ? "read/write" : "read-only"}`,
+      )
+      .join("\n");
+    const automaticPolicy = preview.automatic_categories.length
+      ? `Automatic categories: ${preview.automatic_categories.join(", ")}`
+      : "Automatic categories: none";
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options = {
+      type: "warning" as const,
+      title: "Import this provider configuration?",
+      message: `Review ${preview.providers.length} provider registration${preview.providers.length === 1 ? "" : "s"}.`,
+      detail: `${providers}\n${automaticPolicy}\n\nThis replaces the current local registration. Client IDs and policy metadata will be encrypted in the local database. Passwords, access tokens, refresh tokens, and client secrets are rejected. Importing does not authorize any account.`,
+      buttons: ["Cancel", "Import encrypted configuration"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const confirmation = owner
+      ? await dialog.showMessageBox(owner, options)
+      : await dialog.showMessageBox(options);
+    if (confirmation.response !== 1) return null;
+    return supervisor.client.importProviderConfiguration(configurationJson);
+  });
+  ipcMain.handle("communications:configuration-clear", async (event) => {
+    const current = await supervisor.client.getProviderConfigurationStatus();
+    if (current.source === "NOT_CONFIGURED") return current;
+    if (current.source === "ENVIRONMENT") {
+      throw new TypeError(
+        "Provider configuration is managed by the process environment.",
+      );
+    }
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options = {
+      type: "warning" as const,
+      title: "Clear provider configuration?",
+      message:
+        "Provider connections will be disabled after configuration is cleared.",
+      detail:
+        "Encrypted OAuth tokens are retained so you can revoke each provider separately before clearing. Clearing does not revoke consent at Google or Microsoft.",
+      buttons: ["Cancel", "Clear configuration"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const confirmation = owner
+      ? await dialog.showMessageBox(owner, options)
+      : await dialog.showMessageBox(options);
+    if (confirmation.response !== 1) return null;
+    return supervisor.client.clearProviderConfiguration();
+  });
   ipcMain.handle(
     "communications:oauth-start",
     async (_event, providerValue: unknown) => {

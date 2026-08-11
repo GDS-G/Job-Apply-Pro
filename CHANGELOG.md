@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.18.0-alpha.1] - Unreleased
+
+### Added
+
+- Added authenticated provider-configuration status, validation, encrypted import, and clear operations with a native desktop JSON picker and explicit confirmation.
+- Added an AES-256-GCM encrypted singleton configuration repository and Alembic migration, with sanitized provider/scope/capability summaries and persisted update time.
+- Added desktop interaction and backend API/repository/migration coverage for configuration import, environment precedence, encryption, clearing, and secret-field rejection.
+
+### Changed
+
+- `JAP_COMMUNICATION_CONFIG_JSON` is now the explicit managed-deployment override; encrypted desktop configuration is used only when the environment value is absent.
+- Provider connection controls now explain whether configuration is absent, encrypted locally, or environment-managed before account authorization begins.
+
+### Security
+
+- Configuration files are limited to 64 KiB, require at least one provider or OAuth client, reject unknown fields including passwords/tokens/client secrets, and never expose raw JSON or client IDs to the renderer or API response.
+- Clearing a configuration requires native confirmation and does not claim to revoke provider consent or silently destroy retained encrypted OAuth credentials.
+
 ## [0.17.0-alpha.1] - Unreleased
 
 ### Added

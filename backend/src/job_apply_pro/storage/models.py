@@ -481,6 +481,14 @@ class CommunicationRecordRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class CommunicationConfigurationRow(Base):
+    __tablename__ = "communication_configurations"
+
+    id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    encrypted_configuration: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class OAuthCredentialRow(Base):
     __tablename__ = "oauth_credentials"
 

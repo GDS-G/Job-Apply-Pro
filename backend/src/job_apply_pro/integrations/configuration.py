@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -11,7 +12,15 @@ from pydantic import (
     model_validator,
 )
 
-from job_apply_pro.domain.communications import IntegrationProvider, MessageCategory
+from job_apply_pro.domain.communications import (
+    IntegrationProvider,
+    MessageCategory,
+    ProviderConfigurationPreview,
+    ProviderConfigurationSource,
+    ProviderConfigurationStatus,
+)
+
+MAX_COMMUNICATION_CONFIG_BYTES = 65_536
 
 
 class CommunicationConfigurationError(ValueError):
@@ -93,9 +102,61 @@ def build_communication_configuration(
     if config_json is None:
         return CommunicationConfiguration()
     try:
-        payload = json.loads(config_json.get_secret_value())
+        raw = config_json.get_secret_value()
+        if len(raw.encode("utf-8")) > MAX_COMMUNICATION_CONFIG_BYTES:
+            raise CommunicationConfigurationError(
+                "Communication provider configuration exceeds the 64 KiB limit"
+            )
+        payload = json.loads(raw)
         return CommunicationConfiguration.model_validate(payload)
+    except CommunicationConfigurationError:
+        raise
     except (json.JSONDecodeError, ValidationError) as error:
         raise CommunicationConfigurationError(
-            "JAP_COMMUNICATION_CONFIG_JSON must contain credential references, not tokens"
+            "Communication configuration must contain only public client registration metadata, "
+            "credential references, scopes, and policy flags; passwords, tokens, and client "
+            "secrets are not accepted"
         ) from error
+
+
+def summarize_communication_configuration(
+    configuration: CommunicationConfiguration,
+    *,
+    source: ProviderConfigurationSource,
+    updated_at: datetime | None = None,
+) -> ProviderConfigurationStatus:
+    connections = {item.provider: item for item in configuration.providers}
+    clients = {item.provider: item for item in configuration.oauth_clients}
+    providers: list[ProviderConfigurationPreview] = []
+    for provider in sorted(set(connections) | set(clients), key=lambda item: item.value):
+        connection = connections.get(provider)
+        client = clients.get(provider)
+        scopes = client.requested_scopes if client is not None else []
+        providers.append(
+            ProviderConfigurationPreview(
+                provider=provider,
+                oauth_configured=client is not None,
+                requested_scopes=scopes,
+                read_enabled=connection.read_enabled
+                if connection is not None
+                else client is not None,
+                write_enabled=(
+                    connection.write_enabled
+                    if connection is not None
+                    else any(
+                        scope.endswith(
+                            ("gmail.send", "Mail.Send", "calendar.events", "Calendars.ReadWrite")
+                        )
+                        for scope in scopes
+                    )
+                ),
+            )
+        )
+    return ProviderConfigurationStatus(
+        source=source,
+        providers=providers,
+        automatic_categories=sorted(
+            configuration.automatic_categories, key=lambda item: item.value
+        ),
+        updated_at=updated_at,
+    )

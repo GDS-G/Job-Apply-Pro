@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Provider Data Resilience build
+## Provider Configuration Control build
 
-The active milestone is **Provider Data Resilience `v0.17.0-alpha.1`**. It adds authenticated Gmail/Outlook message synchronization, bounded pagination across official mail and calendar adapters, encrypted provider/message deduplication, attachment-name metadata without attachment downloads, and strict Microsoft continuation-origin checks. It retains bounded document ingestion, evidence-bound DOCX/PDF generation, supervised portal execution, encrypted OAuth/PKCE connectivity, and the Portal Readiness baselines.
+The active milestone is **Provider Configuration Control `v0.18.0-alpha.1`**. It adds authenticated validation, encrypted local import, sanitized status, environment-managed precedence, and explicit clearing for Gmail, Outlook, Google Calendar, and Outlook Calendar registration metadata. The native desktop picker reads a bounded JSON file in Electron main, previews only provider names, scopes, and read/write capability, and never sends file contents or client IDs to the renderer. Passwords, access tokens, refresh tokens, and client secrets are rejected. It retains bounded provider synchronization, document ingestion, evidence-bound DOCX/PDF generation, supervised portal execution, encrypted OAuth/PKCE connectivity, and the Portal Readiness baselines.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
@@ -92,6 +92,8 @@ The portal catalog is available at `/api/v1/portals/catalog`, with fingerprint i
 Supervised portal runs are under `/api/v1/portals/supervised`. They require `JAP_AUTOMATION_ENABLED=true`, `JAP_SUPERVISED_PORTAL_ENABLED=true`, and an exact portal in `JAP_SUPERVISED_PORTAL_ALLOWLIST`. The visible browser remains in user takeover for authentication and challenges. Automated final submission additionally requires `JAP_SUPERVISED_PORTAL_SUBMISSION_ENABLED=true`, a current review fingerprint, exactly one recognized submit control, native desktop confirmation, and identifier-backed confirmation evidence.
 
 The Communication API is under `/api/v1/communications`. Analyses and reply drafts are encrypted at rest; message listing, draft creation, calendar planning, follow-ups, mutation audits, and daily summaries share authenticated contracts. Gmail, Outlook, Google Calendar, and Outlook Calendar adapters fail closed until local OAuth credentials and account authorization are configured. Sanitized fixture adapters are used for regression tests and never contact provider networks.
+
+Provider registration control is available under `/api/v1/communications/configuration`. The desktop can validate and import a JSON file up to 64 KiB after a native confirmation. Accepted fields are public desktop client IDs, exact loopback redirect URIs, reviewed scopes, non-secret credential references/account hints, and policy flags. The active local configuration is AES-256-GCM ciphertext in the database. `JAP_COMMUNICATION_CONFIG_JSON` remains available for managed deployments and takes precedence; when present, desktop import and clear are disabled. Start from [`docs/examples/provider-configuration.example.json`](docs/examples/provider-configuration.example.json), replace only the public client IDs, and remove providers/scopes you are not using.
 
 ## Validation
 

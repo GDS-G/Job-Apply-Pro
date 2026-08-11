@@ -1,17 +1,20 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 
 describe("App", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("shows the Workbench safety boundary", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Provider Data Resilience v0.17.0-alpha.1"),
+      screen.getByText("Provider Configuration Control v0.18.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -99,5 +102,38 @@ describe("App", () => {
     expect(
       await screen.findByText(/fetched 2, imported 1, already present 1/i),
     ).toBeInTheDocument();
+  });
+
+  it("imports a reviewed provider configuration without exposing its contents", async () => {
+    const importConfiguration = vi
+      .spyOn(
+        window.jobApplyPro.workbench,
+        "selectAndImportProviderConfiguration",
+      )
+      .mockResolvedValue({
+        source: "ENCRYPTED_DATABASE",
+        providers: [
+          {
+            provider: "GMAIL",
+            oauth_configured: true,
+            requested_scopes: ["gmail.readonly"],
+            read_enabled: true,
+            write_enabled: false,
+          },
+        ],
+        automatic_categories: [],
+        updated_at: new Date(0).toISOString(),
+      });
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /import provider config/i }),
+    );
+
+    expect(importConfiguration).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(/configuration imported for 1 provider/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/gmail\.readonly/i)).not.toBeInTheDocument();
   });
 });

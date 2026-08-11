@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.core import get_cipher
@@ -28,6 +29,9 @@ from job_apply_pro.domain.communications import (
     OAuthAuthorizationState,
     OAuthCallbackResult,
     OutboundDraft,
+    ProviderConfigurationImport,
+    ProviderConfigurationSource,
+    ProviderConfigurationStatus,
     ProviderMessageSyncResult,
     SchedulingPlanRequest,
     SchedulingRecommendation,
@@ -39,11 +43,14 @@ from job_apply_pro.integrations.communications import (
     ProviderNotConfiguredError,
 )
 from job_apply_pro.integrations.configuration import (
+    CommunicationConfiguration,
     CommunicationConfigurationError,
     ProviderConnectionConfig,
     build_communication_configuration,
+    summarize_communication_configuration,
 )
 from job_apply_pro.integrations.oauth import (
+    OAUTH_PROVIDERS,
     OAuthAuthorizationError,
     OAuthConfigurationError,
     OAuthConnectionService,
@@ -56,6 +63,9 @@ from job_apply_pro.integrations.provider_clients import (
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.communications import CommunicationService
+from job_apply_pro.storage.communication_configuration_repository import (
+    CommunicationConfigurationRepository,
+)
 from job_apply_pro.storage.communication_repository import CommunicationRepository
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
@@ -67,11 +77,47 @@ SessionDependency = Annotated[Session, Depends(get_session)]
 CipherDependency = Annotated[SensitiveDataCipher, Depends(get_cipher)]
 
 
+def _active_configuration(
+    session: Session,
+    cipher: SensitiveDataCipher,
+) -> tuple[CommunicationConfiguration, ProviderConfigurationSource, datetime | None]:
+    environment = get_settings().communication_config_json
+    if environment is not None:
+        return (
+            build_communication_configuration(environment),
+            ProviderConfigurationSource.ENVIRONMENT,
+            None,
+        )
+    stored = CommunicationConfigurationRepository(session, cipher).load()
+    if stored is not None:
+        configuration, updated_at = stored
+        return configuration, ProviderConfigurationSource.ENCRYPTED_DATABASE, updated_at
+    return (
+        build_communication_configuration(None),
+        ProviderConfigurationSource.NOT_CONFIGURED,
+        None,
+    )
+
+
+def _validated_import(raw: str) -> CommunicationConfiguration:
+    configuration = build_communication_configuration(SecretStr(raw))
+    if not configuration.providers and not configuration.oauth_clients:
+        raise CommunicationConfigurationError(
+            "Communication configuration must include at least one provider or OAuth client"
+        )
+    for client in configuration.oauth_clients:
+        if not set(client.requested_scopes) <= OAUTH_PROVIDERS[client.provider].permitted_scopes:
+            raise CommunicationConfigurationError(
+                "Communication configuration includes a scope that is not approved for its provider"
+            )
+    return configuration
+
+
 def get_communication_service(
     session: SessionDependency, cipher: CipherDependency
 ) -> CommunicationService:
     try:
-        configuration = build_communication_configuration(get_settings().communication_config_json)
+        configuration, _, _ = _active_configuration(session, cipher)
     except CommunicationConfigurationError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -134,7 +180,7 @@ def get_oauth_service(
     session: SessionDependency, cipher: CipherDependency
 ) -> OAuthConnectionService:
     try:
-        configuration = build_communication_configuration(get_settings().communication_config_json)
+        configuration, _, _ = _active_configuration(session, cipher)
     except CommunicationConfigurationError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -147,6 +193,85 @@ def get_oauth_service(
 
 
 OAuthServiceDependency = Annotated[OAuthConnectionService, Depends(get_oauth_service)]
+
+
+@router.get("/configuration", response_model=ProviderConfigurationStatus)
+def provider_configuration_status(
+    session: SessionDependency,
+    cipher: CipherDependency,
+) -> ProviderConfigurationStatus:
+    try:
+        configuration, source, updated_at = _active_configuration(session, cipher)
+    except CommunicationConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Communication provider configuration is invalid",
+        ) from error
+    return summarize_communication_configuration(
+        configuration,
+        source=source,
+        updated_at=updated_at,
+    )
+
+
+@router.post("/configuration/validate", response_model=ProviderConfigurationStatus)
+def validate_provider_configuration(
+    command: ProviderConfigurationImport,
+) -> ProviderConfigurationStatus:
+    try:
+        configuration = _validated_import(command.configuration_json.get_secret_value())
+    except CommunicationConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
+    return summarize_communication_configuration(
+        configuration,
+        source=ProviderConfigurationSource.IMPORT_PREVIEW,
+    )
+
+
+@router.post("/configuration/import", response_model=ProviderConfigurationStatus)
+def import_provider_configuration(
+    command: ProviderConfigurationImport,
+    session: SessionDependency,
+    cipher: CipherDependency,
+) -> ProviderConfigurationStatus:
+    if get_settings().communication_config_json is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider configuration is managed by the process environment",
+        )
+    try:
+        configuration = _validated_import(command.configuration_json.get_secret_value())
+    except CommunicationConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
+    updated_at = CommunicationConfigurationRepository(session, cipher).save(configuration)
+    return summarize_communication_configuration(
+        configuration,
+        source=ProviderConfigurationSource.ENCRYPTED_DATABASE,
+        updated_at=updated_at,
+    )
+
+
+@router.delete("/configuration", response_model=ProviderConfigurationStatus)
+def clear_provider_configuration(
+    session: SessionDependency,
+    cipher: CipherDependency,
+) -> ProviderConfigurationStatus:
+    if get_settings().communication_config_json is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider configuration is managed by the process environment",
+        )
+    CommunicationConfigurationRepository(session, cipher).delete()
+    return summarize_communication_configuration(
+        CommunicationConfiguration(),
+        source=ProviderConfigurationSource.NOT_CONFIGURED,
+    )
 
 
 @router.get("/integrations", response_model=list[IntegrationHealth])

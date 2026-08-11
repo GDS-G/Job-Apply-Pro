@@ -94,6 +94,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ),
     listIntegrationHealth: () =>
       ipcRenderer.invoke("communications:integrations"),
+    getProviderConfigurationStatus: () =>
+      ipcRenderer.invoke("communications:configuration"),
+    selectAndImportProviderConfiguration: () =>
+      ipcRenderer.invoke("communications:configuration-import"),
+    clearProviderConfiguration: () =>
+      ipcRenderer.invoke("communications:configuration-clear"),
     startProviderAuthorization: (provider: IntegrationProvider) =>
       ipcRenderer.invoke("communications:oauth-start", provider),
     revokeProviderAuthorization: (provider: IntegrationProvider) =>
