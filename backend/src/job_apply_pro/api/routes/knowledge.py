@@ -1,11 +1,15 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
 from job_apply_pro.documents.extractors import DocumentExtractionError
+from job_apply_pro.domain.applications import (
+    SubmittedDocumentCapture,
+    SubmittedDocumentEvidence,
+)
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryCreate,
     AnswerLibraryEntry,
@@ -15,11 +19,16 @@ from job_apply_pro.domain.knowledge import (
     CandidateKnowledgeSnapshot,
     ClaimReview,
     DocumentExtraction,
+    DocumentGenerationAudit,
     DocumentImportResult,
     DocumentKind,
     ExperienceSummary,
     RetrievalQuery,
     RetrievalResult,
+    TailoredDocumentApproval,
+    TailoredDocumentPreview,
+    TailoredDocumentRequest,
+    TailoredDocumentResult,
 )
 from job_apply_pro.security.encryption import DecryptionError, SensitiveDataCipher
 from job_apply_pro.security.keys import KeyConfigurationError
@@ -30,7 +39,11 @@ from job_apply_pro.services.knowledge import (
 )
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
-from job_apply_pro.storage.repositories import CandidateRepository
+from job_apply_pro.storage.repositories import (
+    ApplicationRepository,
+    CandidateRepository,
+    JobRepository,
+)
 
 router = APIRouter(prefix="/knowledge", tags=["candidate-knowledge"])
 SessionDependency = Annotated[Session, Depends(get_session)]
@@ -44,6 +57,8 @@ def get_knowledge_service(
     return CandidateKnowledgeService(
         CandidateKnowledgeRepository(session),
         CandidateRepository(session),
+        JobRepository(session),
+        ApplicationRepository(session),
         cipher,
         document_data_dir=settings.document_data_dir,
         document_max_bytes=settings.document_max_bytes,
@@ -137,6 +152,23 @@ def get_document_extraction(
         raise _http_error(error) from error
 
 
+@router.get("/document-versions/{version_id}/content", response_class=Response)
+def get_document_content(version_id: str, service: KnowledgeServiceDependency) -> Response:
+    try:
+        return Response(
+            content=service.get_document_content(version_id),
+            media_type="application/octet-stream",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
 @router.get("/profiles/{profile_id}/claims", response_model=list[CandidateClaim])
 def list_candidate_claims(
     profile_id: str, service: KnowledgeServiceDependency
@@ -217,4 +249,93 @@ def get_candidate_knowledge_snapshot(
     try:
         return service.snapshot(profile_id)
     except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/documents/tailored/preview",
+    response_model=TailoredDocumentPreview,
+)
+def preview_tailored_document(
+    command: TailoredDocumentRequest,
+    service: KnowledgeServiceDependency,
+) -> TailoredDocumentPreview:
+    try:
+        return service.preview_tailored_document(command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/documents/tailored/generate",
+    response_model=TailoredDocumentResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_tailored_document(
+    approval: TailoredDocumentApproval,
+    service: KnowledgeServiceDependency,
+) -> TailoredDocumentResult:
+    try:
+        return service.generate_tailored_document(approval)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/applications/{application_id}/document-generation-audits",
+    response_model=list[DocumentGenerationAudit],
+)
+def list_document_generation_audits(
+    application_id: str,
+    service: KnowledgeServiceDependency,
+) -> list[DocumentGenerationAudit]:
+    try:
+        return service.list_generation_audits(application_id)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/applications/{application_id}/submitted-documents",
+    response_model=SubmittedDocumentEvidence,
+    status_code=status.HTTP_201_CREATED,
+)
+def capture_submitted_document(
+    application_id: str,
+    command: SubmittedDocumentCapture,
+    service: KnowledgeServiceDependency,
+) -> SubmittedDocumentEvidence:
+    try:
+        return service.capture_submitted_document(application_id, command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/applications/{application_id}/submitted-documents",
+    response_model=list[SubmittedDocumentEvidence],
+)
+def list_submitted_documents(
+    application_id: str,
+    service: KnowledgeServiceDependency,
+) -> list[SubmittedDocumentEvidence]:
+    try:
+        return service.list_submitted_documents(application_id)
+    except LookupError as error:
         raise _http_error(error) from error

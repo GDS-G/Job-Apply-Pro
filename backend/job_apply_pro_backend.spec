@@ -4,22 +4,25 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 repo_root = Path.cwd()
 playwright_datas, playwright_binaries, playwright_hidden = collect_all("playwright")
+reportlab_datas, reportlab_binaries, reportlab_hidden = collect_all("reportlab")
 
 analysis = Analysis(
     [str(repo_root / "backend" / "src" / "job_apply_pro" / "desktop_entry.py")],
     pathex=[str(repo_root / "backend" / "src")],
-    binaries=playwright_binaries,
+    binaries=[*playwright_binaries, *reportlab_binaries],
     datas=[
         (str(repo_root / "backend" / "alembic.ini"), "."),
         (str(repo_root / "backend" / "migrations"), "migrations"),
         *playwright_datas,
+        *reportlab_datas,
     ],
     hiddenimports=[
         *playwright_hidden,
+        *reportlab_hidden,
         *collect_submodules("sqlalchemy.dialects.sqlite"),
         *collect_submodules("uvicorn"),
     ],
-    excludes=["pytest", "mypy", "ruff", "reportlab"],
+    excludes=["pytest", "mypy", "ruff"],
     noarchive=False,
 )
 pyz = PYZ(analysis.pure)

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Supervised Portal Execution",
-  version: "0.14.0-alpha.1",
+  name: "Document Generation & Retention",
+  version: "0.15.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -783,6 +783,7 @@ export type DocumentKind =
   | "EDUCATION"
   | "PORTFOLIO"
   | "OTHER";
+export type DocumentOutputFormat = "DOCX" | "PDF";
 export type ClaimVerificationStatus = "PROPOSED" | "VERIFIED" | "REJECTED";
 export type ClaimPermittedUse = "PROFILE_ONLY" | "APPLICATIONS" | "ANY";
 export type SensitivityLevel = "PUBLIC" | "PERSONAL" | "SENSITIVE";
@@ -842,6 +843,69 @@ export interface CandidateKnowledgeSnapshot {
   documents: CandidateDocument[];
   claims: CandidateClaim[];
   answers: AnswerLibraryEntry[];
+}
+
+export interface TailoredDocumentRequest {
+  application_id: string;
+  kind: "RESUME" | "COVER_LETTER";
+  output_format: DocumentOutputFormat;
+  variant_label: string;
+  max_claims: number;
+}
+
+export interface TailoredDocumentSection {
+  heading: string;
+  paragraphs: string[];
+  evidence_claim_ids: string[];
+}
+
+export interface TailoredDocumentPreview {
+  application_id: string;
+  profile_id: string;
+  job_id: string;
+  kind: "RESUME" | "COVER_LETTER";
+  output_format: DocumentOutputFormat;
+  employer: string;
+  title: string;
+  variant_label: string;
+  sections: TailoredDocumentSection[];
+  selected_claim_ids: string[];
+  matched_requirement_ids: string[];
+  missing_required_requirements: string[];
+  review_fingerprint: string;
+}
+
+export interface DocumentGenerationAudit {
+  id: string;
+  application_id: string;
+  profile_id: string;
+  job_id: string;
+  document_version_id: string;
+  kind: "RESUME" | "COVER_LETTER";
+  output_format: DocumentOutputFormat;
+  review_fingerprint: string;
+  evidence_claim_ids: string[];
+  requirement_ids: string[];
+  missing_required_requirements: string[];
+  created_at: string;
+}
+
+export interface TailoredDocumentResult {
+  preview: TailoredDocumentPreview;
+  document: CandidateDocument;
+  version: {
+    id: string;
+    document_id: string;
+    version: number;
+    file_name: string;
+    media_type: string;
+    sha256: string;
+    parser_version: string;
+    page_count: number;
+    character_count: number;
+    created_at: string;
+  };
+  audit: DocumentGenerationAudit;
 }
 
 export type WorkflowControlAction =
@@ -948,6 +1012,13 @@ export interface DesktopBridge {
       claimId: string,
       approved: boolean,
     ): Promise<CandidateClaim>;
+    previewTailoredDocument(
+      input: TailoredDocumentRequest,
+    ): Promise<TailoredDocumentPreview>;
+    generateTailoredDocument(
+      input: TailoredDocumentRequest,
+      reviewFingerprint: string,
+    ): Promise<TailoredDocumentResult | null>;
     createCandidate(input: CandidateProfileCreate): Promise<CandidateProfile>;
     startMockWorkflow(input: MockWorkflowCreate): Promise<WorkflowRunSnapshot>;
     controlWorkflow(

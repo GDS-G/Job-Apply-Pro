@@ -5,6 +5,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from job_apply_pro.domain.applications import (
+    ApplicationDocumentRole,
+    SubmittedDocumentEvidence,
+)
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryRecord,
     CandidateClaim,
@@ -14,7 +18,9 @@ from job_apply_pro.domain.knowledge import (
     ClaimPermittedUse,
     ClaimType,
     ClaimVerificationStatus,
+    DocumentGenerationAudit,
     DocumentKind,
+    DocumentOutputFormat,
     EvidenceSource,
     RetrievalChunkRecord,
     SensitivityLevel,
@@ -22,10 +28,12 @@ from job_apply_pro.domain.knowledge import (
 from job_apply_pro.storage.models import (
     AnswerLibraryRow,
     CandidateClaimRow,
+    DocumentGenerationAuditRow,
     DocumentRow,
     DocumentVersionRow,
     EvidenceSourceRow,
     RetrievalChunkRow,
+    SubmittedDocumentEvidenceRow,
 )
 
 
@@ -208,6 +216,76 @@ class CandidateKnowledgeRepository:
             self._session.rollback()
             raise
 
+    def add_generated_bundle(
+        self,
+        document: CandidateDocument,
+        version: CandidateDocumentVersionRecord,
+        evidence: EvidenceSource,
+        audit: DocumentGenerationAudit,
+    ) -> None:
+        try:
+            self._session.add(
+                DocumentRow(
+                    id=document.id,
+                    profile_id=document.profile_id,
+                    kind=document.kind.value,
+                    display_name=document.display_name,
+                    variant_label=document.variant_label,
+                    job_family_tags_json=document.job_family_tags,
+                    is_primary=document.is_primary,
+                    archived=document.archived,
+                    created_at=document.created_at,
+                )
+            )
+            self._session.add(
+                DocumentVersionRow(
+                    id=version.id,
+                    document_id=version.document_id,
+                    version=version.version,
+                    file_name=version.file_name,
+                    media_type=version.media_type,
+                    sha256=version.sha256,
+                    storage_path=version.storage_path,
+                    encrypted_extraction=version.encrypted_extraction,
+                    parser_version=version.parser_version,
+                    page_count=version.page_count,
+                    character_count=version.character_count,
+                    created_at=version.created_at,
+                )
+            )
+            self._session.add(
+                EvidenceSourceRow(
+                    id=evidence.id,
+                    profile_id=evidence.profile_id,
+                    document_version_id=evidence.document_version_id,
+                    source_type=evidence.source_type,
+                    source_label=evidence.source_label,
+                    source_uri=evidence.source_uri,
+                    content_hash=evidence.content_hash,
+                    created_at=evidence.created_at,
+                )
+            )
+            self._session.add(
+                DocumentGenerationAuditRow(
+                    id=audit.id,
+                    application_id=audit.application_id,
+                    profile_id=audit.profile_id,
+                    job_id=audit.job_id,
+                    document_version_id=audit.document_version_id,
+                    kind=audit.kind.value,
+                    output_format=audit.output_format.value,
+                    review_fingerprint=audit.review_fingerprint,
+                    evidence_claim_ids_json=audit.evidence_claim_ids,
+                    requirement_ids_json=audit.requirement_ids,
+                    missing_required_requirements_json=audit.missing_required_requirements,
+                    created_at=audit.created_at,
+                )
+            )
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
     def list_documents(self, profile_id: str) -> list[CandidateDocument]:
         statement = (
             select(DocumentRow)
@@ -340,3 +418,85 @@ class CandidateKnowledgeRepository:
     def list_chunks(self, profile_id: str) -> list[RetrievalChunkRecord]:
         statement = select(RetrievalChunkRow).where(RetrievalChunkRow.profile_id == profile_id)
         return [_chunk(row) for row in self._session.scalars(statement).all()]
+
+    def add_generation_audit(self, audit: DocumentGenerationAudit) -> DocumentGenerationAudit:
+        self._session.add(
+            DocumentGenerationAuditRow(
+                id=audit.id,
+                application_id=audit.application_id,
+                profile_id=audit.profile_id,
+                job_id=audit.job_id,
+                document_version_id=audit.document_version_id,
+                kind=audit.kind.value,
+                output_format=audit.output_format.value,
+                review_fingerprint=audit.review_fingerprint,
+                evidence_claim_ids_json=audit.evidence_claim_ids,
+                requirement_ids_json=audit.requirement_ids,
+                missing_required_requirements_json=audit.missing_required_requirements,
+                created_at=audit.created_at,
+            )
+        )
+        self._session.commit()
+        return audit
+
+    def list_generation_audits(self, application_id: str) -> list[DocumentGenerationAudit]:
+        rows = self._session.scalars(
+            select(DocumentGenerationAuditRow)
+            .where(DocumentGenerationAuditRow.application_id == application_id)
+            .order_by(DocumentGenerationAuditRow.created_at.desc())
+        ).all()
+        return [
+            DocumentGenerationAudit(
+                id=row.id,
+                application_id=row.application_id,
+                profile_id=row.profile_id,
+                job_id=row.job_id,
+                document_version_id=row.document_version_id,
+                kind=DocumentKind(row.kind),
+                output_format=DocumentOutputFormat(row.output_format),
+                review_fingerprint=row.review_fingerprint,
+                evidence_claim_ids=row.evidence_claim_ids_json,
+                requirement_ids=row.requirement_ids_json,
+                missing_required_requirements=row.missing_required_requirements_json,
+                created_at=_utc(row.created_at),
+            )
+            for row in rows
+        ]
+
+    def add_submitted_document(
+        self, evidence: SubmittedDocumentEvidence
+    ) -> SubmittedDocumentEvidence:
+        self._session.add(
+            SubmittedDocumentEvidenceRow(
+                id=evidence.id,
+                application_id=evidence.application_id,
+                document_version_id=evidence.document_version_id,
+                role=evidence.role.value,
+                file_name=evidence.file_name,
+                sha256=evidence.sha256,
+                upload_fingerprint=evidence.upload_fingerprint,
+                captured_at=evidence.captured_at,
+            )
+        )
+        self._session.commit()
+        return evidence
+
+    def list_submitted_documents(self, application_id: str) -> list[SubmittedDocumentEvidence]:
+        rows = self._session.scalars(
+            select(SubmittedDocumentEvidenceRow)
+            .where(SubmittedDocumentEvidenceRow.application_id == application_id)
+            .order_by(SubmittedDocumentEvidenceRow.captured_at)
+        ).all()
+        return [
+            SubmittedDocumentEvidence(
+                id=row.id,
+                application_id=row.application_id,
+                document_version_id=row.document_version_id,
+                role=ApplicationDocumentRole(row.role),
+                file_name=row.file_name,
+                sha256=row.sha256,
+                upload_fingerprint=row.upload_fingerprint,
+                captured_at=_utc(row.captured_at),
+            )
+            for row in rows
+        ]

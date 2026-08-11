@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Supervised Portal Execution `v0.14.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, reviews scopes, and completes provider authorization.
+This guide applies to Document Generation & Retention `v0.15.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, reviews scopes, and completes provider authorization.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.14.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.15.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -31,6 +31,22 @@ For Microsoft:
 3. Review Microsoft's [authorization-code/PKCE flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow), [desktop app registration guidance](https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration), and [Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference). An organization may require administrator consent.
 
 After configuration, select **Review & connect**, verify the provider host and displayed scopes, sign in manually, complete any MFA, and approve only the expected access. Return to Job Apply Pro and refresh the dashboard. Use **Revoke access** to revoke at the provider where supported and always delete the encrypted local credential. Microsoft may also require revocation from the account's application-consent page.
+
+## Generate and retain application documents
+
+Import source resumes and supporting material in PDF, DOCX, RTF, TXT, or Markdown form. Review every proposed claim before approving it. Tailored generation ignores proposed, rejected, superseded, unlocked, or profile-only claims.
+
+1. Create or select an application whose job title and requirements have been persisted.
+2. In **Candidate documents & evidence**, open **Tailored document review** and select the application.
+3. Choose **Resume** or **Cover letter**, DOCX or PDF output, and a short variant label.
+4. Select **Preview evidence**. Review the target employer/title, every selected claim, matched requirements, and the list of required requirements that remain unsupported. A missing requirement is a gap to review, not permission for the app to invent an answer.
+5. Read every heading and paragraph in the exact document preview, then select **Review & generate exact document** only when it is correct. The native dialog approves the current review fingerprint; if claims or job requirements changed, generation stops and requires a new preview.
+6. Choose a destination in the native save dialog if you want a usable DOCX/PDF copy. The decrypted bytes move only through the Electron main process to that destination and never enter the renderer.
+7. The result remains stored as a new encrypted, non-primary candidate document version even if the save dialog is canceled. Select that exact version for the applicable workflow rather than assuming the newest document is always correct.
+
+When a supported portal verifies the displayed upload filename and later observes an identifier-backed submission confirmation, it retains the exact document version, SHA-256 digest, role, and upload fingerprint with the application. This is evidence of which local file version was submitted; it is not a copy of a portal password, browser cookie, or employer response. If the portal filename or digest differs, retention fails closed and the submission must be reviewed manually.
+
+Current limitations: legacy binary `.doc` requires conversion with a trusted local office tool; image-only/scanned documents do not yet have an OCR fallback; deterministic token matching is conservative; and advanced visual templates are not yet implemented.
 
 ## Run a supervised portal validation
 

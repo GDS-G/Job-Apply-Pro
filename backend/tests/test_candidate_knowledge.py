@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from io import BytesIO
 from pathlib import Path
 
@@ -12,14 +13,23 @@ from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.knowledge import get_knowledge_service
 from job_apply_pro.documents.extractors import extract_document
+from job_apply_pro.domain.applications import (
+    ApplicationCreate,
+    ApplicationDocumentRole,
+    SubmittedDocumentCapture,
+)
 from job_apply_pro.domain.candidate import CandidateProfileCreate, ContactDetails
+from job_apply_pro.domain.jobs import JobCreate
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryCreate,
     ClaimPermittedUse,
     ClaimReview,
     ClaimVerificationStatus,
     DocumentKind,
+    DocumentOutputFormat,
     RetrievalQuery,
+    TailoredDocumentApproval,
+    TailoredDocumentRequest,
 )
 from job_apply_pro.main import app
 from job_apply_pro.security.encryption import SensitiveDataCipher
@@ -32,7 +42,9 @@ from job_apply_pro.services.knowledge import (
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.models import (
     AnswerLibraryRow,
+    DocumentGenerationAuditRow,
     DocumentVersionRow,
+    JobRequirementRow,
     RetrievalChunkRow,
 )
 from job_apply_pro.storage.repositories import (
@@ -67,6 +79,8 @@ def _service(session: Session, tmp_path: Path) -> CandidateKnowledgeService:
     return CandidateKnowledgeService(
         CandidateKnowledgeRepository(session),
         CandidateRepository(session),
+        JobRepository(session),
+        ApplicationRepository(session),
         SensitiveDataCipher(StaticKeyProvider(b"k" * 32)),
         document_data_dir=tmp_path / "documents",
         document_max_bytes=1_000_000,
@@ -243,3 +257,149 @@ def test_candidate_knowledge_multipart_api(session: Session, tmp_path: Path) -> 
         assert snapshot["answers"] == []
     finally:
         app.dependency_overrides.clear()
+
+
+def test_tailored_document_requires_locked_evidence_and_exact_review(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    imported = service.import_document(
+        profile_id,
+        file_name="source-resume.txt",
+        data=RESUME,
+        kind=DocumentKind.RESUME,
+        display_name="Source resume",
+        variant_label="Source",
+        job_family_tags=["network"],
+        is_primary=True,
+    )
+    python_claim = next(
+        claim for claim in imported.proposed_claims if claim.canonical_key == "skill.python"
+    )
+    service.review_claim(
+        python_claim.id,
+        ClaimReview(approved=True, permitted_use=ClaimPermittedUse.APPLICATIONS),
+    )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="tailored-1",
+            employer="Evidence Systems",
+            title="Python Automation Engineer",
+            description_hash=hashlib.sha256(b"python automation").hexdigest(),
+        )
+    )
+    session.add(
+        JobRequirementRow(
+            id="requirement-python",
+            job_id=job.id,
+            category="skill",
+            text="Production Python experience",
+            required=True,
+            evidence_json={"source": "fixture"},
+        )
+    )
+    session.commit()
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="tailored-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    request = TailoredDocumentRequest(
+        application_id=application.id,
+        kind=DocumentKind.RESUME,
+        output_format=DocumentOutputFormat.DOCX,
+        variant_label="Python evidence",
+    )
+    preview = service.preview_tailored_document(request)
+    assert preview.selected_claim_ids == [python_claim.id]
+    assert preview.matched_requirement_ids == ["requirement-python"]
+    assert preview.missing_required_requirements == []
+    with pytest.raises(CandidateKnowledgeConflictError, match="changed"):
+        service.generate_tailored_document(
+            TailoredDocumentApproval(
+                **request.model_dump(),
+                review_fingerprint="0" * 64,
+                confirmation_phrase="APPROVE TAILORED DOCUMENT",
+            )
+        )
+
+    generated = service.generate_tailored_document(
+        TailoredDocumentApproval(
+            **request.model_dump(),
+            review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="APPROVE TAILORED DOCUMENT",
+        )
+    )
+    assert generated.version.file_name.endswith(".docx")
+    assert generated.document.variant_label == "Python evidence"
+    assert "Python" in service.get_extraction(generated.version.id).plain_text
+    assert service.get_document_content(generated.version.id).startswith(b"PK")
+    stored = session.get(DocumentVersionRow, generated.version.id)
+    assert stored is not None
+    assert "Python" not in Path(stored.storage_path).read_text(encoding="ascii")
+    audit = session.scalar(
+        select(DocumentGenerationAuditRow).where(
+            DocumentGenerationAuditRow.document_version_id == generated.version.id
+        )
+    )
+    assert audit is not None
+    assert audit.review_fingerprint == preview.review_fingerprint
+    assert service.list_generation_audits(application.id)[0] == generated.audit
+
+    with pytest.raises(CandidateKnowledgeConflictError, match="hash changed"):
+        service.capture_submitted_document(
+            application.id,
+            SubmittedDocumentCapture(
+                document_version_id=generated.version.id,
+                role=ApplicationDocumentRole.RESUME,
+                expected_sha256="0" * 64,
+                displayed_file_name=generated.version.file_name,
+                upload_fingerprint="reference-ats:resume-upload-1",
+                confirmation_phrase="RETAIN SUBMITTED DOCUMENT",
+            ),
+        )
+    with pytest.raises(CandidateKnowledgeConflictError, match="filename"):
+        service.capture_submitted_document(
+            application.id,
+            SubmittedDocumentCapture(
+                document_version_id=generated.version.id,
+                role=ApplicationDocumentRole.RESUME,
+                expected_sha256=generated.version.sha256,
+                displayed_file_name="wrong-file-name.docx",
+                upload_fingerprint="reference-ats:resume-upload-1",
+                confirmation_phrase="RETAIN SUBMITTED DOCUMENT",
+            ),
+        )
+    capture = SubmittedDocumentCapture(
+        document_version_id=generated.version.id,
+        role=ApplicationDocumentRole.RESUME,
+        expected_sha256=generated.version.sha256,
+        displayed_file_name=generated.version.file_name,
+        upload_fingerprint="reference-ats:resume-upload-1",
+        confirmation_phrase="RETAIN SUBMITTED DOCUMENT",
+    )
+    submitted = service.capture_submitted_document(application.id, capture)
+    assert submitted.sha256 == generated.version.sha256
+    assert service.capture_submitted_document(application.id, capture) == submitted
+    assert service.list_submitted_documents(application.id) == [submitted]
+
+    cover_request = TailoredDocumentRequest(
+        application_id=application.id,
+        kind=DocumentKind.COVER_LETTER,
+        output_format=DocumentOutputFormat.PDF,
+        variant_label="Python cover letter",
+    )
+    cover_preview = service.preview_tailored_document(cover_request)
+    cover = service.generate_tailored_document(
+        TailoredDocumentApproval(
+            **cover_request.model_dump(),
+            review_fingerprint=cover_preview.review_fingerprint,
+            confirmation_phrase="APPROVE TAILORED DOCUMENT",
+        )
+    )
+    assert cover.version.file_name.endswith(".pdf")
+    assert "Python Automation Engineer" in service.get_extraction(cover.version.id).plain_text

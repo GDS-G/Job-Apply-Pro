@@ -12,6 +12,7 @@ import type {
   PortalKind,
   ReferencePortalRunCreate,
   SupervisedPortalRunCreate,
+  TailoredDocumentRequest,
   WorkflowControlAction,
 } from "@job-apply-pro/contracts";
 
@@ -195,6 +196,48 @@ function supervisedPortalInput(value: unknown): SupervisedPortalRunCreate {
   };
 }
 
+function tailoredDocumentInput(value: unknown): TailoredDocumentRequest {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Tailored document input is invalid.");
+  }
+  const kind = requiredText(Reflect.get(value, "kind"), "Document kind", 30);
+  if (!new Set(["RESUME", "COVER_LETTER"]).has(kind)) {
+    throw new TypeError("Tailored document kind is invalid.");
+  }
+  const outputFormat = requiredText(
+    Reflect.get(value, "output_format"),
+    "Output format",
+    20,
+  );
+  if (!new Set(["DOCX", "PDF"]).has(outputFormat)) {
+    throw new TypeError("Tailored document output format is invalid.");
+  }
+  const maxClaims = Reflect.get(value, "max_claims");
+  if (
+    typeof maxClaims !== "number" ||
+    !Number.isInteger(maxClaims) ||
+    maxClaims < 1 ||
+    maxClaims > 30
+  ) {
+    throw new TypeError("Tailored document claim limit must be 1 to 30.");
+  }
+  return {
+    application_id: requiredText(
+      Reflect.get(value, "application_id"),
+      "Application id",
+      100,
+    ),
+    kind: kind as TailoredDocumentRequest["kind"],
+    output_format: outputFormat as TailoredDocumentRequest["output_format"],
+    variant_label: requiredText(
+      Reflect.get(value, "variant_label"),
+      "Variant label",
+      120,
+    ),
+    max_claims: maxClaims,
+  };
+}
+
 function challengeInput(value: unknown): ChallengeSessionCreate {
   if (typeof value !== "object" || value === null) {
     throw new TypeError("Challenge session input is invalid.");
@@ -292,6 +335,61 @@ export function registerWorkbenchIpc(
         throw new TypeError("Claim approval must be a boolean.");
       }
       return supervisor.client.reviewCandidateClaim(claimId, approvedValue);
+    },
+  );
+  ipcMain.handle("knowledge:preview-tailored", (_event, value: unknown) =>
+    supervisor.client.previewTailoredDocument(tailoredDocumentInput(value)),
+  );
+  ipcMain.handle(
+    "knowledge:generate-tailored",
+    async (event, value: unknown, fingerprintValue: unknown) => {
+      const input = tailoredDocumentInput(value);
+      const fingerprint = requiredText(
+        fingerprintValue,
+        "Tailored document review fingerprint",
+        64,
+      );
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Generate this exact tailored document?",
+        message: `${input.kind === "RESUME" ? "Resume" : "Cover letter"} evidence is locked to the reviewed preview.`,
+        detail:
+          "The backend will refuse if the job requirements, selected claims, content, or review fingerprint changed.",
+        buttons: ["Cancel", "Generate reviewed document"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      const generated = await supervisor.client.generateTailoredDocument(
+        input,
+        fingerprint,
+      );
+      const extension = generated.version.file_name.endsWith(".pdf")
+        ? "pdf"
+        : "docx";
+      const target = await dialog.showSaveDialog({
+        title: "Save generated application document",
+        defaultPath: generated.version.file_name,
+        filters: [
+          {
+            name: extension === "pdf" ? "PDF document" : "Word document",
+            extensions: [extension],
+          },
+        ],
+        properties: ["createDirectory", "showOverwriteConfirmation"],
+      });
+      if (!target.canceled && target.filePath) {
+        const data = await supervisor.client.getDocumentContent(
+          generated.version.id,
+        );
+        await writeFile(target.filePath, data, { flag: "w", mode: 0o600 });
+      }
+      return generated;
     },
   );
   ipcMain.handle("workbench:create-candidate", (_event, value: unknown) =>

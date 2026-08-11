@@ -31,6 +31,9 @@ import type {
   SupervisedPortalRunCreate,
   SupervisedPortalRunSnapshot,
   SupportDiagnostics,
+  TailoredDocumentPreview,
+  TailoredDocumentRequest,
+  TailoredDocumentResult,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -107,6 +110,48 @@ export class BackendClient {
         }),
       },
     );
+  }
+
+  previewTailoredDocument(
+    input: TailoredDocumentRequest,
+  ): Promise<TailoredDocumentPreview> {
+    return this.request("/knowledge/documents/tailored/preview", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  generateTailoredDocument(
+    input: TailoredDocumentRequest,
+    reviewFingerprint: string,
+  ): Promise<TailoredDocumentResult> {
+    return this.request("/knowledge/documents/tailored/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        ...input,
+        review_fingerprint: reviewFingerprint,
+        confirmation_phrase: "APPROVE TAILORED DOCUMENT",
+      }),
+    });
+  }
+
+  async getDocumentContent(versionId: string): Promise<Uint8Array> {
+    const response = await fetch(
+      `${this.baseUrl}/knowledge/document-versions/${encodeURIComponent(versionId)}/content`,
+      {
+        headers: { "X-Job-Apply-Pro-Token": this.token },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => null);
+      const detail =
+        typeof payload === "object" && payload !== null && "detail" in payload
+          ? String(payload.detail)
+          : `Local backend request failed with HTTP ${response.status}`;
+      throw new BackendApiError(detail, response.status);
+    }
+    return new Uint8Array(await response.arrayBuffer());
   }
 
   createCandidate(input: CandidateProfileCreate): Promise<CandidateProfile> {

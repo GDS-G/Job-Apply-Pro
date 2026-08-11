@@ -17,7 +17,7 @@ from job_apply_pro.domain.browser import (
 )
 from job_apply_pro.domain.candidate import CandidateBackup, CandidateStatus
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
-from job_apply_pro.domain.jobs import Job, JobCreate
+from job_apply_pro.domain.jobs import Job, JobCreate, JobRequirement
 from job_apply_pro.domain.portals import (
     PortalCapability,
     PortalFieldMapping,
@@ -236,6 +236,24 @@ class JobRepository:
             description_hash=row.description_hash,
             discovered_at=_utc(row.discovered_at),
         )
+
+    def list_requirements(self, job_id: str) -> list[JobRequirement]:
+        rows = self._session.scalars(
+            select(JobRequirementRow)
+            .where(JobRequirementRow.job_id == job_id)
+            .order_by(JobRequirementRow.required.desc(), JobRequirementRow.id)
+        ).all()
+        return [
+            JobRequirement(
+                id=row.id,
+                job_id=row.job_id,
+                category=row.category,
+                text=row.text,
+                required=row.required,
+                evidence=row.evidence_json,
+            )
+            for row in rows
+        ]
 
 
 class ApplicationRepository:

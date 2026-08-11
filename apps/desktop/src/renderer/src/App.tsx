@@ -46,6 +46,8 @@ import type {
   PortalRunSnapshot,
   RestorePlan,
   SupervisedPortalRunSnapshot,
+  TailoredDocumentPreview,
+  TailoredDocumentRequest,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -139,6 +141,10 @@ export function App() {
   const [knowledge, setKnowledge] = useState<CandidateKnowledgeSnapshot | null>(
     null,
   );
+  const [tailoredDocument, setTailoredDocument] = useState<{
+    input: TailoredDocumentRequest;
+    preview: TailoredDocumentPreview;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -528,6 +534,50 @@ export function App() {
     }
   }
 
+  async function previewTailoredDocument(form: FormData) {
+    const input: TailoredDocumentRequest = {
+      application_id: String(form.get("application_id")),
+      kind: String(form.get("kind")) as TailoredDocumentRequest["kind"],
+      output_format: String(
+        form.get("output_format"),
+      ) as TailoredDocumentRequest["output_format"],
+      variant_label: String(form.get("variant_label")),
+      max_claims: 12,
+    };
+    setBusy(true);
+    setError(null);
+    try {
+      const preview =
+        await window.jobApplyPro.workbench.previewTailoredDocument(input);
+      setTailoredDocument({ input, preview });
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateTailoredDocument() {
+    if (!tailoredDocument || !profileId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const generated =
+        await window.jobApplyPro.workbench.generateTailoredDocument(
+          tailoredDocument.input,
+          tailoredDocument.preview.review_fingerprint,
+        );
+      if (generated) {
+        await refreshKnowledge(profileId);
+        setTailoredDocument(null);
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function prepareReferencePortal(form: FormData) {
     if (!profileId) return;
     setBusy(true);
@@ -857,7 +907,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Supervised Portal Execution v0.14.0-alpha.1</strong>
+              <strong>Document Generation & Retention v0.15.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1167,6 +1217,138 @@ export function App() {
                 ) : (
                   <div className="empty-state empty-state--compact">
                     No proposed facts are waiting for review.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="panel__header panel__header--subsection">
+              <div>
+                <h3>Tailored document review</h3>
+                <p>
+                  Generate from locked application-approved claims only; missing
+                  required qualifications remain visible
+                </p>
+              </div>
+              <FileText size={18} />
+            </div>
+            <div className="portal-grid">
+              <form
+                action={(form) => void previewTailoredDocument(form)}
+                className="workbench-form"
+              >
+                <label>
+                  Target application
+                  <select name="application_id" required>
+                    {workflows
+                      .filter((workflow) => workflow.profile_id === profileId)
+                      .map((workflow) => (
+                        <option
+                          key={workflow.application_id}
+                          value={workflow.application_id}
+                        >
+                          {workflow.title} at {workflow.employer}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Document kind
+                  <select name="kind" defaultValue="RESUME">
+                    <option value="RESUME">Resume</option>
+                    <option value="COVER_LETTER">Cover letter</option>
+                  </select>
+                </label>
+                <label>
+                  Output
+                  <select name="output_format" defaultValue="DOCX">
+                    <option value="DOCX">DOCX</option>
+                    <option value="PDF">PDF</option>
+                  </select>
+                </label>
+                <label>
+                  Variant label
+                  <input
+                    name="variant_label"
+                    defaultValue="Tailored evidence"
+                    maxLength={120}
+                    required
+                  />
+                </label>
+                <button
+                  className="button button--secondary form-submit"
+                  disabled={
+                    busy ||
+                    !knowledge?.claims.some(
+                      (claim) =>
+                        claim.locked &&
+                        claim.verification_status === "VERIFIED" &&
+                        ["APPLICATIONS", "ANY"].includes(claim.permitted_use),
+                    ) ||
+                    !workflows.some(
+                      (workflow) => workflow.profile_id === profileId,
+                    )
+                  }
+                  type="submit"
+                >
+                  <Search size={16} /> Preview evidence
+                </button>
+              </form>
+              <div className="portal-status">
+                {tailoredDocument ? (
+                  <>
+                    <span className="status-pill status-pill--safe">
+                      Review required
+                    </span>
+                    <strong>
+                      {tailoredDocument.preview.title} at{" "}
+                      {tailoredDocument.preview.employer}
+                    </strong>
+                    <p>
+                      {tailoredDocument.preview.selected_claim_ids.length}{" "}
+                      locked claims ·{" "}
+                      {tailoredDocument.preview.matched_requirement_ids.length}{" "}
+                      matched requirements
+                    </p>
+                    {tailoredDocument.preview.missing_required_requirements
+                      .length ? (
+                      <small>
+                        Missing required:{" "}
+                        {tailoredDocument.preview.missing_required_requirements.join(
+                          "; ",
+                        )}
+                      </small>
+                    ) : (
+                      <small>No required qualification is unmatched.</small>
+                    )}
+                    <div aria-label="Exact generated document preview">
+                      {tailoredDocument.preview.sections.map(
+                        (section, sectionIndex) => (
+                          <div key={`${section.heading}-${sectionIndex}`}>
+                            <b>{section.heading}</b>
+                            <ul>
+                              {section.paragraphs.map((paragraph, index) => (
+                                <li key={`${sectionIndex}-${index}`}>
+                                  {paragraph}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                    <button
+                      className="button button--primary"
+                      disabled={busy}
+                      onClick={() => void generateTailoredDocument()}
+                      type="button"
+                    >
+                      <ShieldCheck size={16} /> Review & generate exact document
+                    </button>
+                  </>
+                ) : (
+                  <div className="empty-state empty-state--compact">
+                    Preview recomputes the job requirements and evidence
+                    fingerprint. Generation requires a separate native approval.
                   </div>
                 )}
               </div>

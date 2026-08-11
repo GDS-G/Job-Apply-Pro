@@ -23,6 +23,10 @@ const bridge: DesktopBridge = {
     reviewCandidateClaim: async () => {
       throw new Error("Not implemented in this test.");
     },
+    previewTailoredDocument: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    generateTailoredDocument: async () => null,
     createCandidate: async () => {
       throw new Error("Not implemented in this test.");
     },

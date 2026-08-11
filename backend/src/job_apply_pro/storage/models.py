@@ -123,6 +123,25 @@ class DocumentVersionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DocumentGenerationAuditRow(Base):
+    __tablename__ = "document_generation_audits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    document_version_id: Mapped[str] = mapped_column(
+        ForeignKey("document_versions.id"), unique=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(30))
+    output_format: Mapped[str] = mapped_column(String(20))
+    review_fingerprint: Mapped[str] = mapped_column(String(64))
+    evidence_claim_ids_json: Mapped[list[str]] = mapped_column(JSON)
+    requirement_ids_json: Mapped[list[str]] = mapped_column(JSON)
+    missing_required_requirements_json: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class JobRow(Base):
     __tablename__ = "jobs"
     __table_args__ = (UniqueConstraint("source", "external_id", name="uq_job_source_id"),)
@@ -187,6 +206,28 @@ class ApplicationAnswerRow(Base):
     confidence: Mapped[float] = mapped_column(Float)
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SubmittedDocumentEvidenceRow(Base):
+    __tablename__ = "submitted_document_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id",
+            "document_version_id",
+            "role",
+            "upload_fingerprint",
+            name="uq_submitted_document_capture",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    document_version_id: Mapped[str] = mapped_column(ForeignKey("document_versions.id"))
+    role: Mapped[str] = mapped_column(String(30))
+    file_name: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64))
+    upload_fingerprint: Mapped[str] = mapped_column(String(200))
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class AnswerLibraryRow(Base):
