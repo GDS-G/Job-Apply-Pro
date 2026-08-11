@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./var/job_apply_pro.db"
     log_level: str = "INFO"
     automation_enabled: bool = False
+    api_token: SecretStr | None = None
 
     def ensure_runtime_directories(self) -> None:
         if self.database_url.startswith("sqlite:///./"):

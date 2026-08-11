@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import ClassVar
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -8,7 +9,15 @@ from job_apply_pro.domain.applications import Application, ApplicationCreate
 from job_apply_pro.domain.candidate import CandidateBackup, CandidateStatus
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
 from job_apply_pro.domain.jobs import Job, JobCreate
-from job_apply_pro.domain.workflow import VerificationResult, WorkflowEvent, WorkflowState, utc_now
+from job_apply_pro.domain.workbench import WorkflowRunSnapshot
+from job_apply_pro.domain.workflow import (
+    TransitionCommand,
+    VerificationResult,
+    WorkflowEvent,
+    WorkflowState,
+    utc_now,
+    validate_transition,
+)
 from job_apply_pro.storage.models import (
     ApplicationRow,
     CandidateProfileRow,
@@ -24,6 +33,36 @@ def _utc(value: datetime) -> datetime:
     return value
 
 
+def _event_from_row(row: WorkflowEventRow) -> WorkflowEvent:
+    return WorkflowEvent(
+        id=row.id,
+        workflow_id=row.workflow_id,
+        sequence=row.sequence,
+        prior_state=WorkflowState(row.prior_state),
+        next_state=WorkflowState(row.next_state),
+        actor=row.actor,
+        cause=row.cause,
+        verification=VerificationResult(row.verification),
+        retry_count=row.retry_count,
+        occurred_at=_utc(row.occurred_at),
+    )
+
+
+def _event_row(event: WorkflowEvent) -> WorkflowEventRow:
+    return WorkflowEventRow(
+        id=event.id,
+        workflow_id=event.workflow_id,
+        sequence=event.sequence,
+        prior_state=event.prior_state.value,
+        next_state=event.next_state.value,
+        actor=event.actor,
+        cause=event.cause,
+        verification=event.verification.value,
+        retry_count=event.retry_count,
+        occurred_at=event.occurred_at,
+    )
+
+
 class WorkflowEventRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -36,20 +75,7 @@ class WorkflowEventRepository:
         return 1 if latest is None else latest + 1
 
     def add(self, event: WorkflowEvent) -> WorkflowEvent:
-        self._session.add(
-            WorkflowEventRow(
-                id=event.id,
-                workflow_id=event.workflow_id,
-                sequence=event.sequence,
-                prior_state=event.prior_state.value,
-                next_state=event.next_state.value,
-                actor=event.actor,
-                cause=event.cause,
-                verification=event.verification.value,
-                retry_count=event.retry_count,
-                occurred_at=event.occurred_at,
-            )
-        )
+        self._session.add(_event_row(event))
         self._session.commit()
         return event
 
@@ -60,25 +86,7 @@ class WorkflowEventRepository:
             .order_by(WorkflowEventRow.sequence)
         )
         rows = self._session.scalars(statement).all()
-        return [
-            WorkflowEvent(
-                id=row.id,
-                workflow_id=row.workflow_id,
-                sequence=row.sequence,
-                prior_state=WorkflowState(row.prior_state),
-                next_state=WorkflowState(row.next_state),
-                actor=row.actor,
-                cause=row.cause,
-                verification=VerificationResult(row.verification),
-                retry_count=row.retry_count,
-                occurred_at=(
-                    row.occurred_at
-                    if row.occurred_at.tzinfo is not None
-                    else row.occurred_at.replace(tzinfo=UTC)
-                ),
-            )
-            for row in rows
-        ]
+        return [_event_from_row(row) for row in rows]
 
 
 class CandidateRepository:
@@ -253,4 +261,118 @@ class CheckpointRepository:
             page_fingerprint=row.page_fingerprint,
             encrypted_payload=row.encrypted_payload,
             created_at=_utc(row.created_at),
+        )
+
+
+class WorkbenchRepository:
+    _PROGRESS: ClassVar[dict[WorkflowState, int]] = {
+        WorkflowState.DISCOVERED: 5,
+        WorkflowState.DEDUPLICATED: 15,
+        WorkflowState.SCORED: 28,
+        WorkflowState.ELIGIBILITY_CHECKED: 40,
+        WorkflowState.DOCUMENTS_SELECTED: 52,
+        WorkflowState.APPLICATION_OPENED: 64,
+        WorkflowState.FORM_MAPPED: 76,
+        WorkflowState.ANSWERS_VALIDATED: 88,
+        WorkflowState.READY_TO_SUBMIT: 100,
+        WorkflowState.USER_TAKEOVER: 50,
+        WorkflowState.FAILED_RETRYABLE: 40,
+        WorkflowState.FAILED_TERMINAL: 100,
+        WorkflowState.CLOSED: 100,
+    }
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_snapshot(self, workflow_id: str) -> WorkflowRunSnapshot | None:
+        statement = (
+            select(ApplicationRow, JobRow, CandidateProfileRow)
+            .join(JobRow, JobRow.id == ApplicationRow.job_id)
+            .join(CandidateProfileRow, CandidateProfileRow.id == ApplicationRow.profile_id)
+            .where(ApplicationRow.workflow_id == workflow_id)
+        )
+        row = self._session.execute(statement).one_or_none()
+        if row is None:
+            return None
+        application, job, candidate = row._tuple()
+        return self._snapshot(application, job, candidate)
+
+    def list_snapshots(self) -> list[WorkflowRunSnapshot]:
+        statement = (
+            select(ApplicationRow, JobRow, CandidateProfileRow)
+            .join(JobRow, JobRow.id == ApplicationRow.job_id)
+            .join(CandidateProfileRow, CandidateProfileRow.id == ApplicationRow.profile_id)
+            .order_by(ApplicationRow.updated_at.desc())
+        )
+        return [self._snapshot(*row._tuple()) for row in self._session.execute(statement).all()]
+
+    def apply_transition(self, workflow_id: str, command: TransitionCommand) -> WorkflowRunSnapshot:
+        statement = select(ApplicationRow).where(ApplicationRow.workflow_id == workflow_id)
+        application = self._session.scalar(statement)
+        if application is None:
+            raise LookupError(f"Workflow {workflow_id} was not found")
+        current = WorkflowState(application.state)
+        if current is not command.current_state:
+            message = (
+                f"Workflow state changed from {command.current_state} to {current}; "
+                "refresh and retry"
+            )
+            raise ValueError(message)
+        validate_transition(command)
+        event = WorkflowEvent(
+            id=str(uuid4()),
+            workflow_id=workflow_id,
+            sequence=self._next_sequence(workflow_id),
+            prior_state=current,
+            next_state=command.next_state,
+            actor=command.actor,
+            cause=command.cause,
+            verification=command.verification,
+            retry_count=command.retry_count,
+            occurred_at=utc_now(),
+        )
+        try:
+            self._session.add(_event_row(event))
+            application.state = command.next_state.value
+            application.updated_at = event.occurred_at
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        snapshot = self.get_snapshot(workflow_id)
+        if snapshot is None:  # pragma: no cover - protected by the transaction above
+            raise LookupError(f"Workflow {workflow_id} was not found")
+        return snapshot
+
+    def _next_sequence(self, workflow_id: str) -> int:
+        statement = select(func.max(WorkflowEventRow.sequence)).where(
+            WorkflowEventRow.workflow_id == workflow_id
+        )
+        latest = self._session.scalar(statement)
+        return 1 if latest is None else latest + 1
+
+    def _snapshot(
+        self,
+        application: ApplicationRow,
+        job: JobRow,
+        candidate: CandidateProfileRow,
+    ) -> WorkflowRunSnapshot:
+        state = WorkflowState(application.state)
+        event_statement = (
+            select(WorkflowEventRow)
+            .where(WorkflowEventRow.workflow_id == application.workflow_id)
+            .order_by(WorkflowEventRow.sequence)
+        )
+        events = [_event_from_row(row) for row in self._session.scalars(event_statement).all()]
+        return WorkflowRunSnapshot(
+            workflow_id=application.workflow_id,
+            application_id=application.id,
+            profile_id=application.profile_id,
+            candidate_display_name=candidate.display_name,
+            employer=job.employer,
+            title=job.title,
+            state=state,
+            progress=self._PROGRESS.get(state, 60),
+            updated_at=_utc(application.updated_at),
+            events=events,
         )

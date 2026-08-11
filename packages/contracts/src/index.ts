@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Core",
-  version: "0.2.0-alpha.1",
+  name: "Workbench",
+  version: "0.3.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -91,6 +91,54 @@ export interface WorkflowCheckpoint {
   created_at: string;
 }
 
+export interface WorkflowEvent {
+  id: string;
+  workflow_id: string;
+  sequence: number;
+  prior_state: WorkflowState;
+  next_state: WorkflowState;
+  actor: string;
+  cause: string;
+  verification: VerificationResult;
+  retry_count: number;
+  occurred_at: string;
+}
+
+export type WorkflowControlAction =
+  "ADVANCE" | "PAUSE" | "RESUME" | "RETRY" | "TAKEOVER" | "STOP";
+
+export interface WorkflowRunSnapshot {
+  workflow_id: string;
+  application_id: string;
+  profile_id: string;
+  candidate_display_name: string;
+  employer: string;
+  title: string;
+  state: WorkflowState;
+  progress: number;
+  updated_at: string;
+  events: WorkflowEvent[];
+}
+
+export interface CandidateProfileCreate {
+  display_name: string;
+  contact: ContactDetails;
+}
+
+export interface MockWorkflowCreate {
+  profile_id: string;
+  employer: string;
+  title: string;
+}
+
+export type BackendRuntimeState = "starting" | "ready" | "degraded" | "stopped";
+
+export interface BackendRuntimeStatus {
+  state: BackendRuntimeState;
+  message: string;
+  checked_at: string;
+}
+
 export interface HealthResponse {
   status: "ok" | "degraded";
   service: "job-apply-pro-backend";
@@ -146,5 +194,15 @@ export interface DesktopBridge {
     chrome: string;
     node: string;
   };
-  apiBaseUrl: string;
+  workbench: {
+    getStatus(): Promise<BackendRuntimeStatus>;
+    listWorkflows(): Promise<WorkflowRunSnapshot[]>;
+    createCandidate(input: CandidateProfileCreate): Promise<CandidateProfile>;
+    startMockWorkflow(input: MockWorkflowCreate): Promise<WorkflowRunSnapshot>;
+    controlWorkflow(
+      workflowId: string,
+      action: WorkflowControlAction,
+    ): Promise<WorkflowRunSnapshot>;
+    onStatus(listener: (status: BackendRuntimeStatus) => void): () => void;
+  };
 }

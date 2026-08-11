@@ -4,15 +4,15 @@ import { describe, expect, it } from "vitest";
 import { App } from "./App";
 
 describe("App", () => {
-  it("shows the Core safety boundary", () => {
+  it("shows the Workbench safety boundary", () => {
     render(<App />);
 
-    expect(screen.getByText("Core v0.2.0-alpha.1")).toBeInTheDocument();
+    expect(screen.getByText("Workbench v0.3.0-alpha.1")).toBeInTheDocument();
     expect(
-      screen.getByText(/production submission are intentionally disabled/i),
+      screen.getByText(/production submission remains intentionally disabled/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /start discovery/i }),
+      screen.getByRole("button", { name: /create encrypted profile/i }),
     ).toBeInTheDocument();
   });
 });

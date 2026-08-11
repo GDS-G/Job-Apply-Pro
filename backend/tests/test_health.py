@@ -3,15 +3,15 @@ from fastapi.testclient import TestClient
 from job_apply_pro.main import app
 
 
-def test_health_reports_core_build() -> None:
+def test_health_reports_workbench_build() -> None:
     response = TestClient(app).get("/api/v1/health")
 
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
         "service": "job-apply-pro-backend",
-        "version": "0.2.0-alpha.1",
-        "build": "Core",
+        "version": "0.3.0-alpha.1",
+        "build": "Workbench",
         "environment": "development",
     }
 

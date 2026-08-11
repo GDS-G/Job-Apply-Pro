@@ -7,3 +7,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0003: Deterministic workflow state machine](0003-deterministic-workflow-state-machine.md)
 - [ADR-0004: Local encryption and key boundaries](0004-local-encryption-and-key-boundaries.md)
 - [ADR-0005: Core data and repository boundaries](0005-core-data-and-repository-boundaries.md)
+- [ADR-0006: Authenticated desktop service boundary](0006-authenticated-desktop-service-boundary.md)
+- [ADR-0007: Durable supervised Workbench controls](0007-durable-supervised-workbench-controls.md)
