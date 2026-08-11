@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Candidate Knowledge",
-  version: "0.5.0-alpha.1",
+  name: "AI Gateway",
+  version: "0.6.0-alpha.1",
   channel: "alpha",
 } as const;
 

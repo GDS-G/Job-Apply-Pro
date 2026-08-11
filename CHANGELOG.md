@@ -2,6 +2,29 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.6.0-alpha.1] - Unreleased
+
+### Added
+
+- Provider-independent AI Gateway contracts and authenticated `/api/v1/ai` routes.
+- OpenAI-compatible adapter shared by primary cloud, secondary cloud, and loopback llama.cpp providers.
+- Capability-aware model registry and per-task routing policies with bounded retries, fallback, timeouts, and cost budgets.
+- Text, multimodal input, strict structured output, bounded function calls, embeddings, and reranking.
+- Versioned task-specific prompt registry with untrusted-data separation and locked-fact precedence.
+- Routine, Employment Sensitive, Highly Sensitive, and Restricted privacy classifications with external-consent and redaction policy.
+- AES-256-GCM encrypted, profile/source/model/prompt/schema/privacy-versioned response cache.
+- Sanitized model invocation records with hashes, route, usage, costs, attempts, latency, status, and error classification.
+- Coordinator, qualification, form interpretation, answer, verification, and recovery agents.
+- Deterministic evaluation harness and provider, privacy, fallback, validation, cache, agent, API, and migration fixtures.
+
+### Security
+
+- External providers require HTTPS, explicit routing permission, and user consent; local endpoints require loopback.
+- Highly Sensitive and Restricted data cannot be transmitted to external models.
+- Provider secrets, prompts, candidate inputs, and plaintext outputs are excluded from invocation logs.
+- Model responses and tool calls fail closed unless their declared JSON schemas validate.
+- Production application submission remains disabled.
+
 ## [0.5.0-alpha.1] - Unreleased
 
 ### Added

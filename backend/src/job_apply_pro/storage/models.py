@@ -288,16 +288,35 @@ class ModelInvocationRow(Base):
     __tablename__ = "model_invocations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    profile_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     task_type: Mapped[str] = mapped_column(String(80))
     provider: Mapped[str] = mapped_column(String(80))
     model: Mapped[str] = mapped_column(String(120))
     prompt_version: Mapped[str] = mapped_column(String(80))
     schema_version: Mapped[str] = mapped_column(String(80))
     input_hash: Mapped[str] = mapped_column(String(64))
+    cache_key: Mapped[str] = mapped_column(String(64), index=True)
+    classification: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(20))
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_micros: Mapped[int] = mapped_column(Integer, default=0)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    route_json: Mapped[list[str]] = mapped_column(JSON)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AICacheRow(Base):
+    __tablename__ = "ai_cache"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    profile_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    classification: Mapped[str] = mapped_column(String(40))
+    encrypted_response: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

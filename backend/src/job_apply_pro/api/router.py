@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from job_apply_pro.api.routes import (
+    ai,
     browser,
     core,
     dashboard,
@@ -20,3 +21,4 @@ api_router.include_router(runtime.router)
 api_router.include_router(workbench.router)
 api_router.include_router(browser.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(ai.router)

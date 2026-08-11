@@ -16,6 +16,7 @@ class RuntimeStatus(BaseModel):
     authenticated: bool = True
     browser_runtime_available: bool = True
     candidate_knowledge_available: bool = True
+    ai_gateway_available: bool = True
 
 
 @router.get("/status", response_model=RuntimeStatus)
