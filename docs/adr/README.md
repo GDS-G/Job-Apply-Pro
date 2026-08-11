@@ -17,3 +17,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0013: AI privacy, prompts, validation, and caching](0013-ai-privacy-prompts-validation-and-caching.md)
 - [ADR-0014: Reference ATS confirmed-submission boundary](0014-reference-ats-confirmed-submission-boundary.md)
 - [ADR-0015: Durable supervised challenge sessions](0015-durable-supervised-challenge-sessions.md)
+- [ADR-0016: Production-disabled portal catalog and replay contracts](0016-production-disabled-portal-catalog.md)

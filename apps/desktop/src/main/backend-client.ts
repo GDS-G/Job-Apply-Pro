@@ -14,6 +14,7 @@ import type {
   ChallengeSessionSnapshot,
   MockWorkflowCreate,
   PortalRunSnapshot,
+  PortalAdapterDefinition,
   ReferencePortalRunCreate,
   WorkflowControlAction,
   WorkflowRunSnapshot,
@@ -122,6 +123,10 @@ export class BackendClient {
 
   listPortalRuns(): Promise<PortalRunSnapshot[]> {
     return this.request("/portals/runs");
+  }
+
+  listPortalCatalog(): Promise<PortalAdapterDefinition[]> {
+    return this.request("/portals/catalog");
   }
 
   prepareReferencePortal(

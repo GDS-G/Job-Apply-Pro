@@ -1,0 +1,13 @@
+[
+  {"id":"linkedin-search","portal":"LINKEDIN","url":"https://www.linkedin.com/jobs/search","page_type":"JOB_SEARCH_RESULTS","visible_text":"LinkedIn jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"indeed-search","portal":"INDEED","url":"https://www.indeed.com/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Indeed jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"monster-search","portal":"MONSTER","url":"https://www.monster.com/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Monster jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"careerbuilder-search","portal":"CAREERBUILDER","url":"https://www.careerbuilder.com/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"CareerBuilder jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"dice-search","portal":"DICE","url":"https://www.dice.com/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Dice jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"ziprecruiter-search","portal":"ZIPRECRUITER","url":"https://www.ziprecruiter.com/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"ZipRecruiter jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"glassdoor-search","portal":"GLASSDOOR","url":"https://www.glassdoor.com/Jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Glassdoor jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"workday-search","portal":"WORKDAY","url":"https://tenant.myworkdayjobs.com/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Workday jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"taleo-search","portal":"TALEO","url":"https://company.taleo.net/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Taleo jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"greenhouse-search","portal":"GREENHOUSE","url":"https://boards.greenhouse.io/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Greenhouse jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"},
+  {"id":"company-search","portal":"COMPANY_CAREERS","url":"https://careers.example.test/jobs","page_type":"JOB_SEARCH_RESULTS","visible_text":"Careers jobs","control_labels":["Search jobs"],"expected_capability":"SEARCH"}
+]

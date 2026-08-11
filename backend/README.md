@@ -7,7 +7,7 @@ python -m pip install -e ".\backend[dev]"
 python -m alembic -c backend\alembic.ini upgrade head
 ```
 
-The Challenge Framework build exposes health, runtime status, workflow controls, event history, candidate, job, application, encrypted-backup, resumable-checkpoint, browser-session, candidate-knowledge, governed AI, reference-portal, and challenge-session endpoints under `/api/v1`.
+The Portal Adapter Expansion build exposes health, runtime status, workflow controls, event history, candidate, job, application, encrypted-backup, resumable-checkpoint, browser-session, candidate-knowledge, governed AI, reference-portal, challenge-session, and portal-catalog endpoints under `/api/v1`.
 
 Browser sessions are available under `/api/v1/browser`. Session creation, observation, verified actions, action history, takeover, return, restart, and stop all use the same privileged API authentication. Production automation is locked by default, so only loopback fixture URLs are accepted.
 
@@ -18,5 +18,7 @@ AI operations are available under `/api/v1/ai`. The gateway owns provider config
 Reference ATS operations are available under `/api/v1/portals`. A run discovers and validates a fixture job, deduplicates it, persists requirements and fit evidence, chooses an approved resume, maps and completes the multi-page form, verifies the upload, and stops at `READY_TO_SUBMIT`. Confirmation requires the exact review fingerprint and fixed approval phrase; the adapter records `SUBMISSION_CONFIRMED` only after a strong confirmation-page signal. The adapter rejects every non-loopback origin.
 
 Challenge operations are available under `/api/v1/challenges`. Sessions persist detection evidence, typed questions, verified answers, timers, review fingerprints, recovery events, and CAPTCHA intervention state. Answer suggestions are deterministic and limited to encrypted contact facts or locked approved application answers. Model-route responses describe the capability tier for the governed AI Gateway; challenge code never calls a provider directly.
+
+The portal catalog under `/api/v1/portals/catalog` declares generic-agent workflows for all Phase 9 targets. `/identify` matches sanitized page evidence against domain and signal fingerprints, while `/replays/validate` reports per-portal accuracy. Every catalog entry has `production_enabled=false`; only the loopback Reference ATS executes application and confirmation actions.
 
 Candidate, checkpoint, and candidate-knowledge routes require `JAP_MASTER_KEY`, a base64-encoded 32-byte local key. When `JAP_API_TOKEN` is configured, all `/api/v1` routes except health require the `X-Job-Apply-Pro-Token` header. The API never persists or returns either secret. OpenAPI documentation is available at `http://127.0.0.1:8765/api/docs` while the service is running.

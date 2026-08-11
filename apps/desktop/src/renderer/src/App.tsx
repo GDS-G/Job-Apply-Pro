@@ -30,6 +30,7 @@ import type {
   CandidateProfile,
   ChallengeAnswerSuggestion,
   ChallengeSessionSnapshot,
+  PortalAdapterDefinition,
   PortalRunSnapshot,
   WorkflowControlAction,
   WorkflowRunSnapshot,
@@ -74,7 +75,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Challenge framework</span>
+        <span>Portal adapter expansion</span>
       </div>
     </div>
   );
@@ -87,6 +88,9 @@ export function App() {
     BrowserSessionSnapshot[]
   >([]);
   const [portalRuns, setPortalRuns] = useState<PortalRunSnapshot[]>([]);
+  const [portalCatalog, setPortalCatalog] = useState<PortalAdapterDefinition[]>(
+    [],
+  );
   const [challengeSessions, setChallengeSessions] = useState<
     ChallengeSessionSnapshot[]
   >([]);
@@ -109,16 +113,18 @@ export function App() {
 
   const refreshWorkflows = useCallback(async () => {
     try {
-      const [items, sessions, runs, challenges] = await Promise.all([
+      const [items, sessions, runs, challenges, adapters] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
         window.jobApplyPro.workbench.listPortalRuns(),
         window.jobApplyPro.workbench.listChallengeSessions(),
+        window.jobApplyPro.workbench.listPortalCatalog(),
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
       setPortalRuns(runs);
       setChallengeSessions(challenges);
+      setPortalCatalog(adapters);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -480,7 +486,7 @@ export function App() {
           <section className="hero-row">
             <div>
               <span className="eyebrow">
-                Phase 8 · Supervised challenge handling
+                Phase 9 · Replay-validated portal catalog
               </span>
               <h1>Supervised application workbench</h1>
               <p>{status.message}</p>
@@ -519,7 +525,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Challenge Framework v0.8.0-alpha.1</strong>
+              <strong>Portal Adapter Expansion v0.9.0-alpha.1</strong>
               <p>
                 Search, qualification, document selection, verified form fill,
                 upload, confirmation-gated submission, and tracking now run as
@@ -920,6 +926,22 @@ export function App() {
                   </div>
                 )}
               </div>
+            </div>
+            <div className="adapter-health" aria-label="Portal adapter health">
+              {portalCatalog.map((adapter) => (
+                <div className="adapter-health__item" key={adapter.kind}>
+                  <div>
+                    <strong>{adapter.display_name}</strong>
+                    <small>{adapter.strategy.replaceAll("_", " ")}</small>
+                  </div>
+                  <span className="status-pill status-pill--safe">
+                    {adapter.support_status.replaceAll("_", " ")}
+                  </span>
+                  <small>
+                    {adapter.capabilities.length} capabilities · production off
+                  </small>
+                </div>
+              ))}
             </div>
           </section>
 

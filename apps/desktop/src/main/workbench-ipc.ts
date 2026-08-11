@@ -203,6 +203,9 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
     supervisor.client.startMockWorkflow(mockWorkflowInput(value)),
   );
   ipcMain.handle("portals:list-runs", () => supervisor.client.listPortalRuns());
+  ipcMain.handle("portals:list-catalog", () =>
+    supervisor.client.listPortalCatalog(),
+  );
   ipcMain.handle("challenges:list", (_event, workflowIdValue: unknown) =>
     workflowIdValue === undefined || workflowIdValue === null
       ? supervisor.client.listChallengeSessions()

@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Challenge Framework build
+## Portal Adapter Expansion build
 
-The active milestone is **Challenge Framework `v0.8.0-alpha.1`**. It adds durable CAPTCHA, questionnaire, quiz, and assessment sessions over the existing reference-ATS workflow. The backend detects challenge type and provider, extracts typed questions and visible timers, maps only approved candidate facts, recommends provider-independent AI gateway routes, verifies every browser answer, checkpoints recovery, and requires an exact review fingerprint plus explicit confirmation before completion.
+The active milestone is **Portal Adapter Expansion `v0.9.0-alpha.1`**. It adds production-disabled, replay-validated generic-agent workflows for LinkedIn, Indeed, Monster, CareerBuilder, Dice, ZipRecruiter, Glassdoor, company careers sites, Workday, Taleo, and Greenhouse. Each definition declares host boundaries, capabilities, page fingerprints, confirmation requirements, limitations, and regression status while the Reference ATS remains the only executable submission fixture.
 
 Application services never call provider SDKs directly. External AI calls require an enabled routing policy and explicit consent; highly sensitive and restricted data are blocked from external providers. The reference ATS accepts loopback fixture origins only, and an elevated submission action requires a matching review fingerprint plus an explicit desktop confirmation. Production portals, email, and calendar accounts remain disabled.
 
@@ -81,6 +81,8 @@ The AI Gateway API is under `/api/v1/ai`. Provider secrets, model definitions, a
 The reference portal API is under `/api/v1/portals`. `POST /reference/runs` prepares a loopback fixture application through `READY_TO_SUBMIT`; `POST /runs/{id}/confirm` accepts only the exact persisted review fingerprint and records confirmation only after the adapter observes its approved confirmation signal. This release does not authorize real portal submission.
 
 The challenge API is under `/api/v1/challenges`. Detection persists the browser fingerprint, resume state, extracted questions, and timer. Suggestions come only from encrypted profile contact fields or locked approved answer-library entries. Legal attestations, signatures, and CAPTCHAs always require direct user action. Assessment completion requires verified answers, the current review fingerprint, and the fixed `COMPLETE CHALLENGE` phrase.
+
+The portal catalog is available at `/api/v1/portals/catalog`, with fingerprint identification at `/identify` and sanitized replay validation at `/replays/validate`. Catalog support means the generic workflow contract is implemented and replay-tested; it does not authorize live login, application completion, or submission.
 
 ## Validation
 
