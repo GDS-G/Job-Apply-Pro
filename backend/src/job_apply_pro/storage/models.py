@@ -346,6 +346,51 @@ class PortalRunRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class SupervisedPortalRunRow(Base):
+    __tablename__ = "supervised_portal_runs"
+    __table_args__ = (
+        Index("ix_supervised_portal_runs_workflow_updated", "workflow_id", "updated_at"),
+        UniqueConstraint("browser_session_id", name="uq_supervised_portal_browser_session"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    portal: Mapped[str] = mapped_column(String(40), index=True)
+    workflow_id: Mapped[str] = mapped_column(String(100), index=True)
+    browser_session_id: Mapped[str] = mapped_column(ForeignKey("browser_sessions.id"), index=True)
+    state: Mapped[str] = mapped_column(String(40), index=True)
+    current_url: Mapped[str] = mapped_column(Text)
+    allowed_origins_json: Mapped[list[str]] = mapped_column(JSON)
+    page_fingerprint: Mapped[str] = mapped_column(String(200))
+    current_match_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    disposition: Mapped[str] = mapped_column(String(50))
+    intervention_reasons_json: Mapped[list[str]] = mapped_column(JSON)
+    trace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SupervisedPortalStepEvidenceRow(Base):
+    __tablename__ = "supervised_portal_step_evidence"
+    __table_args__ = (
+        UniqueConstraint("run_id", "sequence", name="uq_supervised_portal_step_sequence"),
+        Index("ix_supervised_portal_step_run_created", "run_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("supervised_portal_runs.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    disposition: Mapped[str] = mapped_column(String(50))
+    capability: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    page_type: Mapped[str] = mapped_column(String(100))
+    before_fingerprint: Mapped[str] = mapped_column(String(200))
+    after_fingerprint: Mapped[str] = mapped_column(String(200))
+    action_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    action_fingerprint: Mapped[str] = mapped_column(String(64))
+    verified: Mapped[bool] = mapped_column(Boolean)
+    intervention_reasons_json: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ChallengeSessionRow(Base):
     __tablename__ = "challenge_sessions"
     __table_args__ = (Index("ix_challenge_sessions_workflow_updated", "workflow_id", "updated_at"),)

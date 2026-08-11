@@ -625,6 +625,16 @@ h1 {
   letter-spacing: -0.01em;
 }
 
+.panel__header h3 {
+  margin: 0;
+  color: #283247;
+  font-size: 11.5px;
+}
+
+.panel__header--subsection {
+  border-top: 1px solid #edf0f4;
+}
+
 .panel__header p {
   margin: 4px 0 0;
   color: #9099ab;
@@ -839,10 +849,12 @@ h1 {
   font-weight: 700;
 }
 
-.workbench-form input {
+.workbench-form input,
+.workbench-form select,
+.workbench-form textarea {
   width: 100%;
-  height: 38px;
-  padding: 0 10px;
+  min-height: 38px;
+  padding: 9px 10px;
   color: #2f394d;
   font: inherit;
   font-size: 11px;
@@ -852,7 +864,13 @@ h1 {
   outline: none;
 }
 
-.workbench-form input:focus {
+.workbench-form textarea {
+  resize: vertical;
+}
+
+.workbench-form input:focus,
+.workbench-form select:focus,
+.workbench-form textarea:focus {
   border-color: #7b84e8;
   box-shadow: 0 0 0 3px #eef0ff;
 }
@@ -1136,6 +1154,17 @@ h1 {
   margin: 0;
   color: #7f899d;
   font-size: 10px;
+}
+
+.portal-status small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .adapter-health {

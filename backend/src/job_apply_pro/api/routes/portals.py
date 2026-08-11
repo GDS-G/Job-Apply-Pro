@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.browser import get_browser_service
+from job_apply_pro.browser.client import BrowserWorkerError, BrowserWorkerUnavailableError
 from job_apply_pro.config import get_settings
 from job_apply_pro.domain.browser import BrowserEngine
 from job_apply_pro.domain.portals import (
@@ -17,15 +18,26 @@ from job_apply_pro.domain.portals import (
     PortalRunSnapshot,
     ReferencePortalRunCreate,
     SubmissionApproval,
+    SupervisedPortalCapture,
+    SupervisedPortalRunCreate,
+    SupervisedPortalRunSnapshot,
+    SupervisedPortalSubmissionApproval,
 )
 from job_apply_pro.portals.catalog import PortalCatalog, PortalCatalogError
 from job_apply_pro.security.encryption import SensitiveDataCipher
+from job_apply_pro.services.browser_runtime import BrowserPolicyError, BrowserSessionStateError
 from job_apply_pro.services.core import CoreService
 from job_apply_pro.services.portals import (
     PortalApprovalError,
     PortalEligibilityError,
     PortalExecutionError,
     ReferencePortalService,
+)
+from job_apply_pro.services.supervised_portals import (
+    SupervisedPortalPolicyError,
+    SupervisedPortalService,
+    SupervisedPortalStateError,
+    parse_portal_allowlist,
 )
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
@@ -37,6 +49,7 @@ from job_apply_pro.storage.repositories import (
     PortalRunRepository,
     WorkbenchRepository,
 )
+from job_apply_pro.storage.supervised_portal_repository import SupervisedPortalRepository
 
 from .core import get_cipher
 
@@ -77,6 +90,27 @@ def get_portal_catalog() -> PortalCatalog:
 PortalCatalogDependency = Annotated[PortalCatalog, Depends(get_portal_catalog)]
 
 
+def get_supervised_portal_service(
+    session: SessionDependency,
+    cipher: CipherDependency,
+    catalog: PortalCatalogDependency,
+) -> SupervisedPortalService:
+    settings = get_settings()
+    return SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        get_browser_service(session, cipher),
+        catalog,
+        enabled=settings.supervised_portal_enabled,
+        submission_enabled=settings.supervised_portal_submission_enabled,
+        allowed_portals=parse_portal_allowlist(settings.supervised_portal_allowlist),
+    )
+
+
+SupervisedPortalServiceDependency = Annotated[
+    SupervisedPortalService, Depends(get_supervised_portal_service)
+]
+
+
 def _http_error(error: Exception) -> HTTPException:
     if isinstance(error, LookupError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
@@ -84,6 +118,21 @@ def _http_error(error: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     if isinstance(error, PortalApprovalError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    if isinstance(error, SupervisedPortalPolicyError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
+    if isinstance(error, BrowserPolicyError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
+    if isinstance(error, SupervisedPortalStateError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    if isinstance(error, BrowserSessionStateError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    if isinstance(error, BrowserWorkerUnavailableError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Browser worker is unavailable; supervised evidence was preserved",
+        )
+    if isinstance(error, BrowserWorkerError):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     if isinstance(error, (PortalExecutionError, ValueError)):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     if isinstance(error, IntegrityError):
@@ -123,6 +172,98 @@ def validate_portal_replays(
     try:
         return catalog.run_replays(cases)
     except PortalCatalogError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/supervised/runs",
+    response_model=SupervisedPortalRunSnapshot,
+    status_code=status.HTTP_201_CREATED,
+)
+def start_supervised_portal_run(
+    command: SupervisedPortalRunCreate,
+    service: SupervisedPortalServiceDependency,
+) -> SupervisedPortalRunSnapshot:
+    try:
+        return service.start(command)
+    except (
+        LookupError,
+        BrowserPolicyError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        SupervisedPortalPolicyError,
+        SupervisedPortalStateError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get("/supervised/runs", response_model=list[SupervisedPortalRunSnapshot])
+def list_supervised_portal_runs(
+    service: SupervisedPortalServiceDependency,
+) -> list[SupervisedPortalRunSnapshot]:
+    return service.list_runs()
+
+
+@router.get("/supervised/runs/{run_id}", response_model=SupervisedPortalRunSnapshot)
+def get_supervised_portal_run(
+    run_id: str, service: SupervisedPortalServiceDependency
+) -> SupervisedPortalRunSnapshot:
+    try:
+        return service.get(run_id)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/supervised/runs/{run_id}/capture", response_model=SupervisedPortalRunSnapshot)
+def capture_supervised_portal_step(
+    run_id: str,
+    command: SupervisedPortalCapture,
+    service: SupervisedPortalServiceDependency,
+) -> SupervisedPortalRunSnapshot:
+    try:
+        return service.capture(run_id, command)
+    except (
+        LookupError,
+        BrowserPolicyError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        SupervisedPortalPolicyError,
+        SupervisedPortalStateError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.post("/supervised/runs/{run_id}/submit", response_model=SupervisedPortalRunSnapshot)
+def submit_supervised_portal_run(
+    run_id: str,
+    approval: SupervisedPortalSubmissionApproval,
+    service: SupervisedPortalServiceDependency,
+) -> SupervisedPortalRunSnapshot:
+    try:
+        return service.submit(run_id, approval)
+    except (
+        LookupError,
+        BrowserPolicyError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        SupervisedPortalPolicyError,
+        SupervisedPortalStateError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.post("/supervised/runs/{run_id}/stop", response_model=SupervisedPortalRunSnapshot)
+def stop_supervised_portal_run(
+    run_id: str, service: SupervisedPortalServiceDependency
+) -> SupervisedPortalRunSnapshot:
+    try:
+        return service.stop(run_id)
+    except (
+        LookupError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        SupervisedPortalStateError,
+    ) as error:
         raise _http_error(error) from error
 
 

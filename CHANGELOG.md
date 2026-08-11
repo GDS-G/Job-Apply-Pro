@@ -2,6 +2,26 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.14.0-alpha.1] - Unreleased
+
+### Added
+
+- Added supervised live-portal runs for the named portal catalog, with visible persistent browser profiles, exact-origin allowlists, durable run state, and append-only per-step evidence.
+- Added explicit manual-intervention states for login, MFA, CAPTCHA, assessments, legal attestations, final submission, and changed-site detection.
+- Added authenticated portal run APIs and a desktop workbench for starting a portal, capturing a fresh page fingerprint, reviewing intervention status, submitting the exact reviewed application, and stopping while preserving the trace.
+
+### Changed
+
+- Named portals can now execute through a generic supervised boundary when both automation and supervised-portal gates are enabled and the specific portal is allowlisted; catalog entries remain production-disabled.
+- Browser observations from start, capture, action, resume, and restart are checked against exact allowed origins. A page-driven origin escape now forces user takeover and stops automated action.
+- Final submission requires a separately enabled submission gate, the current page fingerprint, exactly one recognized submit control, an exact approval phrase, and a fresh identifier-backed confirmation page.
+
+### Security
+
+- Passwords, MFA codes, CAPTCHA answers, legal attestations, and signatures are never application configuration. Sign-in and challenges remain direct user actions in the visible browser.
+- All supervised portal capability gates default to disabled, HTTP is limited to loopback fixtures, and live evidence does not change `production_enabled` without separate terms, authorization, and release approval.
+- Uncertain submission outcomes fail closed as `SUBMISSION_UNCERTAIN`; they are never reported as confirmed applications.
+
 ## [0.13.0-alpha.1] - Unreleased
 
 ### Added

@@ -164,6 +164,7 @@ class BrowserRuntimeService:
                 },
             )
             observation = BrowserObservation.model_validate(result)
+            self._validate_observation(record, observation)
             saved = self._repository.save_observation(
                 session_id, BrowserSessionState.ACTIVE, observation
             )
@@ -183,6 +184,7 @@ class BrowserRuntimeService:
         record = self._active_record(session_id, allow_takeover=True)
         result = self._worker.call("observe", {"session_id": session_id})
         observation = BrowserObservation.model_validate(result)
+        self._validate_live_observation(record, observation)
         saved = self._repository.save_observation(session_id, record.state, observation)
         return _public_snapshot(saved)
 
@@ -195,6 +197,7 @@ class BrowserRuntimeService:
             timeout_seconds=max(75, action.timeout_ms / 1_000 + 10),
         )
         observation = BrowserObservation.model_validate(result.get("observation"))
+        self._validate_live_observation(record, observation)
         attempts_value = result.get("attempts")
         action_result = BrowserActionResult(
             id=str(uuid4()),
@@ -224,6 +227,7 @@ class BrowserRuntimeService:
             raise BrowserSessionStateError("Browser session is not in user takeover")
         result = self._worker.call("observe", {"session_id": session_id})
         observation = BrowserObservation.model_validate(result)
+        self._validate_live_observation(record, observation)
         saved = self._repository.save_observation(
             session_id, BrowserSessionState.ACTIVE, observation
         )
@@ -234,6 +238,7 @@ class BrowserRuntimeService:
         self._active_record(session_id, allow_takeover=True)
         result = self._worker.call("restart_session", {"session_id": session_id})
         observation = BrowserObservation.model_validate(result)
+        self._validate_live_observation(self._record(session_id), observation)
         saved = self._repository.save_observation(
             session_id, BrowserSessionState.ACTIVE, observation
         )
@@ -327,6 +332,22 @@ class BrowserRuntimeService:
             approved_root = self._browser_data_dir.parent
             if not upload_path.is_file() or not upload_path.is_relative_to(approved_root):
                 raise BrowserPolicyError("Upload path is outside the approved runtime directory")
+
+    @staticmethod
+    def _validate_observation(
+        record: BrowserSessionRecord, observation: BrowserObservation
+    ) -> None:
+        if observation.origin not in record.allowed_origins:
+            raise BrowserPolicyError("Browser observation escaped the session origin allowlist")
+
+    def _validate_live_observation(
+        self, record: BrowserSessionRecord, observation: BrowserObservation
+    ) -> None:
+        try:
+            self._validate_observation(record, observation)
+        except BrowserPolicyError:
+            self._repository.set_state(record.id, BrowserSessionState.USER_TAKEOVER)
+            raise
 
     def _save_checkpoint(
         self,

@@ -24,3 +24,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0020: Versioned dependency maintenance baseline](0020-versioned-dependency-maintenance-baseline.md)
 - [ADR-0021: Traceable product and portal readiness](0021-traceable-product-and-portal-readiness.md)
 - [ADR-0022: Encrypted OAuth provider connectivity](0022-encrypted-oauth-provider-connectivity.md)
+- [ADR-0023: Supervised portal execution policy](0023-supervised-portal-execution-policy.md)

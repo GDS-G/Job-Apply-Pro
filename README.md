@@ -2,13 +2,13 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Provider Connectivity build
+## Supervised Portal Execution build
 
-The active milestone is **Provider Connectivity `v0.13.0-alpha.1`**. It adds encrypted OAuth 2.0 Authorization Code with PKCE lifecycle management and official Gmail, Outlook, Google Calendar, and Outlook Calendar HTTP adapters while retaining fail-closed provider authorization and the Portal Readiness traceability baseline.
+The active milestone is **Supervised Portal Execution `v0.14.0-alpha.1`**. It adds visible, owner-supervised execution for allowlisted named portals, exact-origin browser containment, durable per-step evidence, explicit intervention states, and fingerprint-bound final-submission confirmation. It retains the encrypted OAuth/PKCE provider connectivity and Portal Readiness baselines.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
-This remains an alpha foundation. The loopback Reference ATS is the only executable submission adapter; named live portals and mail/calendar provider writes remain disabled until provider-specific implementation, authorization, and supervised validation are complete. See `docs/requirements-traceability.md` for the current product-scope audit.
+This remains an alpha foundation. Named portal execution is disabled by default and must be enabled per portal for an owner-approved validation window. Sign-in, MFA, CAPTCHA, assessments, legal attestations, and signatures remain direct user actions; final submission has its own disabled-by-default gate and exact confirmation flow. Catalog entries remain `production_enabled=false`, and mail/calendar writes still require reviewed OAuth authorization. See `docs/requirements-traceability.md` for the current product-scope audit.
 
 ## Architecture
 
@@ -86,6 +86,8 @@ The reference portal API is under `/api/v1/portals`. `POST /reference/runs` prep
 The challenge API is under `/api/v1/challenges`. Detection persists the browser fingerprint, resume state, extracted questions, and timer. Suggestions come only from encrypted profile contact fields or locked approved answer-library entries. Legal attestations, signatures, and CAPTCHAs always require direct user action. Assessment completion requires verified answers, the current review fingerprint, and the fixed `COMPLETE CHALLENGE` phrase.
 
 The portal catalog is available at `/api/v1/portals/catalog`, with fingerprint identification at `/identify` and sanitized replay validation at `/replays/validate`. Catalog support means the generic workflow contract is implemented and replay-tested; it does not authorize live login, application completion, or submission.
+
+Supervised portal runs are under `/api/v1/portals/supervised`. They require `JAP_AUTOMATION_ENABLED=true`, `JAP_SUPERVISED_PORTAL_ENABLED=true`, and an exact portal in `JAP_SUPERVISED_PORTAL_ALLOWLIST`. The visible browser remains in user takeover for authentication and challenges. Automated final submission additionally requires `JAP_SUPERVISED_PORTAL_SUBMISSION_ENABLED=true`, a current review fingerprint, exactly one recognized submit control, native desktop confirmation, and identifier-backed confirmation evidence.
 
 The Communication API is under `/api/v1/communications`. Analyses and reply drafts are encrypted at rest; message listing, draft creation, calendar planning, follow-ups, mutation audits, and daily summaries share authenticated contracts. Gmail, Outlook, Google Calendar, and Outlook Calendar adapters fail closed until local OAuth credentials and account authorization are configured. Sanitized fixture adapters are used for regression tests and never contact provider networks.
 
