@@ -2,17 +2,18 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Workbench build
+## Browser Runtime build
 
-The active milestone is **Workbench `v0.3.0-alpha.1`**. It connects the sandboxed Electron interface to the Core local service through validated IPC, supervises migrations and backend health, and provides durable mock-workflow controls and event recovery.
+The active milestone is **Browser Runtime `v0.4.0-alpha.1`**. It adds an isolated Playwright worker, persistent browser profiles, minimized observations, declarative verified actions, screenshots, traces, checkpoints, restart recovery, and supervised takeover controls to the Workbench and Core builds.
 
-This build uses real encrypted local profiles and persisted workflow events, but the workflows themselves are simulated. It does not submit applications or connect to production email, calendar, AI, or job-portal accounts.
+This build operates only against explicit allowlisted origins. With production automation disabled, every origin must be loopback, so the included test fixture cannot reach a real portal. It does not submit applications or connect to production email, calendar, AI, or job-portal accounts.
 
 ## Architecture
 
 ```text
 apps/desktop              Electron main/preload + sandboxed React renderer
 backend/src/job_apply_pro FastAPI API, workflow domain, services, and storage
+backend/src/job_apply_pro/browser Isolated Playwright JSON-lines worker and client
 packages/contracts        Versioned TypeScript contracts shared by desktop code
 backend/migrations        Alembic-managed SQLite schema
 docs/adr                  Architecture decision records
@@ -47,6 +48,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".\backend[dev]"
+python -m playwright install chromium
 python -m alembic -c backend\alembic.ini upgrade head
 ```
 
@@ -65,6 +67,8 @@ pnpm backend:dev
 ```
 
 The API listens only on `127.0.0.1:8765` by default.
+
+Browser profiles default to `var/browser`, while screenshots and Playwright traces default to `var/browser-artifacts`. Both paths are ignored by Git. Configure them with `JAP_BROWSER_DATA_DIR` and `JAP_BROWSER_ARTIFACT_DIR`; set `JAP_BROWSER_HEADLESS=false` only for supervised local debugging.
 
 ## Validation
 

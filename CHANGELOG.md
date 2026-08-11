@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.4.0-alpha.1] - Unreleased
+
+### Added
+
+- Isolated Playwright browser worker with a narrow JSON-lines command boundary.
+- Persistent Chromium, Google Chrome, and Microsoft Edge profile contracts.
+- Minimized observations for tabs, accessibility, relevant controls, validation, dialogs, console/network failures, uploads, downloads, screenshots, and page fingerprints.
+- Declarative semantic actions with preconditions, intended results, bounded retries, permissions, confirmation state, and post-action verification.
+- Durable browser session/action repositories, migrations, encrypted workflow checkpoints, takeover/return, trace capture, and restart recovery.
+- Authenticated browser-runtime API and read-only desktop session status.
+- Deterministic multi-page fixture validation that completes across a real Chromium restart.
+
+### Security
+
+- Production portal origins remain locked; development sessions accept loopback origins only.
+- Renderer IPC exposes browser session status but no generic browser action or network proxy.
+- Browser profiles, screenshots, traces, candidate data, tokens, and runtime databases remain outside source control.
+
 ## [0.3.0-alpha.1] - Unreleased
 
 ### Added

@@ -77,6 +77,17 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
   ipcMain.handle("workbench:list-workflows", () =>
     supervisor.client.listWorkflows(),
   );
+  ipcMain.handle(
+    "workbench:list-browser-sessions",
+    (_event, value: unknown) => {
+      if (value === undefined || value === null) {
+        return supervisor.client.listBrowserSessions();
+      }
+      return supervisor.client.listBrowserSessions(
+        requiredText(value, "Workflow id", 100),
+      );
+    },
+  );
   ipcMain.handle("workbench:create-candidate", (_event, value: unknown) =>
     supervisor.client.createCandidate(candidateInput(value)),
   );

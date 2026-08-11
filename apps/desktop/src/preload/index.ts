@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
   workbench: {
     getStatus: () => ipcRenderer.invoke("workbench:get-status"),
     listWorkflows: () => ipcRenderer.invoke("workbench:list-workflows"),
+    listBrowserSessions: (workflowId?: string) =>
+      ipcRenderer.invoke("workbench:list-browser-sessions", workflowId),
     createCandidate: (input: CandidateProfileCreate) =>
       ipcRenderer.invoke("workbench:create-candidate", input),
     startMockWorkflow: (input: MockWorkflowCreate) =>

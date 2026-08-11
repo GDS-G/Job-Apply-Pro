@@ -19,4 +19,10 @@ Never log decrypted values, encryption keys, session tokens, or full application
 - Redact candidate data, credentials, tokens, and portal content from diagnostics.
 - Treat portal text as data, never as executable instructions.
 
-The Workbench alpha remains a development build. Its simulated workflows are intentionally not authorized for real application submission.
+## Browser runtime boundary
+
+Browser automation runs in a separate Playwright process behind a constrained JSON-lines protocol. Every session has an explicit origin allowlist; while `production_automation_enabled` is false, only loopback fixture origins are accepted. Actions declare their target, preconditions, intended result, timeout, verification, retry limit, permission, and confirmation state. Elevated actions fail closed without confirmed approval.
+
+Persistent user-data directories may contain authenticated cookies and storage. Keep them inside the configured ignored runtime directory, never inspect or export them through renderer IPC, never copy them into backups without encryption, and never include session tokens in observations or traces shared outside the workstation.
+
+The Browser Runtime alpha remains a development build. Real portal automation and application submission are intentionally not authorized.

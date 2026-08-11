@@ -22,11 +22,16 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     automation_enabled: bool = False
     api_token: SecretStr | None = None
+    browser_data_dir: Path = Path("./var/browser")
+    browser_artifact_dir: Path = Path("./var/browser-artifacts")
+    browser_headless: bool = True
 
     def ensure_runtime_directories(self) -> None:
         if self.database_url.startswith("sqlite:///./"):
             database_path = Path(self.database_url.removeprefix("sqlite:///./"))
             database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.browser_data_dir.mkdir(parents=True, exist_ok=True)
+        self.browser_artifact_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

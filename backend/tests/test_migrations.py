@@ -27,5 +27,7 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "applications",
         "workflow_checkpoints",
         "workflow_events",
+        "browser_sessions",
+        "browser_actions",
     } <= tables
     get_settings.cache_clear()
