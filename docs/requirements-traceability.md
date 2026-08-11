@@ -4,7 +4,7 @@
 
 This audit maps the current repository to the authoritative **Job Apply Pro Documentation** Google Doc. It supplements the phase-oriented release notes; it does not narrow the long-term product scope. Explicit current user direction, accepted ADRs, and versioned contracts remain higher priority than older implementation notes when they conflict.
 
-The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Portal Readiness `v0.12.2-alpha.1` removed that ambiguity, Provider Connectivity `v0.13.0-alpha.1` closed the provider OAuth and official-adapter source gap, and Supervised Portal Execution `v0.14.0-alpha.1` adds a generic live-browser execution boundary without claiming portal authorization or production compatibility.
+The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Portal Readiness `v0.12.2-alpha.1` removed that ambiguity, Provider Connectivity `v0.13.0-alpha.1` closed the provider OAuth and official-adapter source gap, Supervised Portal Execution `v0.14.0-alpha.1` added a generic live-browser execution boundary, and Document Generation & Retention `v0.15.0-alpha.1` adds evidence-bound tailored outputs and exact submitted-version evidence without claiming portal authorization or production compatibility.
 
 ## Status meanings
 
@@ -22,7 +22,8 @@ The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical 
 | Core data, repositories, migrations, encryption, workflow state, checkpoints, and append-only events | Implemented and automated | `backend/src/job_apply_pro/domain`, `storage`, `security`, Alembic migrations, core/workflow/encryption tests | Continue expanding persisted schemas with new product functions |
 | Sandboxed Electron shell and authenticated localhost boundary | Implemented and automated | Electron main/preload/renderer, authenticated FastAPI routes, strict contracts, renderer/API security tests | Broader interaction-level desktop testing and final human accessibility review |
 | Browser runtime, observations, verified actions, traces, takeover, and recovery | Implemented, externally gated | Isolated Playwright worker, browser runtime service, exact-origin enforcement, persistent visible profiles, browser and supervised execution tests | Authorized live profiles, portal-specific recovery evidence, native-dialog and sleep/restart lab validation |
-| Candidate evidence, resume import, claims, answer provenance, retrieval, and locking | Partial | Knowledge domain/service/repository, PDF/DOCX/RTF/TXT/Markdown extraction, claim and retrieval tests | Trusted legacy DOC conversion, richer layout/OCR handling, tailored resume and cover-letter generation, broader import corpus |
+| Candidate evidence, resume import, claims, answer provenance, retrieval, and locking | Partial | Knowledge domain/service/repository, PDF/DOCX/RTF/TXT/Markdown extraction, claim and retrieval tests | Trusted legacy DOC conversion, richer layout/OCR handling, and broader import corpus |
+| Tailored resume/cover-letter generation and exact submitted-document retention | Implemented and automated | Evidence-only preview/generation service, DOCX/PDF renderer, fingerprint approval, encrypted versions, generation/submission audit tables, desktop review flow, Reference ATS retention, and deterministic tests | Richer templates and semantic ranking remain improvements; authorized live portal upload evidence remains externally gated |
 | Provider-independent AI gateway, routing, privacy, budgets, cache, and structured output | Partial | AI domain, OpenAI-compatible/local adapter, registry, service, prompts, AI gateway tests | Separately implemented secondary cloud provider, broader stable evaluations, live-provider validation, optional local runtimes |
 | Reference ATS discovery-through-confirmation vertical slice | Implemented and automated | `portals/reference_ats.py`, `ReferencePortalService`, loopback fixture and portal vertical-slice tests | Retain as the safe executable regression reference |
 | LinkedIn, Indeed, Monster, CareerBuilder, Dice, ZipRecruiter, Glassdoor, Workday, Taleo, Greenhouse, and company-career support | Implemented, externally gated | Production-disabled catalog, replay corpus, supervised run state/evidence repository, exact-origin runtime, authenticated API, native confirmation UI, and policy tests | Authorized live fingerprints; portal-specific mappings, terms and rate-limit approval; regression evidence; production enablement per capability |
@@ -50,10 +51,11 @@ These controls are source capability, not provider permission. `production_enabl
 
 ## Next source-controlled implementation order
 
-1. Expand document ingestion and generation, including trusted legacy DOC conversion, OCR/layout fallbacks, tailored document variants, and submitted-document retention.
+1. Expand document ingestion with trusted legacy DOC conversion, OCR/layout fallbacks, and a broader adversarial import corpus.
 2. Expand desktop interaction tests, notifications, provider configuration import/validation UX, provider pagination/attachment handling, and authorized live-provider health evidence.
-3. Add portal-specific mappings only from authorized supervised evidence, with terms, limits, capability ownership, and stop conditions recorded per portal.
-4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.
+3. Add richer document templates and semantic ranking only through the governed AI boundary, while preserving evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval.
+4. Add portal-specific mappings only from authorized supervised evidence, with terms, limits, capability ownership, and stop conditions recorded per portal.
+5. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.
 
 ## External evidence that cannot be replaced by source tests
 

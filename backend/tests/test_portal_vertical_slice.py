@@ -28,7 +28,12 @@ from job_apply_pro.services.core import CoreService
 from job_apply_pro.services.knowledge import CandidateKnowledgeService
 from job_apply_pro.services.portals import PortalApprovalError, ReferencePortalService
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
-from job_apply_pro.storage.models import FitScoreRow, JobRequirementRow, PortalRunRow
+from job_apply_pro.storage.models import (
+    FitScoreRow,
+    JobRequirementRow,
+    PortalRunRow,
+    SubmittedDocumentEvidenceRow,
+)
 from job_apply_pro.storage.repositories import (
     ApplicationRepository,
     BrowserRuntimeRepository,
@@ -180,6 +185,8 @@ def _service(
     knowledge = CandidateKnowledgeService(
         knowledge_repository,
         candidates,
+        jobs,
+        applications,
         cipher,
         document_data_dir=tmp_path / "documents",
         document_max_bytes=1_000_000,
@@ -315,6 +322,11 @@ def test_reference_ats_completes_discovery_to_confirmed_tracking(
             ]
             assert session.scalar(select(func.count(JobRequirementRow.id))) == 2
             assert session.scalar(select(func.count(FitScoreRow.id))) == 1
+            submitted = session.scalar(select(SubmittedDocumentEvidenceRow))
+            assert submitted is not None
+            assert submitted.application_id == completed.application_id
+            assert submitted.document_version_id == completed.selected_document_version_id
+            assert submitted.file_name == "portal-resume.txt"
             assert session.get(PortalRunRow, completed.id) is not None
             assert service.get(completed.id) == completed
     finally:

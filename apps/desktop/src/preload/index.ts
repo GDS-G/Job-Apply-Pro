@@ -10,6 +10,7 @@ import type {
   MockWorkflowCreate,
   ReferencePortalRunCreate,
   SupervisedPortalRunCreate,
+  TailoredDocumentRequest,
   WorkflowControlAction,
 } from "@job-apply-pro/contracts";
 
@@ -31,6 +32,17 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("knowledge:import-resume", profileId),
     reviewCandidateClaim: (claimId: string, approved: boolean) =>
       ipcRenderer.invoke("knowledge:review-claim", claimId, approved),
+    previewTailoredDocument: (input: TailoredDocumentRequest) =>
+      ipcRenderer.invoke("knowledge:preview-tailored", input),
+    generateTailoredDocument: (
+      input: TailoredDocumentRequest,
+      reviewFingerprint: string,
+    ) =>
+      ipcRenderer.invoke(
+        "knowledge:generate-tailored",
+        input,
+        reviewFingerprint,
+      ),
     createCandidate: (input: CandidateProfileCreate) =>
       ipcRenderer.invoke("workbench:create-candidate", input),
     startMockWorkflow: (input: MockWorkflowCreate) =>

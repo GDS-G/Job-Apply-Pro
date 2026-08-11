@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Supervised Portal Execution",
+        build="Document Generation & Retention",
         environment=settings.environment,
     )

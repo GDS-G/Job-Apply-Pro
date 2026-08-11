@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from job_apply_pro.domain.applications import ApplicationCreate
+from job_apply_pro.domain.applications import (
+    ApplicationCreate,
+    ApplicationDocumentRole,
+    SubmittedDocumentEvidence,
+)
 from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionResult,
@@ -314,6 +319,7 @@ class ReferencePortalService:
             "Confirmed application entered local tracking",
             verification=VerificationResult.PASSED,
         )
+        self._retain_confirmed_document(run, evidence.verified_at)
         stopped = self._browser.stop(run.browser_session_id)
         completed = run.model_copy(
             update={
@@ -324,6 +330,43 @@ class ReferencePortalService:
             }
         )
         return self._runs.save(completed)
+
+    def _retain_confirmed_document(self, run: PortalRunSnapshot, captured_at: datetime) -> None:
+        version = self._knowledge.get_version_record(run.selected_document_version_id)
+        if version is None:
+            raise PortalExecutionError(
+                "The confirmed submission document version is no longer available"
+            )
+        upload_fingerprint = hashlib.sha256(
+            "|".join(
+                [
+                    run.portal.value,
+                    run.id,
+                    run.review_fingerprint,
+                    version.id,
+                    version.sha256,
+                ]
+            ).encode()
+        ).hexdigest()
+        for existing in self._knowledge.list_submitted_documents(run.application_id):
+            if (
+                existing.document_version_id == version.id
+                and existing.role is ApplicationDocumentRole.RESUME
+                and existing.upload_fingerprint == upload_fingerprint
+            ):
+                return
+        self._knowledge.add_submitted_document(
+            SubmittedDocumentEvidence(
+                id=str(uuid4()),
+                application_id=run.application_id,
+                document_version_id=version.id,
+                role=ApplicationDocumentRole.RESUME,
+                file_name=version.file_name,
+                sha256=version.sha256,
+                upload_fingerprint=upload_fingerprint,
+                captured_at=captured_at,
+            )
+        )
 
     def get(self, run_id: str) -> PortalRunSnapshot:
         run = self._runs.get(run_id)

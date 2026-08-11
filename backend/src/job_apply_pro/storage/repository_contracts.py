@@ -1,7 +1,11 @@
 from typing import Protocol
 
 from job_apply_pro.domain.ai import AICacheRecord, AIInvocationRecord
-from job_apply_pro.domain.applications import Application, ApplicationCreate
+from job_apply_pro.domain.applications import (
+    Application,
+    ApplicationCreate,
+    SubmittedDocumentEvidence,
+)
 from job_apply_pro.domain.browser import (
     BrowserActionResult,
     BrowserObservation,
@@ -19,13 +23,14 @@ from job_apply_pro.domain.communications import (
     MutationAudit,
     OutboundDraft,
 )
-from job_apply_pro.domain.jobs import Job, JobCreate
+from job_apply_pro.domain.jobs import Job, JobCreate, JobRequirement
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryRecord,
     CandidateClaim,
     CandidateDocument,
     CandidateDocumentVersion,
     CandidateDocumentVersionRecord,
+    DocumentGenerationAudit,
     EvidenceSource,
     RetrievalChunkRecord,
 )
@@ -46,6 +51,8 @@ class JobRepositoryProtocol(Protocol):
     def get(self, job_id: str) -> Job | None: ...
 
     def find_by_identity(self, source: str, external_id: str) -> Job | None: ...
+
+    def list_requirements(self, job_id: str) -> list[JobRequirement]: ...
 
 
 class ApplicationRepositoryProtocol(Protocol):
@@ -112,6 +119,14 @@ class CandidateKnowledgeRepositoryProtocol(Protocol):
         claims: list[CandidateClaim],
     ) -> None: ...
 
+    def add_generated_bundle(
+        self,
+        document: CandidateDocument,
+        version: CandidateDocumentVersionRecord,
+        evidence: EvidenceSource,
+        audit: DocumentGenerationAudit,
+    ) -> None: ...
+
     def list_documents(self, profile_id: str) -> list[CandidateDocument]: ...
 
     def get_document(self, document_id: str) -> CandidateDocument | None: ...
@@ -135,6 +150,16 @@ class CandidateKnowledgeRepositoryProtocol(Protocol):
     def delete_chunk(self, source_type: str, source_id: str) -> None: ...
 
     def list_chunks(self, profile_id: str) -> list[RetrievalChunkRecord]: ...
+
+    def add_generation_audit(self, audit: DocumentGenerationAudit) -> DocumentGenerationAudit: ...
+
+    def list_generation_audits(self, application_id: str) -> list[DocumentGenerationAudit]: ...
+
+    def add_submitted_document(
+        self, evidence: SubmittedDocumentEvidence
+    ) -> SubmittedDocumentEvidence: ...
+
+    def list_submitted_documents(self, application_id: str) -> list[SubmittedDocumentEvidence]: ...
 
 
 class AIGatewayRepositoryProtocol(Protocol):

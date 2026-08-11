@@ -15,6 +15,11 @@ class DocumentKind(StrEnum):
     OTHER = "OTHER"
 
 
+class DocumentOutputFormat(StrEnum):
+    DOCX = "DOCX"
+    PDF = "PDF"
+
+
 class ClaimVerificationStatus(StrEnum):
     PROPOSED = "PROPOSED"
     VERIFIED = "VERIFIED"
@@ -156,6 +161,75 @@ class DocumentImportResult(BaseModel):
     version: CandidateDocumentVersion
     extraction: DocumentExtraction
     proposed_claims: list[CandidateClaim]
+
+
+class TailoredDocumentRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_id: str = Field(min_length=1, max_length=100)
+    kind: DocumentKind
+    output_format: DocumentOutputFormat = DocumentOutputFormat.DOCX
+    variant_label: str = Field(default="Tailored", min_length=1, max_length=120)
+    max_claims: int = Field(default=12, ge=1, le=30)
+
+
+class TailoredDocumentSection(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    heading: str = Field(min_length=1, max_length=200)
+    paragraphs: list[str] = Field(max_length=50)
+    evidence_claim_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class TailoredDocumentPreview(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_id: str
+    profile_id: str
+    job_id: str
+    kind: DocumentKind
+    output_format: DocumentOutputFormat
+    employer: str
+    title: str
+    variant_label: str
+    sections: list[TailoredDocumentSection]
+    selected_claim_ids: list[str]
+    matched_requirement_ids: list[str]
+    missing_required_requirements: list[str]
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class TailoredDocumentApproval(TailoredDocumentRequest):
+    model_config = ConfigDict(frozen=True)
+
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+    confirmation_phrase: str = Field(min_length=1, max_length=100)
+
+
+class DocumentGenerationAudit(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    application_id: str
+    profile_id: str
+    job_id: str
+    document_version_id: str
+    kind: DocumentKind
+    output_format: DocumentOutputFormat
+    review_fingerprint: str
+    evidence_claim_ids: list[str]
+    requirement_ids: list[str]
+    missing_required_requirements: list[str]
+    created_at: datetime
+
+
+class TailoredDocumentResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    preview: TailoredDocumentPreview
+    document: CandidateDocument
+    version: CandidateDocumentVersion
+    audit: DocumentGenerationAudit
 
 
 class ExperienceSummary(BaseModel):

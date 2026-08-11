@@ -9,7 +9,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Supervised Portal Execution v0.14.0-alpha.1"),
+      screen.getByText("Document Generation & Retention v0.15.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
