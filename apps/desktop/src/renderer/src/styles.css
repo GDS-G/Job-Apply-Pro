@@ -583,6 +583,36 @@ h1 {
   place-items: center;
 }
 
+.provider-configuration-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.provider-configuration-actions > svg {
+  color: #7f89a0;
+}
+
+.provider-configuration-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 18px 0;
+  padding: 10px 12px;
+  color: #4c566c;
+  font-size: 10px;
+  background: #f7f8fb;
+  border: 1px solid #e3e6ed;
+  border-radius: 10px;
+}
+
+.provider-configuration-summary strong {
+  flex: 0 0 auto;
+  color: #283247;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -41,6 +41,7 @@ import type {
   IntegrationHealth,
   IntegrationProvider,
   OperationsDashboard,
+  ProviderConfigurationStatus,
   PortalAdapterDefinition,
   PortalKind,
   PortalRunSnapshot,
@@ -119,6 +120,8 @@ export function App() {
   const [integrationHealth, setIntegrationHealth] = useState<
     IntegrationHealth[]
   >([]);
+  const [providerConfiguration, setProviderConfiguration] =
+    useState<ProviderConfigurationStatus | null>(null);
   const [communications, setCommunications] = useState<CommunicationRecord[]>(
     [],
   );
@@ -167,6 +170,7 @@ export function App() {
         challenges,
         adapters,
         integrations,
+        configuration,
         records,
         summary,
         operationsSnapshot,
@@ -182,6 +186,7 @@ export function App() {
         window.jobApplyPro.workbench.listChallengeSessions(),
         window.jobApplyPro.workbench.listPortalCatalog(),
         window.jobApplyPro.workbench.listIntegrationHealth(),
+        window.jobApplyPro.workbench.getProviderConfigurationStatus(),
         window.jobApplyPro.workbench.listCommunicationRecords(),
         window.jobApplyPro.workbench.getDailyCommunicationSummary(),
         window.jobApplyPro.workbench.getOperationsDashboard(),
@@ -197,6 +202,7 @@ export function App() {
       setChallengeSessions(challenges);
       setPortalCatalog(adapters);
       setIntegrationHealth(integrations);
+      setProviderConfiguration(configuration);
       setCommunications(records);
       setCommunicationSummary(summary);
       setOperations(operationsSnapshot);
@@ -229,6 +235,42 @@ export function App() {
     },
     [],
   );
+
+  const importProviderConfiguration = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result =
+        await window.jobApplyPro.workbench.selectAndImportProviderConfiguration();
+      if (result) {
+        await refreshWorkflows();
+        setProviderSyncMessage(
+          `Encrypted provider configuration imported for ${result.providers.length} provider${result.providers.length === 1 ? "" : "s"}. Account authorization is still required.`,
+        );
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, [refreshWorkflows]);
+
+  const clearProviderConfiguration = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result =
+        await window.jobApplyPro.workbench.clearProviderConfiguration();
+      if (result) {
+        await refreshWorkflows();
+        setProviderSyncMessage(
+          "Local provider configuration cleared. Provider consent was not revoked.",
+        );
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }, [refreshWorkflows]);
 
   const revokeProviderAuthorization = useCallback(
     async (provider: IntegrationProvider) => {
@@ -933,7 +975,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Provider Data Resilience v0.17.0-alpha.1</strong>
+              <strong>Provider Configuration Control v0.18.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2036,7 +2078,43 @@ export function App() {
                   health, and audited calendar changes
                 </p>
               </div>
-              <Mail size={19} />
+              <div className="provider-configuration-actions">
+                <span className="status-pill status-pill--safe">
+                  {providerConfiguration?.source.replaceAll("_", " ") ??
+                    "LOADING CONFIGURATION"}
+                </span>
+                <button
+                  className="button button--secondary"
+                  disabled={
+                    busy || providerConfiguration?.source === "ENVIRONMENT"
+                  }
+                  onClick={() => void importProviderConfiguration()}
+                  type="button"
+                >
+                  <Upload size={14} /> Import provider config
+                </button>
+                {providerConfiguration?.source === "ENCRYPTED_DATABASE" ? (
+                  <button
+                    className="button button--danger"
+                    disabled={busy}
+                    onClick={() => void clearProviderConfiguration()}
+                    type="button"
+                  >
+                    Clear config
+                  </button>
+                ) : null}
+                <Mail size={19} />
+              </div>
+            </div>
+            <div className="provider-configuration-summary">
+              <strong>Provider registration control</strong>
+              <span>
+                {providerConfiguration?.source === "ENVIRONMENT"
+                  ? "Managed by the process environment; desktop replacement is disabled."
+                  : providerConfiguration?.providers.length
+                    ? `${providerConfiguration.providers.length} provider registration${providerConfiguration.providers.length === 1 ? "" : "s"} encrypted locally. ${providerConfiguration.automatic_categories.length ? `${providerConfiguration.automatic_categories.length} automatic categor${providerConfiguration.automatic_categories.length === 1 ? "y is" : "ies are"} enabled.` : "Automatic sending is disabled."} Importing does not authorize accounts.`
+                    : "No provider registration is active. Import a reviewed JSON configuration; passwords, tokens, and client secrets are rejected."}
+              </span>
             </div>
             <div className="integration-grid">
               {integrationHealth.map((integration) => (

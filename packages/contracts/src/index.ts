@@ -485,6 +485,24 @@ export interface IntegrationHealth {
   account_hint?: string | null;
 }
 
+export type ProviderConfigurationSource =
+  "NOT_CONFIGURED" | "IMPORT_PREVIEW" | "ENVIRONMENT" | "ENCRYPTED_DATABASE";
+
+export interface ProviderConfigurationPreview {
+  provider: IntegrationProvider;
+  oauth_configured: boolean;
+  requested_scopes: string[];
+  read_enabled: boolean;
+  write_enabled: boolean;
+}
+
+export interface ProviderConfigurationStatus {
+  source: ProviderConfigurationSource;
+  providers: ProviderConfigurationPreview[];
+  automatic_categories: MessageCategory[];
+  updated_at?: string | null;
+}
+
 export interface OAuthAuthorizationRequest {
   provider: IntegrationProvider;
   authorization_url: string;
@@ -1101,6 +1119,9 @@ export interface DesktopBridge {
       priorFingerprint: string,
     ): Promise<ChallengeSessionSnapshot>;
     listIntegrationHealth(): Promise<IntegrationHealth[]>;
+    getProviderConfigurationStatus(): Promise<ProviderConfigurationStatus>;
+    selectAndImportProviderConfiguration(): Promise<ProviderConfigurationStatus | null>;
+    clearProviderConfiguration(): Promise<ProviderConfigurationStatus | null>;
     startProviderAuthorization(
       provider: IntegrationProvider,
     ): Promise<OAuthAuthorizationRequest>;

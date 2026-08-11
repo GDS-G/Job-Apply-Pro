@@ -18,6 +18,13 @@ class IntegrationStatus(StrEnum):
     ERROR = "ERROR"
 
 
+class ProviderConfigurationSource(StrEnum):
+    NOT_CONFIGURED = "NOT_CONFIGURED"
+    IMPORT_PREVIEW = "IMPORT_PREVIEW"
+    ENVIRONMENT = "ENVIRONMENT"
+    ENCRYPTED_DATABASE = "ENCRYPTED_DATABASE"
+
+
 class OutboundPolicy(StrEnum):
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
     AUTOMATIC = "AUTOMATIC"
@@ -218,6 +225,31 @@ class IntegrationHealth(BaseModel):
     credential_reference: str | None = Field(default=None, max_length=200)
     granted_scopes: list[str] = Field(default_factory=list, max_length=100)
     account_hint: str | None = Field(default=None, max_length=200)
+
+
+class ProviderConfigurationImport(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    configuration_json: SecretStr = Field(min_length=2, max_length=65_536)
+
+
+class ProviderConfigurationPreview(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    provider: IntegrationProvider
+    oauth_configured: bool
+    requested_scopes: list[str] = Field(default_factory=list, max_length=100)
+    read_enabled: bool
+    write_enabled: bool
+
+
+class ProviderConfigurationStatus(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    source: ProviderConfigurationSource
+    providers: list[ProviderConfigurationPreview] = Field(default_factory=list, max_length=4)
+    automatic_categories: list[MessageCategory] = Field(default_factory=list, max_length=11)
+    updated_at: datetime | None = None
 
 
 class OAuthAuthorizationState(BaseModel):

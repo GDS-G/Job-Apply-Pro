@@ -25,6 +25,7 @@ import type {
   OperationsDashboard,
   OAuthAuthorizationRequest,
   OAuthAuthorizationState,
+  ProviderConfigurationStatus,
   ProviderMessageSyncResult,
   PortalRunSnapshot,
   PortalAdapterDefinition,
@@ -366,6 +367,32 @@ export class BackendClient {
 
   listIntegrationHealth(): Promise<IntegrationHealth[]> {
     return this.request("/communications/integrations");
+  }
+
+  getProviderConfigurationStatus(): Promise<ProviderConfigurationStatus> {
+    return this.request("/communications/configuration");
+  }
+
+  validateProviderConfiguration(
+    configurationJson: string,
+  ): Promise<ProviderConfigurationStatus> {
+    return this.request("/communications/configuration/validate", {
+      method: "POST",
+      body: JSON.stringify({ configuration_json: configurationJson }),
+    });
+  }
+
+  importProviderConfiguration(
+    configurationJson: string,
+  ): Promise<ProviderConfigurationStatus> {
+    return this.request("/communications/configuration/import", {
+      method: "POST",
+      body: JSON.stringify({ configuration_json: configurationJson }),
+    });
+  }
+
+  clearProviderConfiguration(): Promise<ProviderConfigurationStatus> {
+    return this.request("/communications/configuration", { method: "DELETE" });
   }
 
   startProviderAuthorization(

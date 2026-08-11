@@ -25,3 +25,7 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0021: Traceable product and portal readiness](0021-traceable-product-and-portal-readiness.md)
 - [ADR-0022: Encrypted OAuth provider connectivity](0022-encrypted-oauth-provider-connectivity.md)
 - [ADR-0023: Supervised portal execution policy](0023-supervised-portal-execution-policy.md)
+- [ADR-0024: Evidence-bound document generation and retention](0024-evidence-bound-document-generation-and-retention.md)
+- [ADR-0025: Bounded external document ingestion](0025-bounded-external-document-ingestion.md)
+- [ADR-0026: Bounded provider data synchronization](0026-bounded-provider-data-synchronization.md)
+- [ADR-0027: Encrypted provider configuration control](0027-encrypted-provider-configuration-control.md)

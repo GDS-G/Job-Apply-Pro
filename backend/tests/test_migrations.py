@@ -44,5 +44,6 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "restore_plans",
         "document_generation_audits",
         "submitted_document_evidence",
+        "communication_configurations",
     } <= tables
     get_settings.cache_clear()

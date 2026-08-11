@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Provider Data Resilience `v0.17.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, reviews scopes, and completes provider authorization.
+This guide applies to Provider Configuration Control `v0.18.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.17.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.18.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -15,7 +15,27 @@ The packaged browser runtime uses Microsoft Edge. Keep Windows and Edge supporte
 
 Job Apply Pro does not accept mailbox passwords. Each provider connection uses the system browser, OAuth Authorization Code with PKCE, a one-time loopback callback, and encrypted local token storage.
 
-Before **Review & connect** becomes available, the owner must register a public desktop application with the provider and place its public client ID plus reviewed scopes in local `JAP_COMMUNICATION_CONFIG_JSON`. Do not put client registrations, tokens, or passwords in Git, GitHub Actions, the Google development document, or chat.
+Before **Review & connect** becomes available, the owner must register a public desktop application with the provider. Create a local JSON file containing its public client ID and reviewed scopes, then select **Import provider config**. Job Apply Pro validates a maximum 64 KiB file, shows only provider/scope/capability and automatic-category details in the native confirmation, and encrypts the accepted registration metadata in the local database. Import replaces the current local registration. The raw JSON and client IDs never enter the renderer. Passwords, access tokens, refresh tokens, and client secrets are invalid and must not be included.
+
+Managed deployments may instead set `JAP_COMMUNICATION_CONFIG_JSON`; that environment value takes precedence and disables desktop replacement/clearing. Do not put a real configuration file, tokens, passwords, or private account data in Git, GitHub Actions, the Google development document, or chat. A minimal local import has this shape:
+
+```json
+{
+  "oauth_clients": [
+    {
+      "provider": "GMAIL",
+      "client_id": "registered-public-desktop-client-id",
+      "requested_scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/gmail.readonly"
+      ]
+    }
+  ]
+}
+```
+
+The repository also includes `docs/examples/provider-configuration.example.json` with read-only examples for all four providers. Copy it outside the repository, replace only public desktop client IDs, remove unused providers/scopes, and import the copy. Add write scopes only when you intend to review and use the corresponding write operation.
 
 For Google:
 
@@ -30,7 +50,7 @@ For Microsoft:
 2. Add only delegated Microsoft Graph permissions in use: `User.Read`, `Mail.Read`, `Mail.Send`, and/or `Calendars.ReadWrite`, with `openid`, `email`, and `offline_access` for sign-in and refresh.
 3. Review Microsoft's [authorization-code/PKCE flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow), [desktop app registration guidance](https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration), and [Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference). An organization may require administrator consent.
 
-After configuration, select **Review & connect**, verify the provider host and displayed scopes, sign in manually, complete any MFA, and approve only the expected access. Return to Job Apply Pro and refresh the dashboard. Use **Revoke access** to revoke at the provider where supported and always delete the encrypted local credential. Microsoft may also require revocation from the account's application-consent page.
+After configuration, select **Review & connect**, verify the provider host and displayed scopes, sign in manually, complete any MFA, and approve only the expected access. Return to Job Apply Pro and refresh the dashboard. Use **Revoke access** to revoke at the provider where supported and always delete the encrypted local credential. Microsoft may also require revocation from the account's application-consent page. **Clear config** disables local provider registrations but does not revoke provider consent or delete retained encrypted OAuth tokens; revoke each connection first when removing access.
 
 For a connected Gmail or Outlook account with read access, select **Sync messages**. The app follows at most ten provider pages and imports at most 1,000 messages per operation. Repeat provider message IDs reuse the existing encrypted record. Gmail attachment filenames come from bounded MIME metadata; Outlook attachment filenames are requested separately only when the message reports attachments. Inline resources are ignored, attachment bytes are never downloaded, and filenames do not authorize opening or trusting a file. A green result reports fetched, newly imported, and already-present counts. Provider errors, repeated page tokens, an off-origin Microsoft continuation URL, or a resource limit stop the sync without treating incomplete data as complete.
 
