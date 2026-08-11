@@ -20,6 +20,8 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert client.get("/api/v1/portals/runs").status_code == 401
         assert client.get("/api/v1/challenges/sessions").status_code == 401
         assert client.get("/api/v1/communications/integrations").status_code == 401
+        assert client.get("/api/v1/operations/dashboard").status_code == 401
+        assert client.post("/api/v1/operations/backup-schedules/run-due").status_code == 401
 
         response = client.get(
             "/api/v1/runtime/status",
@@ -28,13 +30,14 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert response.status_code == 200
         assert response.json() == {
             "status": "ready",
-            "version": "0.10.0-alpha.1",
+            "version": "0.11.0-alpha.1",
             "automation_enabled": False,
             "browser_runtime_available": True,
             "candidate_knowledge_available": True,
             "ai_gateway_available": True,
             "portal_vertical_slice_available": True,
             "communication_scheduling_available": True,
+            "operations_dashboard_available": True,
             "authenticated": True,
         }
     finally:

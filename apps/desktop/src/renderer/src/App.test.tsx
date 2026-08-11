@@ -8,7 +8,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Communication & Scheduling v0.10.0-alpha.1"),
+      screen.getByText("Dashboard, Backup & Licensing v0.11.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -24,6 +24,21 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: /communication & scheduling/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: /operations, recovery & licensing/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /create verified backup/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /stage restore/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /schedule daily/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/application report/i)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /create encrypted profile/i }),
     ).toBeInTheDocument();

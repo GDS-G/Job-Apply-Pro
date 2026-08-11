@@ -11,6 +11,7 @@ type StatusListener = (status: BackendRuntimeStatus) => void;
 
 export interface BackendSupervisorOptions {
   projectRoot: string;
+  dataRoot: string;
   baseUrl: string;
   apiToken: string;
   masterKey: string;
@@ -20,6 +21,7 @@ export interface BackendSupervisorOptions {
 
 export class BackendSupervisor {
   private child: ChildProcess | null = null;
+  private backupScheduleTimer: ReturnType<typeof setInterval> | null = null;
   private stopping = false;
   private listeners = new Set<StatusListener>();
   private currentStatus: BackendRuntimeStatus = {
@@ -54,6 +56,14 @@ export class BackendSupervisor {
       JAP_API_TOKEN: this.options.apiToken,
       JAP_MASTER_KEY: this.options.masterKey,
       JAP_DATABASE_URL: this.options.databaseUrl,
+      JAP_BROWSER_DATA_DIR: join(this.options.dataRoot, "browser"),
+      JAP_BROWSER_ARTIFACT_DIR: join(
+        this.options.dataRoot,
+        "browser-artifacts",
+      ),
+      JAP_DOCUMENT_DATA_DIR: join(this.options.dataRoot, "documents"),
+      JAP_BACKUP_DATA_DIR: join(this.options.dataRoot, "backups"),
+      JAP_RESTORE_STAGING_DIR: join(this.options.dataRoot, "restore-staging"),
       PYTHONUNBUFFERED: "1",
     };
 
@@ -104,6 +114,10 @@ export class BackendSupervisor {
 
   stop(): void {
     this.stopping = true;
+    if (this.backupScheduleTimer !== null) {
+      clearInterval(this.backupScheduleTimer);
+      this.backupScheduleTimer = null;
+    }
     this.child?.kill();
     this.child = null;
     this.update("stopped", "Local backend stopped.");
@@ -119,6 +133,7 @@ export class BackendSupervisor {
       try {
         await this.client.runtimeStatus();
         this.update("ready", "Encrypted local backend connected.");
+        this.startBackupScheduler();
         return;
       } catch {
         await delay(250);
@@ -130,6 +145,15 @@ export class BackendSupervisor {
         "Local backend did not become ready before the timeout.",
       );
     }
+  }
+
+  private startBackupScheduler(): void {
+    if (this.backupScheduleTimer !== null) return;
+    const runDue = () => {
+      void this.client.runDueBackupSchedules().catch(() => undefined);
+    };
+    runDue();
+    this.backupScheduleTimer = setInterval(runDue, 60_000);
   }
 
   private resolvePython(): string {

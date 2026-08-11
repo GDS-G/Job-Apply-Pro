@@ -39,5 +39,8 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "portal_runs",
         "challenge_sessions",
         "challenge_events",
+        "backup_manifests",
+        "backup_schedules",
+        "restore_plans",
     } <= tables
     get_settings.cache_clear()
