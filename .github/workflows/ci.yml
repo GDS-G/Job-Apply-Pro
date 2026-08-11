@@ -12,19 +12,19 @@ jobs:
   validate:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.9.0
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -52,3 +52,22 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Package bundled backend
+        run: pnpm package:backend
+
+      - name: Smoke-test bundled backend
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_packaged_backend.ps1
+
+      - name: Package unpacked Windows application
+        run: pnpm --filter @job-apply-pro/desktop package:dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload package smoke artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: job-apply-pro-windows-unpacked
+          path: release/win-unpacked
+          retention-days: 7
+          if-no-files-found: error

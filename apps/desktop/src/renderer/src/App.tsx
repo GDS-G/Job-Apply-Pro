@@ -36,6 +36,7 @@ import type {
   ChallengeSessionSnapshot,
   CommunicationRecord,
   DailyCommunicationSummary,
+  DesktopUpdateStatus,
   IntegrationHealth,
   HelpTopic,
   OperationsDashboard,
@@ -85,7 +86,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Dashboard, backup & licensing</span>
+        <span>Production hardening</span>
       </div>
     </div>
   );
@@ -122,6 +123,10 @@ export function App() {
   const [backupSchedules, setBackupSchedules] = useState<BackupSchedule[]>([]);
   const [restorePlan, setRestorePlan] = useState<RestorePlan | null>(null);
   const [helpTopics, setHelpTopics] = useState<HelpTopic[]>([]);
+  const [updateStatus, setUpdateStatus] = useState<DesktopUpdateStatus | null>(
+    null,
+  );
+  const [diagnosticPath, setDiagnosticPath] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -151,6 +156,7 @@ export function App() {
         backupItems,
         scheduleItems,
         topics,
+        desktopUpdate,
       ] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
@@ -164,6 +170,7 @@ export function App() {
         window.jobApplyPro.workbench.listBackups(),
         window.jobApplyPro.workbench.listBackupSchedules(),
         window.jobApplyPro.workbench.listHelpTopics(),
+        window.jobApplyPro.workbench.getUpdateStatus(),
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
@@ -177,6 +184,7 @@ export function App() {
       setBackups(backupItems);
       setBackupSchedules(scheduleItems);
       setHelpTopics(topics);
+      setUpdateStatus(desktopUpdate);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -216,6 +224,11 @@ export function App() {
       unsubscribe();
     };
   }, [refreshWorkflows]);
+
+  useEffect(
+    () => window.jobApplyPro.workbench.onUpdateStatus(setUpdateStatus),
+    [],
+  );
 
   useEffect(() => {
     if (status.state !== "ready") return;
@@ -334,6 +347,67 @@ export function App() {
     setError(null);
     try {
       setRestorePlan(await window.jobApplyPro.workbench.stageRestore(backupId));
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyStagedRestore(plan: RestorePlan) {
+    setBusy(true);
+    setError(null);
+    try {
+      const applied = await window.jobApplyPro.workbench.applyRestore(
+        plan.id,
+        plan.fingerprint,
+      );
+      if (applied) {
+        setRestorePlan({
+          ...plan,
+          status: "APPLIED",
+          applied_at: new Date().toISOString(),
+        });
+        await refreshWorkflows();
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportDiagnostics() {
+    setBusy(true);
+    setError(null);
+    try {
+      setDiagnosticPath(
+        await window.jobApplyPro.workbench.exportSupportDiagnostics(),
+      );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkForUpdates() {
+    setBusy(true);
+    setError(null);
+    try {
+      setUpdateStatus(await window.jobApplyPro.workbench.checkForUpdates());
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function downloadUpdate() {
+    setBusy(true);
+    setError(null);
+    try {
+      setUpdateStatus(await window.jobApplyPro.workbench.downloadUpdate());
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -603,7 +677,7 @@ export function App() {
           <section className="hero-row">
             <div>
               <span className="eyebrow">
-                Phase 10 · Encrypted communications and scheduling
+                Phase 12 · Production hardening and release readiness
               </span>
               <h1>Supervised application workbench</h1>
               <p>{status.message}</p>
@@ -642,11 +716,11 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Dashboard, Backup & Licensing v0.11.0-alpha.1</strong>
+              <strong>Production Hardening v0.12.0-alpha.1</strong>
               <p>
-                Gmail, Outlook, Google Calendar, and Outlook Calendar now share
-                normalized contracts, encrypted local records, conflict-aware
-                plans, and confirmation-gated mutation audits.
+                Bundled Windows runtime, offline recovery, redacted diagnostics,
+                accessibility gates, and signed-update controls are ready for
+                release validation.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -1044,7 +1118,11 @@ export function App() {
                 )}
               </div>
             </div>
-            <div className="adapter-health" aria-label="Portal adapter health">
+            <div
+              className="adapter-health"
+              aria-label="Portal adapter health"
+              role="region"
+            >
               {portalCatalog.map((adapter) => (
                 <div className="adapter-health__item" key={adapter.kind}>
                   <div>
@@ -1260,6 +1338,13 @@ export function App() {
                   {operations?.license.recovery_allowed ? "yes" : "no"}
                 </small>
               </article>
+              <article className="operations-card">
+                <span>Secure updates</span>
+                <strong>{updateStatus?.state ?? "LOADING"}</strong>
+                <small>
+                  {updateStatus?.message ?? "Reading update status…"}
+                </small>
+              </article>
             </div>
             <div className="backup-workspace">
               <div>
@@ -1297,6 +1382,16 @@ export function App() {
                   >
                     <RotateCcw size={15} /> Stage restore
                   </button>
+                  {restorePlan?.status === "STAGED" && (
+                    <button
+                      className="button button--danger"
+                      disabled={busy}
+                      onClick={() => void applyStagedRestore(restorePlan)}
+                      type="button"
+                    >
+                      <ShieldCheck size={15} /> Apply staged restore
+                    </button>
+                  )}
                   <button
                     className="button button--secondary"
                     disabled={busy || backupSchedules.length > 0}
@@ -1305,6 +1400,44 @@ export function App() {
                   >
                     <CalendarDays size={15} /> Schedule daily
                   </button>
+                  <button
+                    className="button button--secondary"
+                    disabled={busy}
+                    onClick={() => void exportDiagnostics()}
+                    type="button"
+                  >
+                    <FileText size={15} /> Export diagnostics
+                  </button>
+                  <button
+                    className="button button--secondary"
+                    disabled={busy || updateStatus?.state === "DISABLED"}
+                    onClick={() => void checkForUpdates()}
+                    type="button"
+                  >
+                    <RefreshCw size={15} /> Check for updates
+                  </button>
+                  {updateStatus?.state === "AVAILABLE" && (
+                    <button
+                      className="button button--secondary"
+                      disabled={busy}
+                      onClick={() => void downloadUpdate()}
+                      type="button"
+                    >
+                      <Upload size={15} /> Download update
+                    </button>
+                  )}
+                  {updateStatus?.state === "DOWNLOADED" && (
+                    <button
+                      className="button button--primary"
+                      disabled={busy}
+                      onClick={() =>
+                        void window.jobApplyPro.workbench.installUpdate()
+                      }
+                      type="button"
+                    >
+                      <RotateCcw size={15} /> Restart and install
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="backup-status">
@@ -1331,6 +1464,11 @@ export function App() {
                         Restore {restorePlan.status.toLowerCase()}:{" "}
                         {restorePlan.file_count} files · fingerprint{" "}
                         {restorePlan.fingerprint.slice(0, 12)}…
+                      </small>
+                    )}
+                    {diagnosticPath && (
+                      <small>
+                        Redacted diagnostics saved to {diagnosticPath}
                       </small>
                     )}
                   </>

@@ -22,5 +22,5 @@ Commercial entitlement payloads use Ed25519 signatures and a device public-key f
 
 - Metrics can be audited against the evidence that produced them, including attempted-versus-confirmed submission distinctions.
 - Tampered archives and path traversal fail before restore staging.
-- Database application requires a future offline Electron recovery launcher; it is intentionally absent from the live API.
+- Database application is owned by the Electron supervisor, which stops the backend, invokes the offline command with the reviewed fingerprint, preserves a pre-restore copy, and starts the backend again. It remains absent from the live API.
 - Cloud backup transport, device enrollment, revocation, renewal, and payment checkout can be added behind stable interfaces without weakening local recovery.

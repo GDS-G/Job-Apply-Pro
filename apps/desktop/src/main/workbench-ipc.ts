@@ -1,4 +1,7 @@
-import { dialog, ipcMain } from "electron";
+import { writeFile } from "node:fs/promises";
+import { arch, platform, release } from "node:os";
+
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 
 import type {
   CandidateProfileCreate,
@@ -10,6 +13,7 @@ import type {
 } from "@job-apply-pro/contracts";
 
 import type { BackendSupervisor } from "./backend-supervisor.js";
+import type { UpdateManager } from "./update-manager.js";
 
 const actions = new Set<WorkflowControlAction>([
   "ADVANCE",
@@ -149,7 +153,10 @@ function challengeAnswer(value: unknown): ChallengeAnswerCommand {
   };
 }
 
-export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
+export function registerWorkbenchIpc(
+  supervisor: BackendSupervisor,
+  updates: UpdateManager,
+): void {
   ipcMain.handle("workbench:get-status", () => supervisor.status);
   ipcMain.handle("workbench:list-workflows", () =>
     supervisor.client.listWorkflows(),
@@ -261,7 +268,72 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
       requiredText(backupIdValue, "Backup id", 100),
     ),
   );
+  ipcMain.handle(
+    "operations:apply-restore",
+    async (event, planIdValue: unknown, fingerprintValue: unknown) => {
+      const planId = requiredText(planIdValue, "Restore plan id", 100);
+      const fingerprint = requiredText(
+        fingerprintValue,
+        "Restore fingerprint",
+        64,
+      );
+      if (!/^[a-f0-9]{64}$/i.test(fingerprint)) {
+        throw new TypeError("Restore fingerprint must be a SHA-256 value.");
+      }
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Apply verified offline restore?",
+        message:
+          "Job Apply Pro will stop its local backend and replace the selected data.",
+        detail:
+          "The current database is retained as a .pre-restore recovery file. The app restarts the backend after the exact reviewed fingerprint is applied.",
+        buttons: ["Cancel", "Apply verified restore"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return false;
+      await supervisor.applyOfflineRestore(planId, fingerprint);
+      return true;
+    },
+  );
   ipcMain.handle("operations:help", () => supervisor.client.listHelpTopics());
+  ipcMain.handle("operations:export-diagnostics", async () => {
+    const diagnostics = await supervisor.client.getSupportDiagnostics();
+    const target = await dialog.showSaveDialog({
+      title: "Export redacted Job Apply Pro diagnostics",
+      defaultPath: `job-apply-pro-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: "Redacted diagnostic package", extensions: ["json"] }],
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    });
+    if (target.canceled || !target.filePath) return null;
+    const payload = {
+      desktop: {
+        application_version: app.getVersion(),
+        operating_system: platform(),
+        operating_system_release: release(),
+        architecture: arch(),
+        electron_version: process.versions.electron,
+        chrome_version: process.versions.chrome,
+        node_version: process.versions.node,
+      },
+      support: diagnostics,
+    };
+    await writeFile(target.filePath, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "w",
+      mode: 0o600,
+    });
+    return target.filePath;
+  });
+  ipcMain.handle("updates:status", () => updates.status);
+  ipcMain.handle("updates:check", () => updates.check());
+  ipcMain.handle("updates:download", () => updates.download());
+  ipcMain.handle("updates:install", () => updates.install());
   ipcMain.handle("challenges:detect", (_event, value: unknown) =>
     supervisor.client.detectChallenge(challengeInput(value)),
   );

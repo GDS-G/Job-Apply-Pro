@@ -215,25 +215,43 @@ class BackupService:
             raise ValueError("Restore plan changed after review")
         if command.confirmation_phrase != self.RESTORE_PHRASE:
             raise ValueError(f"confirmation_phrase must be {self.RESTORE_PHRASE}")
-        staged = Path(plan.staged_path).resolve()
-        if not staged.is_dir() or self._staging_dir not in staged.parents:
-            raise BackupError("Restore staging directory is unavailable")
-        if BackupCategory.DATABASE in plan.categories:
-            source = staged / "database" / "job_apply_pro.db"
-            self._atomic_restore(source, self._database_path, preserve_previous=True)
-        if BackupCategory.DOCUMENTS in plan.categories:
-            source_root = staged / "documents"
-            if source_root.is_dir():
-                for source in source_root.rglob("*"):
-                    if source.is_file() and not source.is_symlink():
-                        relative = source.relative_to(source_root)
-                        self._atomic_restore(
-                            source, self._document_dir / relative, preserve_previous=False
-                        )
+        self.apply_staged_files(
+            plan,
+            database_url=f"sqlite:///{self._database_path.as_posix()}",
+            document_dir=self._document_dir,
+            staging_dir=self._staging_dir,
+        )
         applied = plan.model_copy(
             update={"status": RestoreStatus.APPLIED, "applied_at": datetime.now(UTC)}
         )
         return self._repository.save_restore_plan(applied)
+
+    @classmethod
+    def apply_staged_files(
+        cls,
+        plan: RestorePlan,
+        *,
+        database_url: str,
+        document_dir: Path,
+        staging_dir: Path,
+    ) -> None:
+        """Apply verified staged files; callers must ensure the database is offline."""
+        staged = Path(plan.staged_path).resolve()
+        staging_root = staging_dir.resolve()
+        if not staged.is_dir() or staging_root not in staged.parents:
+            raise BackupError("Restore staging directory is unavailable")
+        if BackupCategory.DATABASE in plan.categories:
+            source = staged / "database" / "job_apply_pro.db"
+            cls._atomic_restore(source, cls._sqlite_path(database_url), preserve_previous=True)
+        if BackupCategory.DOCUMENTS in plan.categories:
+            source_root = staged / "documents"
+            if not source_root.is_dir():
+                raise BackupError("Staged restore documents are missing")
+            target_root = document_dir.resolve()
+            for source in source_root.rglob("*"):
+                if source.is_file() and not source.is_symlink():
+                    relative = source.relative_to(source_root)
+                    cls._atomic_restore(source, target_root / relative, preserve_previous=False)
 
     def list_backups(self) -> list[BackupManifest]:
         return self._repository.list_backups()

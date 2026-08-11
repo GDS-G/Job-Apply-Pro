@@ -6,9 +6,11 @@ import { app, BrowserWindow, dialog, shell } from "electron";
 import { BackendSupervisor } from "./backend-supervisor.js";
 import { loadOrCreateMasterKey } from "./secret-store.js";
 import { registerWorkbenchIpc } from "./workbench-ipc.js";
+import { UpdateManager } from "./update-manager.js";
 
 const isDevelopment = !app.isPackaged;
 let backendSupervisor: BackendSupervisor | null = null;
+let updateManager: UpdateManager | null = null;
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -90,14 +92,30 @@ app
       apiToken,
       masterKey,
       databaseUrl: process.env.JAP_DATABASE_URL ?? `sqlite:///${databasePath}`,
+      ...(app.isPackaged
+        ? {
+            backendExecutable: join(
+              process.resourcesPath,
+              "backend",
+              "job-apply-pro-backend.exe",
+            ),
+            browserEngine: "msedge" as const,
+          }
+        : { browserEngine: "chromium" as const }),
       ...(process.env.JAP_PYTHON_PATH
         ? { pythonPath: process.env.JAP_PYTHON_PATH }
         : {}),
     });
-    registerWorkbenchIpc(backendSupervisor);
+    updateManager = new UpdateManager(app.isPackaged, app.getVersion());
+    registerWorkbenchIpc(backendSupervisor, updateManager);
     backendSupervisor.onStatus((status) => {
       for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send("workbench:status", status);
+      }
+    });
+    updateManager.onStatus((status) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send("updates:status", status);
       }
     });
     createMainWindow();
@@ -106,6 +124,7 @@ app
         "Local backend startup failed. Saved data remains on disk; restart the app to retry.",
       );
     });
+    void updateManager.check();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

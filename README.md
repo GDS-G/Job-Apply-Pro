@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Dashboard, Backup & Licensing build
+## Production Hardening build
 
-The active milestone is **Dashboard, Backup & Licensing `v0.11.0-alpha.1`**. It adds audit-reconciled application and interview reports, model-cost and portal-health metrics, versioned encrypted local backups, persisted schedules, integrity verification, selective restore staging, an offline restore gate, signed Ed25519 entitlement interfaces, and in-app recovery help.
+The active milestone is **Production Hardening `v0.12.0-alpha.1`**. It adds a bundled backend runtime, Windows NSIS packaging, signed-update enforcement, redacted support diagnostics, accessibility and stress gates, scheduled portal regression, controlled offline restore application, and release/rollback procedures.
 
-Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is deliberately excluded from the live API: the app stages and fingerprints restore plans, while final application requires an offline process and exact confirmation. License state never blocks backup verification, staging, or offline recovery. Optional cloud-backup and payment providers remain fail-closed interfaces until explicitly configured.
+Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
 ## Architecture
 
@@ -97,4 +97,4 @@ pnpm test
 pnpm build
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [docs/adr](docs/adr) before extending the architecture.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [the production-readiness audit](docs/production-readiness-audit.md), [the failure-injection matrix](docs/failure-injection-matrix.md), and [docs/adr](docs/adr) before extending the architecture.

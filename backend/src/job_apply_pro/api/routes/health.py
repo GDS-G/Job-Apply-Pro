@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Dashboard, Backup & Licensing",
+        build="Production Hardening",
         environment=settings.environment,
     )

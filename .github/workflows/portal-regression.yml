@@ -1,0 +1,38 @@
+name: Portal Regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 7 * * 3"
+
+permissions:
+  contents: read
+
+jobs:
+  replay-and-reference-ats:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install backend and browser
+        run: |
+          python -m pip install -e ".\backend[dev]"
+          python -m playwright install chromium
+      - name: Run portal, browser, and challenge regressions
+        run: >-
+          python -m pytest
+          backend/tests/test_portal_catalog.py
+          backend/tests/test_portal_vertical_slice.py
+          backend/tests/test_browser_runtime.py
+          backend/tests/test_challenge_framework.py
+          --junitxml=portal-regression.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: portal-regression-results
+          path: portal-regression.xml
+          retention-days: 30
+          if-no-files-found: error

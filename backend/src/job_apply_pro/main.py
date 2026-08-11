@@ -1,6 +1,8 @@
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +12,34 @@ from job_apply_pro import __version__
 from job_apply_pro.api.router import api_router
 from job_apply_pro.api.routes.browser import shutdown_browser_worker
 from job_apply_pro.config import get_settings
+from job_apply_pro.storage.database import SessionFactory
+from job_apply_pro.storage.models import ErrorRecordRow
+
+
+def _record_server_error(request: Request, classification: str, status_code: int) -> None:
+    route = request.scope.get("route")
+    route_template = getattr(route, "path", "unmatched")
+    try:
+        with SessionFactory() as session:
+            session.add(
+                ErrorRecordRow(
+                    id=str(uuid4()),
+                    workflow_id=None,
+                    classification=classification,
+                    component="api",
+                    action=request.method,
+                    sanitized_context_json={
+                        "route_template": route_template,
+                        "status_code": status_code,
+                    },
+                    retry_count=0,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            session.commit()
+    except Exception:
+        # Telemetry must never hide or replace the original application failure.
+        return
 
 
 def create_app() -> FastAPI:
@@ -50,7 +80,14 @@ def create_app() -> FastAPI:
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Local API authentication failed"},
                 )
-        return await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            _record_server_error(request, "UNHANDLED_EXCEPTION", 500)
+            raise
+        if response.status_code >= 500:
+            _record_server_error(request, "HTTP_SERVER_ERROR", response.status_code)
+        return response
 
     application.include_router(api_router)
     return application

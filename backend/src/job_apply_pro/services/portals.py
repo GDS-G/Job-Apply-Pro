@@ -6,7 +6,12 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from job_apply_pro.domain.applications import ApplicationCreate
-from job_apply_pro.domain.browser import BrowserAction, BrowserActionResult, BrowserSessionCreate
+from job_apply_pro.domain.browser import (
+    BrowserAction,
+    BrowserActionResult,
+    BrowserEngine,
+    BrowserSessionCreate,
+)
 from job_apply_pro.domain.jobs import JobCreate
 from job_apply_pro.domain.knowledge import (
     CandidateDocumentVersionRecord,
@@ -75,6 +80,7 @@ class ReferencePortalService:
         browser: BrowserRuntimeService,
         cipher: SensitiveDataCipher,
         adapter: ReferenceAtsAdapter | None = None,
+        default_browser_engine: BrowserEngine = BrowserEngine.CHROMIUM,
     ) -> None:
         self._core = core
         self._jobs = jobs
@@ -85,6 +91,7 @@ class ReferencePortalService:
         self._browser = browser
         self._cipher = cipher
         self._adapter = adapter or ReferenceAtsAdapter()
+        self._default_browser_engine = default_browser_engine
 
     def prepare(self, command: ReferencePortalRunCreate) -> PortalRunSnapshot:
         candidate = self._core.get_candidate(command.profile_id)
@@ -156,6 +163,7 @@ class ReferencePortalService:
             BrowserSessionCreate(
                 workflow_id=workflow_id,
                 start_url=posting.source_url,
+                engine=self._default_browser_engine,
                 profile_name=f"reference-{uuid4().hex[:12]}",
                 headless=command.headless,
             )

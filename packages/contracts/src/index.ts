@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Dashboard, Backup & Licensing",
-  version: "0.11.0-alpha.1",
+  name: "Production Hardening",
+  version: "0.12.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -539,6 +539,80 @@ export interface HelpTopic {
   context: string;
 }
 
+export type UpdateState =
+  | "DISABLED"
+  | "IDLE"
+  | "CHECKING"
+  | "AVAILABLE"
+  | "DOWNLOADING"
+  | "DOWNLOADED"
+  | "UP_TO_DATE"
+  | "ERROR";
+
+export interface DesktopUpdateStatus {
+  state: UpdateState;
+  current_version: string;
+  available_version?: string | null;
+  progress_percent?: number | null;
+  message: string;
+  checked_at: string;
+}
+
+export interface SupportDiagnostics {
+  generated_at: string;
+  application_version: string;
+  build_name: string;
+  schema_revision: string;
+  environment: string;
+  process_status: string;
+  queue: { total: number; active: number; retryable: number; terminal: number };
+  recovery: {
+    retried_actions: number;
+    recovered_actions: number;
+    recovery_rate: number;
+    checkpoint_count: number;
+  };
+  sessions: {
+    active: number;
+    takeover: number;
+    stopped: number;
+    failed: number;
+  };
+  storage: {
+    database_bytes: number;
+    documents_bytes: number;
+    browser_artifacts_bytes: number;
+    backups_bytes: number;
+    restore_staging_bytes: number;
+  };
+  backups_total: number;
+  latest_backup_status?: string | null;
+  models: OperationsDashboard["models"];
+  portals: OperationsDashboard["portals"];
+  workflows: {
+    workflow_id: string;
+    state: string;
+    event_count: number;
+    updated_at: string;
+  }[];
+  errors: {
+    classification: string;
+    component: string;
+    action: string;
+    retry_count: number;
+    context_keys: string[];
+    created_at: string;
+  }[];
+  traces: {
+    workflow_id: string;
+    file_name: string;
+    size_bytes: number;
+    available: boolean;
+  }[];
+  update_status: "MANAGED_BY_DESKTOP";
+  redaction_policy_version: string;
+}
+
 export interface OperationsDashboard {
   generated_at: string;
   applications: {
@@ -815,7 +889,14 @@ export interface DesktopBridge {
     ): Promise<BackupSchedule>;
     verifyBackup(backupId: string): Promise<BackupVerification>;
     stageRestore(backupId: string): Promise<RestorePlan>;
+    applyRestore(planId: string, fingerprint: string): Promise<boolean>;
     listHelpTopics(): Promise<HelpTopic[]>;
+    exportSupportDiagnostics(): Promise<string | null>;
+    getUpdateStatus(): Promise<DesktopUpdateStatus>;
+    checkForUpdates(): Promise<DesktopUpdateStatus>;
+    downloadUpdate(): Promise<DesktopUpdateStatus>;
+    installUpdate(): Promise<void>;
+    onUpdateStatus(listener: (status: DesktopUpdateStatus) => void): () => void;
     onStatus(listener: (status: BackendRuntimeStatus) => void): () => void;
   };
 }
