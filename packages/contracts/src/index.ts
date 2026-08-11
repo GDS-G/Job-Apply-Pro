@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Provider Connectivity",
-  version: "0.13.0-alpha.1",
+  name: "Supervised Portal Execution",
+  version: "0.14.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -107,6 +107,16 @@ export interface WorkflowEvent {
 export type BrowserEngine = "chromium" | "chrome" | "msedge";
 export type BrowserSessionState =
   "STARTING" | "ACTIVE" | "USER_TAKEOVER" | "STOPPED" | "FAILED";
+export type BrowserActionKind =
+  | "NAVIGATE"
+  | "CLICK"
+  | "FILL"
+  | "SELECT"
+  | "CHECK"
+  | "UNCHECK"
+  | "UPLOAD"
+  | "WAIT_FOR"
+  | "SCREENSHOT";
 
 export interface BrowserTab {
   index: number;
@@ -209,6 +219,16 @@ export interface PortalAdapterDefinition {
   adapter_version: string;
 }
 
+export interface PortalPageMatch {
+  portal: PortalKind;
+  capability: PortalCapability;
+  page_type: string;
+  confidence: number;
+  matched_signals: string[];
+  page_fingerprint: string;
+  requires_user_intervention: boolean;
+}
+
 export interface PortalQualification {
   score: number;
   threshold: number;
@@ -258,6 +278,73 @@ export interface PortalRunSnapshot {
   field_mappings: PortalFieldMapping[];
   review_fingerprint: string;
   submission_evidence?: SubmissionEvidence | null;
+  trace_path?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SupervisedPortalRunState =
+  | "AWAITING_USER"
+  | "INTERVENTION_REQUIRED"
+  | "READY_TO_SUBMIT"
+  | "SUBMISSION_UNCERTAIN"
+  | "SUBMISSION_CONFIRMED"
+  | "STOPPED";
+export type SupervisedPortalDisposition =
+  | "USER_ACTION_REQUIRED"
+  | "MANUAL_INTERVENTION_REQUIRED"
+  | "FINAL_CONFIRMATION_REQUIRED"
+  | "CONFIRMATION_VERIFIED"
+  | "CONFIRMATION_UNCERTAIN"
+  | "STOPPED";
+export type PortalInterventionReason =
+  | "USER_TAKEOVER"
+  | "LOGIN"
+  | "MFA"
+  | "CAPTCHA"
+  | "ASSESSMENT"
+  | "LEGAL_ATTESTATION"
+  | "FINAL_SUBMISSION"
+  | "SITE_CHANGED";
+
+export interface SupervisedPortalRunCreate {
+  workflow_id: string;
+  portal: PortalKind;
+  start_url: string;
+  profile_name: string;
+  engine: BrowserEngine;
+  allowed_origins: string[];
+}
+
+export interface SupervisedPortalStepEvidence {
+  id: string;
+  run_id: string;
+  sequence: number;
+  disposition: SupervisedPortalDisposition;
+  capability?: PortalCapability | null;
+  page_type: string;
+  before_fingerprint: string;
+  after_fingerprint: string;
+  action_kind?: BrowserActionKind | null;
+  action_fingerprint: string;
+  verified: boolean;
+  intervention_reasons: PortalInterventionReason[];
+  created_at: string;
+}
+
+export interface SupervisedPortalRunSnapshot {
+  id: string;
+  portal: PortalKind;
+  workflow_id: string;
+  browser_session_id: string;
+  state: SupervisedPortalRunState;
+  current_url: string;
+  allowed_origins: string[];
+  page_fingerprint: string;
+  current_match?: PortalPageMatch | null;
+  disposition: SupervisedPortalDisposition;
+  intervention_reasons: PortalInterventionReason[];
+  evidence: SupervisedPortalStepEvidence[];
   trace_path?: string | null;
   created_at: string;
   updated_at: string;
@@ -876,6 +963,19 @@ export interface DesktopBridge {
       runId: string,
       reviewFingerprint: string,
     ): Promise<PortalRunSnapshot>;
+    listSupervisedPortalRuns(): Promise<SupervisedPortalRunSnapshot[]>;
+    startSupervisedPortal(
+      input: SupervisedPortalRunCreate,
+    ): Promise<SupervisedPortalRunSnapshot>;
+    captureSupervisedPortal(
+      runId: string,
+      priorPageFingerprint: string,
+    ): Promise<SupervisedPortalRunSnapshot>;
+    submitSupervisedPortal(
+      runId: string,
+      reviewFingerprint: string,
+    ): Promise<SupervisedPortalRunSnapshot | null>;
+    stopSupervisedPortal(runId: string): Promise<SupervisedPortalRunSnapshot>;
     listChallengeSessions(
       workflowId?: string,
     ): Promise<ChallengeSessionSnapshot[]>;

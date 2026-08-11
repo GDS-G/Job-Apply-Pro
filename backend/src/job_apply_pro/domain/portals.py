@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
+from job_apply_pro.domain.browser import BrowserActionKind, BrowserEngine
 from job_apply_pro.domain.workflow import WorkflowState
 
 
@@ -57,6 +58,35 @@ class PortalSupportStatus(StrEnum):
     REPLAY_VALIDATED = "REPLAY_VALIDATED"
     LIVE_VALIDATION_REQUIRED = "LIVE_VALIDATION_REQUIRED"
     DISABLED = "DISABLED"
+
+
+class SupervisedPortalRunState(StrEnum):
+    AWAITING_USER = "AWAITING_USER"
+    INTERVENTION_REQUIRED = "INTERVENTION_REQUIRED"
+    READY_TO_SUBMIT = "READY_TO_SUBMIT"
+    SUBMISSION_UNCERTAIN = "SUBMISSION_UNCERTAIN"
+    SUBMISSION_CONFIRMED = "SUBMISSION_CONFIRMED"
+    STOPPED = "STOPPED"
+
+
+class SupervisedPortalDisposition(StrEnum):
+    USER_ACTION_REQUIRED = "USER_ACTION_REQUIRED"
+    MANUAL_INTERVENTION_REQUIRED = "MANUAL_INTERVENTION_REQUIRED"
+    FINAL_CONFIRMATION_REQUIRED = "FINAL_CONFIRMATION_REQUIRED"
+    CONFIRMATION_VERIFIED = "CONFIRMATION_VERIFIED"
+    CONFIRMATION_UNCERTAIN = "CONFIRMATION_UNCERTAIN"
+    STOPPED = "STOPPED"
+
+
+class PortalInterventionReason(StrEnum):
+    USER_TAKEOVER = "USER_TAKEOVER"
+    LOGIN = "LOGIN"
+    MFA = "MFA"
+    CAPTCHA = "CAPTCHA"
+    ASSESSMENT = "ASSESSMENT"
+    LEGAL_ATTESTATION = "LEGAL_ATTESTATION"
+    FINAL_SUBMISSION = "FINAL_SUBMISSION"
+    SITE_CHANGED = "SITE_CHANGED"
 
 
 class PortalFingerprintRule(BaseModel):
@@ -205,6 +235,70 @@ class SubmissionApproval(BaseModel):
 
     review_fingerprint: str = Field(min_length=1, max_length=200)
     confirmation_phrase: str = Field(min_length=1, max_length=40)
+
+
+class SupervisedPortalRunCreate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    workflow_id: str = Field(min_length=1, max_length=100)
+    portal: PortalKind
+    start_url: AnyHttpUrl
+    profile_name: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    engine: BrowserEngine = BrowserEngine.CHROMIUM
+    allowed_origins: list[str] = Field(default_factory=list, max_length=20)
+
+
+class SupervisedPortalCapture(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    prior_page_fingerprint: str = Field(min_length=1, max_length=200)
+
+
+class SupervisedPortalSubmissionApproval(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    review_fingerprint: str = Field(min_length=1, max_length=200)
+    confirmation_phrase: str = Field(min_length=1, max_length=40)
+
+
+class SupervisedPortalStepEvidence(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    run_id: str
+    sequence: int = Field(ge=1)
+    disposition: SupervisedPortalDisposition
+    capability: PortalCapability | None = None
+    page_type: str = Field(min_length=1, max_length=100)
+    before_fingerprint: str = Field(min_length=1, max_length=200)
+    after_fingerprint: str = Field(min_length=1, max_length=200)
+    action_kind: BrowserActionKind | None = None
+    action_fingerprint: str = Field(min_length=64, max_length=64)
+    verified: bool
+    intervention_reasons: list[PortalInterventionReason] = Field(
+        default_factory=list, max_length=20
+    )
+    created_at: datetime
+
+
+class SupervisedPortalRunSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    portal: PortalKind
+    workflow_id: str
+    browser_session_id: str
+    state: SupervisedPortalRunState
+    current_url: str = Field(min_length=1, max_length=2_000)
+    allowed_origins: list[str]
+    page_fingerprint: str = Field(min_length=1, max_length=200)
+    current_match: PortalPageMatch | None = None
+    disposition: SupervisedPortalDisposition
+    intervention_reasons: list[PortalInterventionReason]
+    evidence: list[SupervisedPortalStepEvidence]
+    trace_path: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class PortalRunSnapshot(BaseModel):

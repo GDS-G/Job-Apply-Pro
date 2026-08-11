@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./var/job_apply_pro.db"
     log_level: str = "INFO"
     automation_enabled: bool = False
+    supervised_portal_enabled: bool = False
+    supervised_portal_submission_enabled: bool = False
+    supervised_portal_allowlist: str = ""
     api_token: SecretStr | None = None
     browser_data_dir: Path = Path("./var/browser")
     browser_artifact_dir: Path = Path("./var/browser-artifacts")

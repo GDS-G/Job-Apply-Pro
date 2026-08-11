@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Provider Connectivity"
+    BUILD_NAME = "Supervised Portal Execution"
 
     def __init__(
         self,

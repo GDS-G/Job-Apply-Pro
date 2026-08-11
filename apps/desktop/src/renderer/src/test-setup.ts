@@ -40,6 +40,17 @@ const bridge: DesktopBridge = {
     confirmReferencePortal: async () => {
       throw new Error("Not implemented in this test.");
     },
+    listSupervisedPortalRuns: async () => [],
+    startSupervisedPortal: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    captureSupervisedPortal: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    submitSupervisedPortal: async () => null,
+    stopSupervisedPortal: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     listChallengeSessions: async () => [],
     detectChallenge: async () => {
       throw new Error("Not implemented in this test.");
@@ -145,19 +156,19 @@ const bridge: DesktopBridge = {
     exportSupportDiagnostics: async () => null,
     getUpdateStatus: async () => ({
       state: "DISABLED",
-      current_version: "0.13.0-alpha.1",
+      current_version: "0.14.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     checkForUpdates: async () => ({
       state: "DISABLED",
-      current_version: "0.13.0-alpha.1",
+      current_version: "0.14.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     downloadUpdate: async () => ({
       state: "DISABLED",
-      current_version: "0.13.0-alpha.1",
+      current_version: "0.14.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
@@ -165,7 +176,7 @@ const bridge: DesktopBridge = {
     onUpdateStatus: (listener) => {
       listener({
         state: "DISABLED",
-        current_version: "0.13.0-alpha.1",
+        current_version: "0.14.0-alpha.1",
         message: "Updates are disabled for development builds.",
         checked_at: new Date(0).toISOString(),
       });

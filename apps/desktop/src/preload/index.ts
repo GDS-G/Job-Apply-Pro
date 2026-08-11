@@ -9,6 +9,7 @@ import type {
   IntegrationProvider,
   MockWorkflowCreate,
   ReferencePortalRunCreate,
+  SupervisedPortalRunCreate,
   WorkflowControlAction,
 } from "@job-apply-pro/contracts";
 
@@ -42,6 +43,20 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("portals:prepare-reference", input),
     confirmReferencePortal: (runId: string, reviewFingerprint: string) =>
       ipcRenderer.invoke("portals:confirm-reference", runId, reviewFingerprint),
+    listSupervisedPortalRuns: () =>
+      ipcRenderer.invoke("portals:list-supervised"),
+    startSupervisedPortal: (input: SupervisedPortalRunCreate) =>
+      ipcRenderer.invoke("portals:start-supervised", input),
+    captureSupervisedPortal: (runId: string, priorPageFingerprint: string) =>
+      ipcRenderer.invoke(
+        "portals:capture-supervised",
+        runId,
+        priorPageFingerprint,
+      ),
+    submitSupervisedPortal: (runId: string, reviewFingerprint: string) =>
+      ipcRenderer.invoke("portals:submit-supervised", runId, reviewFingerprint),
+    stopSupervisedPortal: (runId: string) =>
+      ipcRenderer.invoke("portals:stop-supervised", runId),
     listChallengeSessions: (workflowId?: string) =>
       ipcRenderer.invoke("challenges:list", workflowId),
     detectChallenge: (input: ChallengeSessionCreate) =>

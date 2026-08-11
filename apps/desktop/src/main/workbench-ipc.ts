@@ -9,7 +9,9 @@ import type {
   ChallengeSessionCreate,
   IntegrationProvider,
   MockWorkflowCreate,
+  PortalKind,
   ReferencePortalRunCreate,
+  SupervisedPortalRunCreate,
   WorkflowControlAction,
 } from "@job-apply-pro/contracts";
 
@@ -29,6 +31,19 @@ const integrationProviders = new Set<IntegrationProvider>([
   "OUTLOOK",
   "GOOGLE_CALENDAR",
   "OUTLOOK_CALENDAR",
+]);
+const supervisedPortals = new Set<PortalKind>([
+  "LINKEDIN",
+  "INDEED",
+  "MONSTER",
+  "CAREERBUILDER",
+  "DICE",
+  "ZIPRECRUITER",
+  "GLASSDOOR",
+  "COMPANY_CAREERS",
+  "WORKDAY",
+  "TALEO",
+  "GREENHOUSE",
 ]);
 
 function requiredText(value: unknown, name: string, maxLength: number): string {
@@ -118,6 +133,65 @@ function referencePortalInput(value: unknown): ReferencePortalRunCreate {
     portal_origin: parsed.origin,
     query: requiredText(Reflect.get(value, "query"), "Job query", 200),
     minimum_fit_score: 0.5,
+  };
+}
+
+function supervisedPortalInput(value: unknown): SupervisedPortalRunCreate {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Supervised portal input is invalid.");
+  }
+  const portalValue = requiredText(Reflect.get(value, "portal"), "Portal", 40);
+  if (!supervisedPortals.has(portalValue as PortalKind)) {
+    throw new TypeError("Portal is not available for supervised execution.");
+  }
+  const startUrl = new URL(
+    requiredText(Reflect.get(value, "start_url"), "Start URL", 2_000),
+  );
+  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(
+    startUrl.hostname,
+  );
+  if (
+    startUrl.protocol !== "https:" &&
+    !(startUrl.protocol === "http:" && loopback)
+  ) {
+    throw new TypeError("External supervised portal URLs must use HTTPS.");
+  }
+  const originsValue = Reflect.get(value, "allowed_origins");
+  if (!Array.isArray(originsValue) || originsValue.length > 20) {
+    throw new TypeError("Allowed origins must be an array of at most 20 URLs.");
+  }
+  const allowedOrigins = originsValue.map((item) => {
+    const parsed = new URL(requiredText(item, "Allowed origin", 2_000));
+    const isLoopback = ["127.0.0.1", "localhost", "[::1]"].includes(
+      parsed.hostname,
+    );
+    if (
+      parsed.protocol !== "https:" &&
+      !(parsed.protocol === "http:" && isLoopback)
+    ) {
+      throw new TypeError("External supervised origins must use HTTPS.");
+    }
+    return parsed.origin;
+  });
+  const engine = Reflect.get(value, "engine");
+  if (!new Set(["chromium", "chrome", "msedge"]).has(String(engine))) {
+    throw new TypeError("Browser engine is invalid.");
+  }
+  return {
+    workflow_id: requiredText(
+      Reflect.get(value, "workflow_id"),
+      "Workflow id",
+      100,
+    ),
+    portal: portalValue as PortalKind,
+    start_url: startUrl.toString(),
+    profile_name: requiredText(
+      Reflect.get(value, "profile_name"),
+      "Browser profile",
+      80,
+    ),
+    engine: engine as SupervisedPortalRunCreate["engine"],
+    allowed_origins: allowedOrigins,
   };
 }
 
@@ -229,6 +303,53 @@ export function registerWorkbenchIpc(
   ipcMain.handle("portals:list-runs", () => supervisor.client.listPortalRuns());
   ipcMain.handle("portals:list-catalog", () =>
     supervisor.client.listPortalCatalog(),
+  );
+  ipcMain.handle("portals:list-supervised", () =>
+    supervisor.client.listSupervisedPortalRuns(),
+  );
+  ipcMain.handle("portals:start-supervised", (_event, value: unknown) =>
+    supervisor.client.startSupervisedPortal(supervisedPortalInput(value)),
+  );
+  ipcMain.handle(
+    "portals:capture-supervised",
+    (_event, runIdValue: unknown, fingerprintValue: unknown) =>
+      supervisor.client.captureSupervisedPortal(
+        requiredText(runIdValue, "Supervised portal run id", 100),
+        requiredText(fingerprintValue, "Page fingerprint", 200),
+      ),
+  );
+  ipcMain.handle(
+    "portals:submit-supervised",
+    async (event, runIdValue: unknown, fingerprintValue: unknown) => {
+      const runId = requiredText(runIdValue, "Supervised portal run id", 100);
+      const fingerprint = requiredText(
+        fingerprintValue,
+        "Review fingerprint",
+        200,
+      );
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Submit this exact application?",
+        message: "This will activate the one reviewed final-submit control.",
+        detail:
+          "Job Apply Pro will refuse if the page fingerprint changed, the control is ambiguous, or local submission policy is disabled.",
+        buttons: ["Cancel", "Submit exact application"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.submitSupervisedPortal(runId, fingerprint);
+    },
+  );
+  ipcMain.handle("portals:stop-supervised", (_event, runIdValue: unknown) =>
+    supervisor.client.stopSupervisedPortal(
+      requiredText(runIdValue, "Supervised portal run id", 100),
+    ),
   );
   ipcMain.handle("challenges:list", (_event, workflowIdValue: unknown) =>
     workflowIdValue === undefined || workflowIdValue === null

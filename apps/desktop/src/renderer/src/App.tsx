@@ -42,8 +42,10 @@ import type {
   IntegrationProvider,
   OperationsDashboard,
   PortalAdapterDefinition,
+  PortalKind,
   PortalRunSnapshot,
   RestorePlan,
+  SupervisedPortalRunSnapshot,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -100,6 +102,9 @@ export function App() {
     BrowserSessionSnapshot[]
   >([]);
   const [portalRuns, setPortalRuns] = useState<PortalRunSnapshot[]>([]);
+  const [supervisedPortalRuns, setSupervisedPortalRuns] = useState<
+    SupervisedPortalRunSnapshot[]
+  >([]);
   const [portalCatalog, setPortalCatalog] = useState<PortalAdapterDefinition[]>(
     [],
   );
@@ -148,6 +153,7 @@ export function App() {
         items,
         sessions,
         runs,
+        supervisedRuns,
         challenges,
         adapters,
         integrations,
@@ -162,6 +168,7 @@ export function App() {
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
         window.jobApplyPro.workbench.listPortalRuns(),
+        window.jobApplyPro.workbench.listSupervisedPortalRuns(),
         window.jobApplyPro.workbench.listChallengeSessions(),
         window.jobApplyPro.workbench.listPortalCatalog(),
         window.jobApplyPro.workbench.listIntegrationHealth(),
@@ -176,6 +183,7 @@ export function App() {
       setWorkflows(items);
       setBrowserSessions(sessions);
       setPortalRuns(runs);
+      setSupervisedPortalRuns(supervisedRuns);
       setChallengeSessions(challenges);
       setPortalCatalog(adapters);
       setIntegrationHealth(integrations);
@@ -564,6 +572,100 @@ export function App() {
     }
   }
 
+  async function startSupervisedPortal(form: FormData) {
+    if (!selected) {
+      setError(
+        "Select a workflow before starting supervised portal execution.",
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const portal = String(form.get("portal")) as PortalKind;
+      const origins = String(form.get("allowed_origins") ?? "")
+        .split(/[\n,]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const run = await window.jobApplyPro.workbench.startSupervisedPortal({
+        workflow_id: selected.workflow_id,
+        portal,
+        start_url: String(form.get("start_url")),
+        profile_name: String(form.get("profile_name")),
+        engine: "msedge",
+        allowed_origins: origins,
+      });
+      setSupervisedPortalRuns((current) => [
+        run,
+        ...current.filter((item) => item.id !== run.id),
+      ]);
+      await refreshWorkflows();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function captureSupervisedPortal(run: SupervisedPortalRunSnapshot) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated =
+        await window.jobApplyPro.workbench.captureSupervisedPortal(
+          run.id,
+          run.page_fingerprint,
+        );
+      setSupervisedPortalRuns((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      await refreshWorkflows();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitSupervisedPortal(run: SupervisedPortalRunSnapshot) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await window.jobApplyPro.workbench.submitSupervisedPortal(
+        run.id,
+        run.page_fingerprint,
+      );
+      if (updated) {
+        setSupervisedPortalRuns((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+        await refreshWorkflows();
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopSupervisedPortal(run: SupervisedPortalRunSnapshot) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await window.jobApplyPro.workbench.stopSupervisedPortal(
+        run.id,
+      );
+      setSupervisedPortalRuns((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      await refreshWorkflows();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function detectChallenge() {
     if (!selected) return;
     const browser = browserSessions.find(
@@ -643,6 +745,12 @@ export function App() {
   }
 
   const latestPortalRun = portalRuns[0] ?? null;
+  const latestSupervisedRun =
+    supervisedPortalRuns.find(
+      (run) => run.workflow_id === selected?.workflow_id,
+    ) ??
+    supervisedPortalRuns[0] ??
+    null;
   const activeChallenge =
     challengeSessions.find(
       (item) => item.workflow_id === selected?.workflow_id,
@@ -749,7 +857,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Provider Connectivity v0.13.0-alpha.1</strong>
+              <strong>Supervised Portal Execution v0.14.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1147,6 +1255,139 @@ export function App() {
                   <div className="empty-state empty-state--compact">
                     Import and approve a resume, then provide a running
                     reference ATS fixture origin.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="panel__header panel__header--subsection">
+              <div>
+                <h3>Supervised live portal session</h3>
+                <p>
+                  Visible browser, exact-origin allowlist, manual challenges,
+                  and fingerprint-bound final confirmation
+                </p>
+              </div>
+              <UserRound size={18} />
+            </div>
+            <div className="portal-grid">
+              <form
+                action={(form) => void startSupervisedPortal(form)}
+                className="workbench-form"
+              >
+                <label>
+                  Portal
+                  <select name="portal" defaultValue="LINKEDIN" required>
+                    {portalCatalog
+                      .filter((adapter) => adapter.kind !== "REFERENCE_ATS")
+                      .map((adapter) => (
+                        <option key={adapter.kind} value={adapter.kind}>
+                          {adapter.display_name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Exact HTTPS start URL
+                  <input
+                    name="start_url"
+                    placeholder="https://www.linkedin.com/jobs/view/..."
+                    required
+                    type="url"
+                  />
+                </label>
+                <label>
+                  Persistent browser profile
+                  <input
+                    name="profile_name"
+                    defaultValue="supervised-profile"
+                    pattern="[A-Za-z0-9_-]+"
+                    required
+                    maxLength={80}
+                  />
+                </label>
+                <label>
+                  Additional exact origins (optional)
+                  <textarea
+                    name="allowed_origins"
+                    placeholder="https://tenant.example.com"
+                    rows={2}
+                  />
+                </label>
+                <button
+                  className="button button--primary form-submit"
+                  disabled={busy || !selected}
+                  type="submit"
+                >
+                  <Play size={16} /> Start supervised browser
+                </button>
+              </form>
+              <div className="portal-status">
+                {latestSupervisedRun ? (
+                  <>
+                    <span className="status-pill status-pill--safe">
+                      {latestSupervisedRun.state.replaceAll("_", " ")}
+                    </span>
+                    <strong>
+                      {latestSupervisedRun.portal.replaceAll("_", " ")}
+                    </strong>
+                    <p>
+                      {latestSupervisedRun.current_match?.page_type ??
+                        "Unrecognized page"}{" "}
+                      · {latestSupervisedRun.evidence.length} captured steps
+                    </p>
+                    <small title={latestSupervisedRun.current_url}>
+                      {latestSupervisedRun.current_url}
+                    </small>
+                    {latestSupervisedRun.intervention_reasons.length ? (
+                      <small>
+                        Manual:{" "}
+                        {latestSupervisedRun.intervention_reasons.join(", ")}
+                      </small>
+                    ) : null}
+                    {!["STOPPED", "SUBMISSION_CONFIRMED"].includes(
+                      latestSupervisedRun.state,
+                    ) ? (
+                      <div className="button-row">
+                        <button
+                          className="button button--secondary"
+                          disabled={busy}
+                          onClick={() =>
+                            void captureSupervisedPortal(latestSupervisedRun)
+                          }
+                          type="button"
+                        >
+                          <RefreshCw size={14} /> Capture current step
+                        </button>
+                        {latestSupervisedRun.state === "READY_TO_SUBMIT" ? (
+                          <button
+                            className="button button--primary"
+                            disabled={busy}
+                            onClick={() =>
+                              void submitSupervisedPortal(latestSupervisedRun)
+                            }
+                            type="button"
+                          >
+                            <ShieldCheck size={14} /> Review & submit exact page
+                          </button>
+                        ) : null}
+                        <button
+                          className="button button--secondary"
+                          disabled={busy}
+                          onClick={() =>
+                            void stopSupervisedPortal(latestSupervisedRun)
+                          }
+                          type="button"
+                        >
+                          <CircleStop size={14} /> Stop & preserve trace
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="empty-state empty-state--compact">
+                    Disabled by default. Enable browser automation, supervised
+                    execution, and an explicit portal allowlist in local
+                    configuration before starting.
                   </div>
                 )}
               </div>

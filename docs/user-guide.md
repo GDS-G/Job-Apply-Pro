@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Provider Connectivity `v0.13.0-alpha.1`. This is an alpha build: real portal submission remains disabled, and live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, reviews scopes, and completes provider authorization.
+This guide applies to Supervised Portal Execution `v0.14.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, reviews scopes, and completes provider authorization.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.13.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.14.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -32,12 +32,38 @@ For Microsoft:
 
 After configuration, select **Review & connect**, verify the provider host and displayed scopes, sign in manually, complete any MFA, and approve only the expected access. Return to Job Apply Pro and refresh the dashboard. Use **Revoke access** to revoke at the provider where supported and always delete the encrypted local credential. Microsoft may also require revocation from the account's application-consent page.
 
+## Run a supervised portal validation
+
+Supervised portal execution is intended for a bounded, owner-approved test window. It does not accept or store portal passwords. Before enabling a portal, the owner must review the provider's current terms, the account's authority, the planned actions, the exact origins, and the stop conditions.
+
+For a development launch, configure only the portals being tested:
+
+```text
+JAP_AUTOMATION_ENABLED=true
+JAP_SUPERVISED_PORTAL_ENABLED=true
+JAP_SUPERVISED_PORTAL_ALLOWLIST=LINKEDIN
+JAP_SUPERVISED_PORTAL_SUBMISSION_ENABLED=false
+```
+
+Restart Job Apply Pro after changing local environment configuration. Leave the submission gate false until a prepared application and the test authorization have both been reviewed.
+
+1. In **Portal catalog & supervised execution**, choose the exact portal and enter its HTTPS start URL. Add only exact HTTPS origins needed for the same application flow; redirects to an unlisted origin stop automation and require review.
+2. Start the visible browser. Sign in directly inside that browser. Do not place a username, password, security code, or token in environment variables, source, documentation, chat, or the application notes.
+3. Complete MFA, email codes, CAPTCHA, assessments, terms acceptance, legal attestations, and signatures yourself. Select **Capture current page** after each manual boundary so the app records a fresh fingerprint and classification.
+4. Review the current URL, page type, intervention reasons, evidence count, and the complete application in the provider UI.
+5. To test automated final submission, separately set `JAP_SUPERVISED_PORTAL_SUBMISSION_ENABLED=true`, restart, return to the same persistent profile, and capture the final review page again. Select **Review & submit exact application** only when the displayed application is correct. The native dialog is the last approval boundary.
+6. Treat only an identifier-backed provider confirmation as confirmed. If the result is uncertain, the run records `SUBMISSION_UNCERTAIN`; verify directly in the provider account instead of retrying blindly.
+7. Select **Stop & preserve trace** when complete. Remove the portal from the allowlist and disable both supervised gates after the approved window.
+
+The application cannot prevent the account owner from manually clicking controls in a visible browser. Such actions remain the owner's actions; the evidence stream distinguishes captured user-driven state from an automated, fingerprint-approved submission.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.
 - Portal automation is untrusted input. A prepared application is not a confirmed submission.
 - CAPTCHA, legal attestation, signature, and uncertain confirmation states require direct review.
-- Catalog entries marked replay-tested are not production-enabled integrations.
+- Catalog entries marked replay-tested or supervised-capable are not production-enabled integrations.
+- A visible persistent browser profile may retain provider session cookies. Protect the Windows account, and stop using or remove the profile when the validation authorization ends.
 
 ## Back up and recover
 

@@ -28,6 +28,8 @@ import type {
   PortalAdapterDefinition,
   ReferencePortalRunCreate,
   RestorePlan,
+  SupervisedPortalRunCreate,
+  SupervisedPortalRunSnapshot,
   SupportDiagnostics,
   WorkflowControlAction,
   WorkflowRunSnapshot,
@@ -168,6 +170,61 @@ export class BackendClient {
           confirmation_phrase: "SUBMIT REFERENCE APPLICATION",
         }),
       },
+      120_000,
+    );
+  }
+
+  listSupervisedPortalRuns(): Promise<SupervisedPortalRunSnapshot[]> {
+    return this.request("/portals/supervised/runs");
+  }
+
+  startSupervisedPortal(
+    input: SupervisedPortalRunCreate,
+  ): Promise<SupervisedPortalRunSnapshot> {
+    return this.request(
+      "/portals/supervised/runs",
+      { method: "POST", body: JSON.stringify(input) },
+      120_000,
+    );
+  }
+
+  captureSupervisedPortal(
+    runId: string,
+    priorPageFingerprint: string,
+  ): Promise<SupervisedPortalRunSnapshot> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(runId)}/capture`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          prior_page_fingerprint: priorPageFingerprint,
+        }),
+      },
+      120_000,
+    );
+  }
+
+  submitSupervisedPortal(
+    runId: string,
+    reviewFingerprint: string,
+  ): Promise<SupervisedPortalRunSnapshot> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(runId)}/submit`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          review_fingerprint: reviewFingerprint,
+          confirmation_phrase: "SUBMIT APPLICATION",
+        }),
+      },
+      120_000,
+    );
+  }
+
+  stopSupervisedPortal(runId: string): Promise<SupervisedPortalRunSnapshot> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(runId)}/stop`,
+      { method: "POST" },
       120_000,
     );
   }

@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from shutil import which
 from threading import Thread
+from typing import cast
 
 import pytest
 from pydantic import AnyHttpUrl
@@ -45,6 +46,7 @@ class _FixtureHandler(BaseHTTPRequestHandler):
         del format, args
 
     def do_GET(self) -> None:
+        server_port = cast(ThreadingHTTPServer, self.server).server_port
         pages = {
             "/start": """
                 <body data-page-type="CANDIDATE_IDENTITY">
@@ -80,6 +82,15 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                 <body data-page-type="CONFIRMATION">
                   <h1>Fixture application complete</h1>
                   <p role="status">Confirmation number FIXTURE-104</p>
+                </body>
+            """,
+            "/escape": f"""
+                <body data-page-type="REVIEW">
+                  <h1>Origin escape fixture</h1>
+                  <button type="button"
+                    onclick="location.href='http://localhost:{server_port}/complete'">
+                    Leave allowed origin
+                  </button>
                 </body>
             """,
         }
@@ -279,6 +290,34 @@ def test_multi_page_fixture_is_verified_traced_and_restartable(
             assert Path(stopped.trace_path).is_file()
             assert stopped.action_count == 7
             assert len(service.list_actions(started.id)) == 7
+    finally:
+        worker.close()
+
+
+def test_runtime_moves_to_takeover_when_a_page_escapes_the_origin_allowlist(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/escape"),
+                    engine=BrowserEngine.CHROMIUM,
+                    profile_name="origin-escape-profile",
+                )
+            )
+
+            with pytest.raises(BrowserPolicyError, match="escaped"):
+                service.execute_action(
+                    started.id,
+                    _click_to("Leave allowed origin", "/complete"),
+                )
+
+            assert service.get_session(started.id).state is BrowserSessionState.USER_TAKEOVER
     finally:
         worker.close()
 
