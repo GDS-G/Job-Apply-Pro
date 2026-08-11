@@ -16,7 +16,7 @@ from job_apply_pro.ai.prompts import (
     redact_external_data,
     render_prompt,
 )
-from job_apply_pro.ai.providers import AIProviderError, AIProviderRequest
+from job_apply_pro.ai.providers import AIProviderError
 from job_apply_pro.ai.registry import AIRegistry
 from job_apply_pro.domain.ai import (
     AgentRunRequest,
@@ -29,6 +29,7 @@ from job_apply_pro.domain.ai import (
     AIInputPart,
     AIInvocationRecord,
     AIModelDefinition,
+    AIProviderRequest,
     AIRerankRequest,
     AIRerankResult,
     AITaskType,

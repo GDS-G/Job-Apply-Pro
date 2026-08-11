@@ -39,6 +39,24 @@ const bridge: DesktopBridge = {
     confirmReferencePortal: async () => {
       throw new Error("Not implemented in this test.");
     },
+    listChallengeSessions: async () => [],
+    detectChallenge: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    getChallengeSuggestions: async () => [],
+    getChallengeModelRoutes: async () => [],
+    refreshChallenge: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    answerChallenge: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    completeChallenge: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    completeChallengeIntervention: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     onStatus: () => () => undefined,
   },
 };

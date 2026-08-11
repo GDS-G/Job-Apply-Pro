@@ -2,6 +2,8 @@ import { dialog, ipcMain } from "electron";
 
 import type {
   CandidateProfileCreate,
+  ChallengeAnswerCommand,
+  ChallengeSessionCreate,
   MockWorkflowCreate,
   ReferencePortalRunCreate,
   WorkflowControlAction,
@@ -98,6 +100,55 @@ function referencePortalInput(value: unknown): ReferencePortalRunCreate {
   };
 }
 
+function challengeInput(value: unknown): ChallengeSessionCreate {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Challenge session input is invalid.");
+  }
+  const timeLimit = Reflect.get(value, "time_limit_seconds");
+  if (
+    timeLimit !== undefined &&
+    timeLimit !== null &&
+    (typeof timeLimit !== "number" || timeLimit < 30 || timeLimit > 28_800)
+  ) {
+    throw new TypeError("Challenge time limit must be 30 to 28800 seconds.");
+  }
+  return {
+    workflow_id: requiredText(
+      Reflect.get(value, "workflow_id"),
+      "Workflow id",
+      100,
+    ),
+    browser_session_id: requiredText(
+      Reflect.get(value, "browser_session_id"),
+      "Browser session id",
+      100,
+    ),
+    ...(typeof timeLimit === "number" ? { time_limit_seconds: timeLimit } : {}),
+  };
+}
+
+function challengeAnswer(value: unknown): ChallengeAnswerCommand {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Challenge answer input is invalid.");
+  }
+  const answer = Reflect.get(value, "value");
+  if (typeof answer !== "string" || answer.length > 100_000) {
+    throw new TypeError(
+      "Challenge answer must be text up to 100000 characters.",
+    );
+  }
+  return {
+    question_id: requiredText(
+      Reflect.get(value, "question_id"),
+      "Question id",
+      100,
+    ),
+    value: answer,
+    source: "USER",
+    confidence: 1,
+  };
+}
+
 export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
   ipcMain.handle("workbench:get-status", () => supervisor.status);
   ipcMain.handle("workbench:list-workflows", () =>
@@ -152,6 +203,55 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
     supervisor.client.startMockWorkflow(mockWorkflowInput(value)),
   );
   ipcMain.handle("portals:list-runs", () => supervisor.client.listPortalRuns());
+  ipcMain.handle("challenges:list", (_event, workflowIdValue: unknown) =>
+    workflowIdValue === undefined || workflowIdValue === null
+      ? supervisor.client.listChallengeSessions()
+      : supervisor.client.listChallengeSessions(
+          requiredText(workflowIdValue, "Workflow id", 100),
+        ),
+  );
+  ipcMain.handle("challenges:detect", (_event, value: unknown) =>
+    supervisor.client.detectChallenge(challengeInput(value)),
+  );
+  ipcMain.handle("challenges:suggestions", (_event, sessionIdValue: unknown) =>
+    supervisor.client.getChallengeSuggestions(
+      requiredText(sessionIdValue, "Challenge session id", 100),
+    ),
+  );
+  ipcMain.handle("challenges:model-routes", (_event, sessionIdValue: unknown) =>
+    supervisor.client.getChallengeModelRoutes(
+      requiredText(sessionIdValue, "Challenge session id", 100),
+    ),
+  );
+  ipcMain.handle("challenges:refresh", (_event, sessionIdValue: unknown) =>
+    supervisor.client.refreshChallenge(
+      requiredText(sessionIdValue, "Challenge session id", 100),
+    ),
+  );
+  ipcMain.handle(
+    "challenges:answer",
+    (_event, sessionIdValue: unknown, answerValue: unknown) =>
+      supervisor.client.answerChallenge(
+        requiredText(sessionIdValue, "Challenge session id", 100),
+        challengeAnswer(answerValue),
+      ),
+  );
+  ipcMain.handle(
+    "challenges:complete",
+    (_event, sessionIdValue: unknown, fingerprintValue: unknown) =>
+      supervisor.client.completeChallenge(
+        requiredText(sessionIdValue, "Challenge session id", 100),
+        requiredText(fingerprintValue, "Review fingerprint", 200),
+      ),
+  );
+  ipcMain.handle(
+    "challenges:intervention-complete",
+    (_event, sessionIdValue: unknown, fingerprintValue: unknown) =>
+      supervisor.client.completeChallengeIntervention(
+        requiredText(sessionIdValue, "Challenge session id", 100),
+        requiredText(fingerprintValue, "Prior fingerprint", 200),
+      ),
+  );
   ipcMain.handle("portals:prepare-reference", (_event, value: unknown) =>
     supervisor.client.prepareReferencePortal(referencePortalInput(value)),
   );

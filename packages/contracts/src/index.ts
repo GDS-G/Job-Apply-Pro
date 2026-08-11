@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Portal Vertical Slice",
-  version: "0.7.0-alpha.1",
+  name: "Challenge Framework",
+  version: "0.8.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -216,6 +216,113 @@ export interface PortalRunSnapshot {
   updated_at: string;
 }
 
+export type ChallengeKind = "CAPTCHA" | "QUESTIONNAIRE" | "ASSESSMENT" | "QUIZ";
+export type ChallengeStatus =
+  | "DETECTED"
+  | "INTERVENTION_REQUIRED"
+  | "IN_PROGRESS"
+  | "REVIEW_REQUIRED"
+  | "COMPLETED"
+  | "FAILED"
+  | "EXPIRED";
+export type QuestionKind =
+  | "TEXT"
+  | "LONG_TEXT"
+  | "SELECT"
+  | "CHECKBOX"
+  | "MULTIPLE_CHOICE"
+  | "TRUE_FALSE"
+  | "MATCHING"
+  | "ORDERING"
+  | "VISUAL";
+export type AnswerSource =
+  "CANDIDATE_PROFILE" | "ANSWER_LIBRARY" | "USER" | "AI_GATEWAY";
+
+export interface ChallengeDetection {
+  kind: ChallengeKind;
+  page_type: string;
+  provider?: string | null;
+  captcha_type?: string | null;
+  signatures: string[];
+  page_fingerprint: string;
+  detected_at: string;
+}
+
+export interface ChallengeQuestion {
+  id: string;
+  position: number;
+  prompt: string;
+  kind: QuestionKind;
+  options: string[];
+  required: boolean;
+  character_limit?: number | null;
+  canonical_field?: string | null;
+  legal_attestation: boolean;
+  signature_required: boolean;
+}
+
+export interface ChallengeAnswer {
+  question_id: string;
+  value: string;
+  source: AnswerSource;
+  provenance: Record<string, unknown>;
+  confidence: number;
+  verified: boolean;
+  answered_at: string;
+}
+
+export interface ChallengeSessionSnapshot {
+  id: string;
+  workflow_id: string;
+  browser_session_id: string;
+  resume_state: WorkflowState;
+  detection: ChallengeDetection;
+  status: ChallengeStatus;
+  instructions: string;
+  questions: ChallengeQuestion[];
+  answers: ChallengeAnswer[];
+  current_position: number;
+  flagged_question_ids: string[];
+  time_limit_seconds?: number | null;
+  elapsed_seconds: number;
+  remaining_seconds?: number | null;
+  review_fingerprint?: string | null;
+  completion_signal?: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChallengeSessionCreate {
+  workflow_id: string;
+  browser_session_id: string;
+  time_limit_seconds?: number | null;
+}
+
+export interface ChallengeAnswerCommand {
+  question_id: string;
+  value: string;
+  source?: AnswerSource;
+  confidence?: number;
+}
+
+export interface ChallengeAnswerSuggestion {
+  question_id: string;
+  value: string;
+  source: AnswerSource;
+  provenance: Record<string, unknown>;
+  confidence: number;
+}
+
+export interface ChallengeModelRoute {
+  question_id: string;
+  tier: "FAST_TEXT" | "STRONG_REASONING" | "MULTIMODAL" | "LONG_CONTEXT";
+  task_type: "ANSWER";
+  required_capabilities: string[];
+  cache_allowed: boolean;
+  escalation_reason?: string | null;
+}
+
 export type DocumentKind =
   | "RESUME"
   | "COVER_LETTER"
@@ -402,6 +509,29 @@ export interface DesktopBridge {
       runId: string,
       reviewFingerprint: string,
     ): Promise<PortalRunSnapshot>;
+    listChallengeSessions(
+      workflowId?: string,
+    ): Promise<ChallengeSessionSnapshot[]>;
+    detectChallenge(
+      input: ChallengeSessionCreate,
+    ): Promise<ChallengeSessionSnapshot>;
+    getChallengeSuggestions(
+      sessionId: string,
+    ): Promise<ChallengeAnswerSuggestion[]>;
+    getChallengeModelRoutes(sessionId: string): Promise<ChallengeModelRoute[]>;
+    refreshChallenge(sessionId: string): Promise<ChallengeSessionSnapshot>;
+    answerChallenge(
+      sessionId: string,
+      input: ChallengeAnswerCommand,
+    ): Promise<ChallengeSessionSnapshot>;
+    completeChallenge(
+      sessionId: string,
+      reviewFingerprint: string,
+    ): Promise<ChallengeSessionSnapshot>;
+    completeChallengeIntervention(
+      sessionId: string,
+      priorFingerprint: string,
+    ): Promise<ChallengeSessionSnapshot>;
     onStatus(listener: (status: BackendRuntimeStatus) => void): () => void;
   };
 }

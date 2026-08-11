@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Portal Vertical Slice build
+## Challenge Framework build
 
-The active milestone is **Portal Vertical Slice `v0.7.0-alpha.1`**. It adds a complete reference-ATS workflow: deterministic job discovery and extraction, canonical deduplication, evidence-backed qualification, resume selection, multi-page field mapping and completion, decrypted session-scoped upload staging, explicit review approval, confirmed loopback submission, trace capture, and application tracking.
+The active milestone is **Challenge Framework `v0.8.0-alpha.1`**. It adds durable CAPTCHA, questionnaire, quiz, and assessment sessions over the existing reference-ATS workflow. The backend detects challenge type and provider, extracts typed questions and visible timers, maps only approved candidate facts, recommends provider-independent AI gateway routes, verifies every browser answer, checkpoints recovery, and requires an exact review fingerprint plus explicit confirmation before completion.
 
 Application services never call provider SDKs directly. External AI calls require an enabled routing policy and explicit consent; highly sensitive and restricted data are blocked from external providers. The reference ATS accepts loopback fixture origins only, and an elevated submission action requires a matching review fingerprint plus an explicit desktop confirmation. Production portals, email, and calendar accounts remain disabled.
 
@@ -17,6 +17,7 @@ backend/src/job_apply_pro/browser Isolated Playwright JSON-lines worker and clie
 backend/src/job_apply_pro/documents Bounded document extractors and strict claim proposals
 backend/src/job_apply_pro/ai Provider adapters, registry, prompts, privacy, and routing
 backend/src/job_apply_pro/portals Typed portal adapters and verification contracts
+backend/src/job_apply_pro/challenges Detection, answer mapping, timing, and AI routing policy
 packages/contracts        Versioned TypeScript contracts shared by desktop code
 backend/migrations        Alembic-managed SQLite schema
 docs/adr                  Architecture decision records
@@ -78,6 +79,8 @@ The Candidate Knowledge API is under `/api/v1/knowledge`. Supported imports are 
 The AI Gateway API is under `/api/v1/ai`. Provider secrets, model definitions, and routing policies are supplied as local JSON through `JAP_AI_CONFIG_JSON`; never commit that value. External endpoints require HTTPS, local endpoints require loopback, and an empty configuration leaves the gateway safely `not_configured`.
 
 The reference portal API is under `/api/v1/portals`. `POST /reference/runs` prepares a loopback fixture application through `READY_TO_SUBMIT`; `POST /runs/{id}/confirm` accepts only the exact persisted review fingerprint and records confirmation only after the adapter observes its approved confirmation signal. This release does not authorize real portal submission.
+
+The challenge API is under `/api/v1/challenges`. Detection persists the browser fingerprint, resume state, extracted questions, and timer. Suggestions come only from encrypted profile contact fields or locked approved answer-library entries. Legal attestations, signatures, and CAPTCHAs always require direct user action. Assessment completion requires verified answers, the current review fingerprint, and the fixed `COMPLETE CHALLENGE` phrase.
 
 ## Validation
 

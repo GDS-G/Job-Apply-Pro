@@ -60,6 +60,7 @@ class VerificationKind(StrEnum):
     TEXT_VISIBLE = "TEXT_VISIBLE"
     LOCATOR_VISIBLE = "LOCATOR_VISIBLE"
     VALUE_EQUALS = "VALUE_EQUALS"
+    CHECKED_EQUALS = "CHECKED_EQUALS"
 
 
 class SemanticLocator(BaseModel):

@@ -346,6 +346,34 @@ class PortalRunRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ChallengeSessionRow(Base):
+    __tablename__ = "challenge_sessions"
+    __table_args__ = (Index("ix_challenge_sessions_workflow_updated", "workflow_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(100), index=True)
+    browser_session_id: Mapped[str] = mapped_column(ForeignKey("browser_sessions.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(30), index=True)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    snapshot_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChallengeEventRow(Base):
+    __tablename__ = "challenge_events"
+    __table_args__ = (
+        UniqueConstraint("session_id", "sequence", name="uq_challenge_event_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("challenge_sessions.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(80))
+    details_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ErrorRecordRow(Base):
     __tablename__ = "error_records"
 
