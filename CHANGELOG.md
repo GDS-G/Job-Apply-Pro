@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.16.0-alpha.1] - Unreleased
+
+### Added
+
+- Added opt-in legacy DOC ingestion through an explicitly configured LibreOffice executable, fixed shell-free arguments, an isolated temporary profile, a strict timeout, bounded converted output, and mandatory DOCX reparsing.
+- Added opt-in scanned-PDF OCR using permissively licensed PDFium rendering and an explicitly configured Tesseract executable, with page, DPI, pixel, character, block, and process-time limits.
+- Added durable extraction warnings and desktop-visible import notes so incomplete page extraction is not silently treated as complete evidence.
+
+### Changed
+
+- Added DOC to the desktop document picker and made ReportLab an explicit runtime dependency instead of relying on the development environment during packaging.
+- Added DOCX archive entry and expanded-size preflight checks before parsing, and packaged PDFium's required third-party license material with the backend.
+
+### Security
+
+- Converter and OCR executable paths must be absolute, point to an approved executable name, and are never executed through a shell. Password-protected PDFs remain rejected.
+- External helpers receive fixed arguments and a minimal environment that excludes backend keys and tokens, run without stdin or a visible Windows console, use isolated temporary home/temp/app-data paths, and fail closed on timeout, invalid output, oversized output, or untrusted configuration.
+
 ## [0.15.0-alpha.1] - Unreleased
 
 ### Added

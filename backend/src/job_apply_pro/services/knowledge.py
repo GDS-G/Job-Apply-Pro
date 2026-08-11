@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from job_apply_pro.documents.claims import propose_claims
-from job_apply_pro.documents.extractors import extract_document
+from job_apply_pro.documents.extractors import DocumentIngestionOptions, extract_document
 from job_apply_pro.documents.generator import render_tailored_document
 from job_apply_pro.domain.applications import (
     SubmittedDocumentCapture,
@@ -99,6 +99,7 @@ class CandidateKnowledgeService:
         *,
         document_data_dir: Path,
         document_max_bytes: int,
+        document_ingestion_options: DocumentIngestionOptions | None = None,
     ) -> None:
         self._repository = repository
         self._candidates = candidates
@@ -107,6 +108,7 @@ class CandidateKnowledgeService:
         self._cipher = cipher
         self._document_data_dir = document_data_dir.resolve()
         self._document_max_bytes = document_max_bytes
+        self._document_ingestion_options = document_ingestion_options or DocumentIngestionOptions()
 
     def import_document(
         self,
@@ -130,7 +132,9 @@ class CandidateKnowledgeService:
         safe_name = Path(file_name).name
         if not safe_name or safe_name != file_name:
             raise CandidateKnowledgeError("Document filename must not contain a path")
-        media_type, extraction = extract_document(safe_name, data)
+        media_type, extraction = extract_document(
+            safe_name, data, options=self._document_ingestion_options
+        )
         now = utc_now()
         document_id = str(uuid4())
         version_id = str(uuid4())

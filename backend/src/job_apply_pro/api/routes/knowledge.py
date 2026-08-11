@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
-from job_apply_pro.documents.extractors import DocumentExtractionError
+from job_apply_pro.documents.extractors import DocumentExtractionError, DocumentIngestionOptions
 from job_apply_pro.domain.applications import (
     SubmittedDocumentCapture,
     SubmittedDocumentEvidence,
@@ -62,6 +62,17 @@ def get_knowledge_service(
         cipher,
         document_data_dir=settings.document_data_dir,
         document_max_bytes=settings.document_max_bytes,
+        document_ingestion_options=DocumentIngestionOptions(
+            legacy_doc_converter_path=settings.document_legacy_converter_path,
+            legacy_doc_conversion_timeout_seconds=settings.document_conversion_timeout_seconds,
+            max_converted_bytes=settings.document_max_bytes,
+            ocr_enabled=settings.document_ocr_enabled,
+            ocr_tesseract_path=settings.document_ocr_tesseract_path,
+            ocr_language=settings.document_ocr_language,
+            ocr_dpi=settings.document_ocr_dpi,
+            ocr_max_pages=settings.document_ocr_max_pages,
+            ocr_page_timeout_seconds=settings.document_ocr_page_timeout_seconds,
+        ),
     )
 
 

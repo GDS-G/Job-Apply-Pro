@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "job-apply-pro-backend"
-version = "0.15.0a1"
+version = "0.16.0a1"
 description = "Local Job Apply Pro API and workflow service"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -15,11 +15,14 @@ dependencies = [
   "httpx>=0.28,<1",
   "jsonschema>=4.26,<5",
   "playwright>=1.58,<2",
+  "pillow>=12.3,<13",
   "pypdf>=6.15,<7",
+  "pypdfium2>=5.12,<6",
   "python-docx>=1.2,<2",
   "python-multipart>=0.0.22,<1",
   "pydantic>=2.12,<3",
   "pydantic-settings>=2.10,<3",
+  "reportlab>=4.4,<6",
   "sqlalchemy>=2.0.40,<3",
   "tzdata>=2025.2,<2027",
   "uvicorn[standard]>=0.35,<1",
@@ -33,7 +36,6 @@ dev = [
   "pyinstaller>=6.21,<7",
   "pytest>=9,<10",
   "pytest-cov>=7,<8",
-  "reportlab>=4.4,<6",
   "ruff>=0.14,<1",
   "types-reportlab>=4.4,<5",
   "types-jsonschema>=4.26,<5",
