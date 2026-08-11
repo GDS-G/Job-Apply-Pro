@@ -11,7 +11,7 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
   "alembic>=1.16,<2",
   "cryptography>=50,<51",
-  "fastapi>=0.139,<0.140",
+  "fastapi>=0.139,<0.142",
   "httpx>=0.28,<1",
   "jsonschema>=4.26,<5",
   "playwright>=1.58,<2",
