@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Maintenance Refresh",
-  version: "0.12.1-alpha.1",
+  name: "Portal Readiness",
+  version: "0.12.2-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -186,6 +186,7 @@ export interface PortalFingerprintRule {
   page_type: string;
   required_signals: string[];
   capability: PortalCapability;
+  minimum_confidence: number;
 }
 
 export interface PortalAdapterDefinition {
@@ -202,6 +203,8 @@ export interface PortalAdapterDefinition {
   };
   support_status: "REPLAY_VALIDATED" | "LIVE_VALIDATION_REQUIRED" | "DISABLED";
   production_enabled: boolean;
+  replay_validated_page_types: string[];
+  live_validated_page_types: string[];
   limitations: string[];
   adapter_version: string;
 }
@@ -642,6 +645,8 @@ export interface OperationsDashboard {
     support_status: string;
     production_enabled: boolean;
     run_count: number;
+    replay_validated_page_types: string[];
+    live_validated_page_types: string[];
     limitations: string[];
   }[];
   application_report: {

@@ -716,7 +716,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Maintenance Refresh v0.12.1-alpha.1</strong>
+              <strong>Portal Readiness v0.12.2-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1133,7 +1133,9 @@ export function App() {
                     {adapter.support_status.replaceAll("_", " ")}
                   </span>
                   <small>
-                    {adapter.capabilities.length} capabilities · production off
+                    {adapter.replay_validated_page_types.length} replay page
+                    types · {adapter.live_validated_page_types.length} live ·
+                    production off
                   </small>
                 </div>
               ))}

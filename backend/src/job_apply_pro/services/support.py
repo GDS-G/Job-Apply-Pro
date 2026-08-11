@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Maintenance Refresh"
+    BUILD_NAME = "Portal Readiness"
 
     def __init__(
         self,
@@ -76,6 +76,8 @@ class SupportService:
                     support_status=definition.support_status.value,
                     production_enabled=definition.production_enabled,
                     run_count=run_counts.get(definition.kind.value, 0),
+                    replay_validated_page_types=definition.replay_validated_page_types,
+                    live_validated_page_types=definition.live_validated_page_types,
                     limitations=definition.limitations,
                 )
                 for definition in PORTAL_DEFINITIONS

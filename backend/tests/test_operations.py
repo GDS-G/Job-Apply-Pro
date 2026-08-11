@@ -245,6 +245,8 @@ def test_empty_dashboard_reconciles_and_help_covers_recovery(session: Session) -
     assert dashboard.models.cost_micros == 0
     assert len(dashboard.portals) == 11
     assert all(not portal.production_enabled for portal in dashboard.portals)
+    assert all(len(portal.replay_validated_page_types) == 4 for portal in dashboard.portals)
+    assert all(not portal.live_validated_page_types for portal in dashboard.portals)
     assert dashboard.license.status is LicenseStatus.DEVELOPMENT
     assert {topic.id for topic in help_topics()} >= {"backup-restore", "recovery-access"}
 

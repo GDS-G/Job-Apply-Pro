@@ -21,13 +21,13 @@ describe("update policy", () => {
 
   it("disables updates outside a packaged application", () => {
     expect(
-      initialUpdateStatus(false, "0.12.1-alpha.1", "2026-08-06T00:00:00Z"),
+      initialUpdateStatus(false, "0.12.2-alpha.1", "2026-08-06T00:00:00Z"),
     ).toEqual({
       state: "DISABLED",
-      current_version: "0.12.1-alpha.1",
+      current_version: "0.12.2-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: "2026-08-06T00:00:00Z",
     });
-    expect(initialUpdateStatus(true, "0.12.1-alpha.1").state).toBe("IDLE");
+    expect(initialUpdateStatus(true, "0.12.2-alpha.1").state).toBe("IDLE");
   });
 });

@@ -2,6 +2,25 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.12.2-alpha.1] - Unreleased
+
+### Added
+
+- Expanded every named Phase 9 portal replay profile from a single search fingerprint to search, job-detail, application-form, verified-confirmation, and identifier-free confirmation cases.
+- Added automatic page-type classification across bounded portal fingerprint rules and explicit replay coverage evidence for the desktop and operations dashboard.
+- Added a requirements traceability audit that separates implemented source behavior, replay-only behavior, deferred roadmap scope, and external launch evidence.
+
+### Changed
+
+- Raised portal fingerprint acceptance from partial signal matching to the rule-specific confidence threshold, defaulting to complete required-signal coverage.
+- Added bounded fingerprint contracts for login, MFA, CAPTCHA, document upload, questionnaires, assessments, review, and confirmation pages.
+- Reclassified the product honestly as an alpha foundation rather than calling the entire long-term product source-complete.
+
+### Security
+
+- Confirmation replay validation now proves both positive identifier-backed confirmation and fail-closed identifier-free behavior for every named portal.
+- Named portal execution and provider writes remain production-disabled; replay coverage does not grant live-site authority.
+
 ## [0.12.1-alpha.1] - Unreleased
 
 ### Changed

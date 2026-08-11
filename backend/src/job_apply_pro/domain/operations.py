@@ -162,6 +162,8 @@ class PortalHealthMetric(BaseModel):
     support_status: str
     production_enabled: bool
     run_count: int
+    replay_validated_page_types: list[str]
+    live_validated_page_types: list[str]
     limitations: list[str]
 
 
