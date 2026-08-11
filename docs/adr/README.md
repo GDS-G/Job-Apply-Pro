@@ -23,3 +23,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0019: Production packaging, updates, and diagnostics](0019-production-packaging-updates-and-diagnostics.md)
 - [ADR-0020: Versioned dependency maintenance baseline](0020-versioned-dependency-maintenance-baseline.md)
 - [ADR-0021: Traceable product and portal readiness](0021-traceable-product-and-portal-readiness.md)
+- [ADR-0022: Encrypted OAuth provider connectivity](0022-encrypted-oauth-provider-connectivity.md)

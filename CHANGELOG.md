@@ -2,6 +2,27 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.13.0-alpha.1] - Unreleased
+
+### Added
+
+- Added OAuth 2.0 Authorization Code with PKCE using one-time, encrypted authorization sessions, strict state validation, access-token refresh, and local/provider revocation boundaries.
+- Added encrypted OAuth credential persistence and migration `20260811_0010`; access and refresh tokens never cross the local API or renderer contract.
+- Added official HTTP adapters for Gmail, Outlook mail through Microsoft Graph, Google Calendar, and Outlook Calendar, with deterministic `httpx.MockTransport` contract coverage.
+- Added desktop connection and revocation controls that open only allowlisted Google or Microsoft authorization hosts in the system browser.
+
+### Changed
+
+- Integration health now reports the reviewed scope count, account hint, and effective read/write boundary without exposing tokens.
+- Communication configuration accepts public desktop OAuth client registrations and rejects raw client secrets, access tokens, passwords, and unknown fields.
+- The loopback OAuth callback is authenticated by a high-entropy, ten-minute, one-time state capability instead of exposing the desktop API token to the system browser.
+
+### Security
+
+- OAuth code verifiers and token sets are encrypted with context-separated local encryption before persistence; database rows contain only opaque references and sanitized metadata.
+- Requested scopes are checked against provider-specific allowlists before authorization starts, and expired sessions or replayed callbacks fail closed.
+- Provider clients remain unconfigured until the owner supplies a registered public client ID and manually approves the displayed scopes; no password-based sign-in is supported.
+
 ## [0.12.2-alpha.1] - Unreleased
 
 ### Added

@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class IntegrationProvider(StrEnum):
@@ -216,6 +216,8 @@ class IntegrationHealth(BaseModel):
     read_enabled: bool = False
     write_enabled: bool = False
     credential_reference: str | None = Field(default=None, max_length=200)
+    granted_scopes: list[str] = Field(default_factory=list, max_length=100)
+    account_hint: str | None = Field(default=None, max_length=200)
 
 
 class OAuthAuthorizationState(BaseModel):
@@ -229,6 +231,48 @@ class OAuthAuthorizationState(BaseModel):
     granted_scopes: list[str] = Field(default_factory=list, max_length=100)
     expires_at: datetime | None = None
     account_hint: str | None = Field(default=None, max_length=200)
+
+
+class OAuthAuthorizationRequest(BaseModel):
+    """One-time authorization information safe to return to the desktop."""
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: IntegrationProvider
+    authorization_url: str = Field(min_length=1, max_length=4_000)
+    state: str = Field(min_length=32, max_length=200)
+    expires_at: datetime
+
+
+class OAuthCallbackResult(BaseModel):
+    """Sanitized result returned by the loopback OAuth callback."""
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: IntegrationProvider
+    status: IntegrationStatus
+    account_hint: str | None = Field(default=None, max_length=200)
+    granted_scopes: list[str] = Field(default_factory=list, max_length=100)
+
+
+class OAuthTokenSet(BaseModel):
+    """Internal token bundle; never expose this model through an API response."""
+
+    model_config = ConfigDict(frozen=True)
+
+    access_token: SecretStr
+    refresh_token: SecretStr | None = None
+    token_type: str = Field(default="Bearer", min_length=1, max_length=40)
+    expires_at: datetime
+    granted_scopes: list[str] = Field(default_factory=list, max_length=100)
+    account_hint: str | None = Field(default=None, max_length=200)
+
+    @field_validator("expires_at")
+    @classmethod
+    def require_expiry_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("OAuth expiry must include a UTC offset")
+        return value
 
 
 class CommunicationRecord(BaseModel):

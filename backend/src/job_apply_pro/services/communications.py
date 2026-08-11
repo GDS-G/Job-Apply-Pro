@@ -91,11 +91,12 @@ class CommunicationService:
         knowledge_repository: CandidateKnowledgeRepositoryProtocol | None = None,
     ) -> None:
         self._repository = repository
-        self._message_adapters = message_adapters or {
+        self._message_adapters: dict[IntegrationProvider, MessageProviderAdapter] = {
             IntegrationProvider.GMAIL: DisabledMessageProvider(IntegrationProvider.GMAIL),
             IntegrationProvider.OUTLOOK: DisabledMessageProvider(IntegrationProvider.OUTLOOK),
         }
-        self._calendar_adapters = calendar_adapters or {
+        self._message_adapters.update(message_adapters or {})
+        self._calendar_adapters: dict[IntegrationProvider, CalendarProviderAdapter] = {
             IntegrationProvider.GOOGLE_CALENDAR: DisabledCalendarProvider(
                 IntegrationProvider.GOOGLE_CALENDAR
             ),
@@ -103,6 +104,7 @@ class CommunicationService:
                 IntegrationProvider.OUTLOOK_CALENDAR
             ),
         }
+        self._calendar_adapters.update(calendar_adapters or {})
         self._automatic_categories = automatic_categories or set()
         self._provider_configs = provider_configs or {}
         self._knowledge_repository = knowledge_repository
@@ -144,6 +146,8 @@ class CommunicationService:
                     read_enabled=config.read_enabled and connected,
                     write_enabled=config.write_enabled and connected,
                     credential_reference=config.credential_reference,
+                    granted_scopes=config.granted_scopes,
+                    account_hint=config.account_hint,
                 )
             )
         return health

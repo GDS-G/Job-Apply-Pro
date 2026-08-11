@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Portal Readiness",
-  version: "0.12.2-alpha.1",
+  name: "Provider Connectivity",
+  version: "0.13.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -394,6 +394,24 @@ export interface IntegrationHealth {
   read_enabled: boolean;
   write_enabled: boolean;
   credential_reference?: string | null;
+  granted_scopes: string[];
+  account_hint?: string | null;
+}
+
+export interface OAuthAuthorizationRequest {
+  provider: IntegrationProvider;
+  authorization_url: string;
+  state: string;
+  expires_at: string;
+}
+
+export interface OAuthAuthorizationState {
+  provider: IntegrationProvider;
+  status: IntegrationStatus;
+  credential_reference?: string | null;
+  granted_scopes: string[];
+  expires_at?: string | null;
+  account_hint?: string | null;
 }
 
 export interface NormalizedMessage {
@@ -882,6 +900,12 @@ export interface DesktopBridge {
       priorFingerprint: string,
     ): Promise<ChallengeSessionSnapshot>;
     listIntegrationHealth(): Promise<IntegrationHealth[]>;
+    startProviderAuthorization(
+      provider: IntegrationProvider,
+    ): Promise<OAuthAuthorizationRequest>;
+    revokeProviderAuthorization(
+      provider: IntegrationProvider,
+    ): Promise<OAuthAuthorizationState>;
     listCommunicationRecords(): Promise<CommunicationRecord[]>;
     getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
     getOperationsDashboard(): Promise<OperationsDashboard>;

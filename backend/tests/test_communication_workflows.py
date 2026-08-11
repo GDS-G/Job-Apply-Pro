@@ -108,16 +108,38 @@ def test_communication_configuration_accepts_references_and_rejects_tokens() -> 
         SecretStr(
             '{"providers":[{"provider":"GMAIL",'
             '"credential_reference":"os-keychain:gmail:primary"}],'
+            '"oauth_clients":[{"provider":"GMAIL",'
+            '"client_id":"public-desktop-client",'
+            '"requested_scopes":["openid","email"]}],'
             '"automatic_categories":["APPLICATION_CONFIRMATION"]}'
         )
     )
     assert configuration.providers[0].credential_reference == "os-keychain:gmail:primary"
+    assert configuration.oauth_clients[0].client_id == "public-desktop-client"
     assert configuration.automatic_categories == {MessageCategory.APPLICATION_CONFIRMATION}
     with pytest.raises(CommunicationConfigurationError):
         build_communication_configuration(
             SecretStr(
                 '{"providers":[{"provider":"GMAIL",'
                 '"credential_reference":"ref","access_token":"secret"}]}'
+            )
+        )
+    with pytest.raises(CommunicationConfigurationError):
+        build_communication_configuration(
+            SecretStr(
+                '{"oauth_clients":[{"provider":"GMAIL",'
+                '"client_id":"public-desktop-client",'
+                '"redirect_uri":"https://attacker.example.test/callback",'
+                '"requested_scopes":["openid"]}]}'
+            )
+        )
+    with pytest.raises(CommunicationConfigurationError):
+        build_communication_configuration(
+            SecretStr(
+                '{"oauth_clients":[{"provider":"GMAIL",'
+                '"client_id":"public-desktop-client",'
+                '"client_secret":"must-not-be-accepted",'
+                '"requested_scopes":["openid"]}]}'
             )
         )
 

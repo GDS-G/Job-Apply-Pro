@@ -18,9 +18,12 @@ import type {
   CommunicationRecord,
   DailyCommunicationSummary,
   IntegrationHealth,
+  IntegrationProvider,
   HelpTopic,
   MockWorkflowCreate,
   OperationsDashboard,
+  OAuthAuthorizationRequest,
+  OAuthAuthorizationState,
   PortalRunSnapshot,
   PortalAdapterDefinition,
   ReferencePortalRunCreate,
@@ -254,6 +257,24 @@ export class BackendClient {
 
   listIntegrationHealth(): Promise<IntegrationHealth[]> {
     return this.request("/communications/integrations");
+  }
+
+  startProviderAuthorization(
+    provider: IntegrationProvider,
+  ): Promise<OAuthAuthorizationRequest> {
+    return this.request(
+      `/communications/oauth/${encodeURIComponent(provider)}/start`,
+      { method: "POST" },
+    );
+  }
+
+  revokeProviderAuthorization(
+    provider: IntegrationProvider,
+  ): Promise<OAuthAuthorizationState> {
+    return this.request(
+      `/communications/oauth/${encodeURIComponent(provider)}/revoke`,
+      { method: "POST" },
+    );
   }
 
   listCommunicationRecords(): Promise<CommunicationRecord[]> {

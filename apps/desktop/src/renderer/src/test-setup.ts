@@ -65,8 +65,17 @@ const bridge: DesktopBridge = {
         message: "OAuth is not configured",
         read_enabled: false,
         write_enabled: false,
+        granted_scopes: [],
       },
     ],
+    startProviderAuthorization: async () => {
+      throw new Error("OAuth client is not configured in this test.");
+    },
+    revokeProviderAuthorization: async (provider) => ({
+      provider,
+      status: "AUTHORIZATION_REQUIRED",
+      granted_scopes: [],
+    }),
     listCommunicationRecords: async () => [],
     getDailyCommunicationSummary: async () => ({
       generated_at: new Date(0).toISOString(),
@@ -136,19 +145,19 @@ const bridge: DesktopBridge = {
     exportSupportDiagnostics: async () => null,
     getUpdateStatus: async () => ({
       state: "DISABLED",
-      current_version: "0.12.2-alpha.1",
+      current_version: "0.13.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     checkForUpdates: async () => ({
       state: "DISABLED",
-      current_version: "0.12.2-alpha.1",
+      current_version: "0.13.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     downloadUpdate: async () => ({
       state: "DISABLED",
-      current_version: "0.12.2-alpha.1",
+      current_version: "0.13.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
@@ -156,7 +165,7 @@ const bridge: DesktopBridge = {
     onUpdateStatus: (listener) => {
       listener({
         state: "DISABLED",
-        current_version: "0.12.2-alpha.1",
+        current_version: "0.13.0-alpha.1",
         message: "Updates are disabled for development builds.",
         checked_at: new Date(0).toISOString(),
       });

@@ -70,9 +70,13 @@ def create_app() -> FastAPI:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         configured_token = settings.api_token
-        is_protected = request.url.path.startswith("/api/v1/") and request.url.path not in {
-            "/api/v1/health"
+        public_paths = {
+            "/api/v1/health",
+            "/api/v1/communications/oauth/callback",
         }
+        is_protected = (
+            request.url.path.startswith("/api/v1/") and request.url.path not in public_paths
+        )
         if configured_token is not None and is_protected:
             provided_token = request.headers.get("X-Job-Apply-Pro-Token", "")
             if not secrets.compare_digest(provided_token, configured_token.get_secret_value()):

@@ -9,7 +9,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Portal Readiness v0.12.2-alpha.1"),
+      screen.getByText("Provider Connectivity v0.13.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

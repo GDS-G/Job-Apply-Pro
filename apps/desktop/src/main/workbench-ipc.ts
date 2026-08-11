@@ -1,12 +1,13 @@
 import { writeFile } from "node:fs/promises";
 import { arch, platform, release } from "node:os";
 
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import type {
   CandidateProfileCreate,
   ChallengeAnswerCommand,
   ChallengeSessionCreate,
+  IntegrationProvider,
   MockWorkflowCreate,
   ReferencePortalRunCreate,
   WorkflowControlAction,
@@ -23,6 +24,12 @@ const actions = new Set<WorkflowControlAction>([
   "TAKEOVER",
   "STOP",
 ]);
+const integrationProviders = new Set<IntegrationProvider>([
+  "GMAIL",
+  "OUTLOOK",
+  "GOOGLE_CALENDAR",
+  "OUTLOOK_CALENDAR",
+]);
 
 function requiredText(value: unknown, name: string, maxLength: number): string {
   if (
@@ -35,6 +42,16 @@ function requiredText(value: unknown, name: string, maxLength: number): string {
     );
   }
   return value.trim();
+}
+
+function integrationProvider(value: unknown): IntegrationProvider {
+  if (
+    typeof value !== "string" ||
+    !integrationProviders.has(value as IntegrationProvider)
+  ) {
+    throw new TypeError("Integration provider is invalid.");
+  }
+  return value as IntegrationProvider;
 }
 
 function candidateInput(value: unknown): CandidateProfileCreate {
@@ -222,6 +239,32 @@ export function registerWorkbenchIpc(
   );
   ipcMain.handle("communications:integrations", () =>
     supervisor.client.listIntegrationHealth(),
+  );
+  ipcMain.handle(
+    "communications:oauth-start",
+    async (_event, providerValue: unknown) => {
+      const authorization = await supervisor.client.startProviderAuthorization(
+        integrationProvider(providerValue),
+      );
+      const authorizationUrl = new URL(authorization.authorization_url);
+      if (
+        authorizationUrl.protocol !== "https:" ||
+        !["accounts.google.com", "login.microsoftonline.com"].includes(
+          authorizationUrl.hostname,
+        )
+      ) {
+        throw new TypeError("Provider authorization URL is not allowlisted.");
+      }
+      await shell.openExternal(authorizationUrl.toString());
+      return authorization;
+    },
+  );
+  ipcMain.handle(
+    "communications:oauth-revoke",
+    (_event, providerValue: unknown) =>
+      supervisor.client.revokeProviderAuthorization(
+        integrationProvider(providerValue),
+      ),
   );
   ipcMain.handle("communications:records", () =>
     supervisor.client.listCommunicationRecords(),
