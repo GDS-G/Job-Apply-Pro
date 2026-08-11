@@ -206,7 +206,7 @@ def test_calendar_mutation_and_follow_up_are_audited_and_deduplicated(
 ) -> None:
     adapter = FixtureCalendarProvider(IntegrationProvider.GOOGLE_CALENDAR)
     service = _service(session, calendar_provider=adapter)
-    start = datetime(2026, 8, 7, 16, tzinfo=UTC)
+    start = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
     plan = service.plan_calendar_mutation(
         CalendarMutationCreate(
             provider=IntegrationProvider.GOOGLE_CALENDAR,
@@ -244,3 +244,4 @@ def test_calendar_mutation_and_follow_up_are_audited_and_deduplicated(
     summary = service.daily_summary()
     assert summary.confirmed_mutations == 1
     assert summary.scheduled_follow_ups == 1
+    assert summary.due_follow_ups == 0
