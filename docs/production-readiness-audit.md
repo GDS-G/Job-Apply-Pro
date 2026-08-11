@@ -7,7 +7,7 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 | Requirement | Implementation evidence | Validation evidence | Result |
 | --- | --- | --- | --- |
 | Performance and stress testing | Bounded diagnostic queries, workflow limits, startup deadline | 2,000-job test under 3 seconds; packaged startup under 60 seconds; backend coverage gate at least 80% | Source/packaged candidate complete |
-| Security testing and threat model | `SECURITY.md`, `docs/threat-model.md`, strict boundaries | pnpm audit, pip-audit, Gitleaks, CodeQL for Python and JavaScript/TypeScript, encryption/auth/privacy tests | Source complete; PR #12 checks green at `4e46179` |
+| Security testing and threat model | `SECURITY.md`, `docs/threat-model.md`, strict boundaries | pnpm audit, pip-audit, Gitleaks, CodeQL for Python and JavaScript/TypeScript, encryption/auth/privacy tests | Source complete; PR #12 checks green at `cc0fd82` |
 | Accessibility | Semantic renderer and UI Automation exposure | axe serious/critical gate plus real packaged-window inspection | Candidate complete; human contrast/keyboard review remains release-lab evidence |
 | Signed installer | Electron Builder NSIS, `forceCodeSigning=true`, Authenticode verifier | Unsigned local candidate correctly reports `NotSigned` and is rejected by metadata script | Implementation complete; signed artifact blocked by certificate |
 | Automatic updates | Explicit check/download/install state machine, signature verification, downgrade rejection | Pure policy tests and packaged UI inspection | Source complete; signed end-to-end update requires two signed versions |
@@ -25,7 +25,7 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 
 ### Latest remote validation
 
-PR #12 commit `4e461799e7cd32a63868d8719853ccc17fafc77c` passed dependency audit, secret scanning, Python CodeQL, JavaScript/TypeScript CodeQL, formatting, lint, strict type checking, all backend and desktop tests, the 80% coverage gate, production build, frozen-backend packaging and smoke validation, unpacked Windows packaging, and artifact upload. The preceding run exposed and the commit corrected a hard-coded calendar test date that had crossed from scheduled to due; the test now creates its fixture relative to the test clock and asserts both scheduled and due counts.
+PR #12 commit `cc0fd82774ea379257e1b7d69d0ad2310cbf945e` passed dependency audit, secret scanning, Python CodeQL, JavaScript/TypeScript CodeQL, formatting, lint, strict type checking, all backend and desktop tests, the 80% coverage gate, production build, frozen-backend packaging and smoke validation, unpacked Windows packaging, and artifact upload. Commit `4e461799e7cd32a63868d8719853ccc17fafc77c` corrected a hard-coded calendar test date that had crossed from scheduled to due; the test now creates its fixture relative to the test clock and asserts both scheduled and due counts. Commit `cc0fd82` also migrated checkout, pnpm setup, Node setup, Python setup, Gitleaks, CodeQL, and artifact upload to their Node 24-compatible action majors and added default-branch security analysis.
 
 ## Current release classification
 
