@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Production Hardening build
+## Maintenance Refresh build
 
-The active milestone is **Production Hardening `v0.12.0-alpha.1`**. It adds a bundled backend runtime, Windows NSIS packaging, signed-update enforcement, redacted support diagnostics, accessibility and stress gates, scheduled portal regression, controlled offline restore application, and release/rollback procedures.
+The active milestone is **Maintenance Refresh `v0.12.1-alpha.1`**. It preserves the production-hardening runtime and safety model while updating the supported Node 24 toolchain, Python framework/type/report dependencies, accessibility checks, workflow actions, and dependency-maintenance policy.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

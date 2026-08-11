@@ -33,14 +33,20 @@ Release PRs #1 through #12 were merged in version order with merge commits, each
 
 The `main` branch is governed for a solo maintainer: changes require a pull request and current required checks, but no approving reviewer is required while only one maintainer exists. Required conversation resolution is enabled; force pushes and branch deletion are disabled.
 
+### Maintenance refresh local validation
+
+`Maintenance Refresh v0.12.1-alpha.1` consolidates the compatible post-integration dependency updates into a separately versioned candidate. The validated environment uses Node 24.14, the pnpm 11 lockfile, Python 3.12, FastAPI 0.141.1, mypy 2.3.0, ReportLab 5.0.0, PyPDF 6.15.0, Starlette's `httpx2` test client, and a peer-clean Vite 7.3.6/electron-vite 5 toolchain. Node 24 type declarations remain on the Node 24 major.
+
+Local formatting, linting, strict TypeScript and mypy checks, all 57 backend tests at 81.19% coverage, all 4 desktop tests, the production build, frozen-backend build and smoke test, unpacked Windows package, pnpm audit, and pip-audit passed. The final unsigned NSIS candidate `Job-Apply-Pro-0.12.1-alpha.1-x64.exe` is 163,110,670 bytes with SHA-256 `61B134377725C5254A44488732883EAD4A351035B2CE9AC1EBCE4B225BB8564F`; Authenticode reports `NotSigned` as required for a local candidate without release credentials. PyPDF 6.15.0 excludes `PYSEC-2026-3655` and `PYSEC-2026-3656`.
+
 ## Current release classification
 
-`Production Hardening v0.12.0-alpha.1` is a source-complete, packaged Windows alpha candidate. It is not a stable production release because no organization certificate or authorized live provider/portal accounts have been supplied. The release workflow must not be dispatched and no catalog entry may set `production_enabled=true` until those external controls exist.
+`Maintenance Refresh v0.12.1-alpha.1` is the current source-complete, packaged Windows alpha candidate. It preserves the production-hardening behavior and safety boundaries while refreshing the supported build and dependency baseline. It is not a stable production release because no organization certificate or authorized live provider/portal accounts have been supplied. The release workflow must not be dispatched and no catalog entry may set `production_enabled=true` until those external controls exist.
 
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
-2. A signed `v0.12.0-alpha.1` installer whose Authenticode subject and SHA-256 checksum match the release record.
+2. A signed `v0.12.1-alpha.1` installer whose Authenticode subject and SHA-256 checksum match the release record.
 3. A second signed candidate or prior signed release to prove update and rollback behavior end to end.
 4. Named authorized test accounts, integration owners, granted scopes, and legal/terms approval for each portal, mail provider, and calendar provider claimed as production-tested.
 5. Attached release-lab evidence for the manual rows in `docs/failure-injection-matrix.md`, including offline network, expired login, unavailable Edge, locked database, write denial/storage pressure, sleep/resume, uninstall/reinstall, update, and rollback.
