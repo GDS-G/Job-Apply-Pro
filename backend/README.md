@@ -7,7 +7,7 @@ python -m pip install -e ".\backend[dev]"
 python -m alembic -c backend\alembic.ini upgrade head
 ```
 
-The Portal Adapter Expansion build exposes health, runtime status, workflow controls, event history, candidate, job, application, encrypted-backup, resumable-checkpoint, browser-session, candidate-knowledge, governed AI, reference-portal, challenge-session, and portal-catalog endpoints under `/api/v1`.
+The Communication & Scheduling build exposes health, runtime status, workflow controls, event history, candidate, job, application, encrypted-backup, resumable-checkpoint, browser-session, candidate-knowledge, governed AI, portal, challenge, communication, follow-up, calendar-plan, and mutation-audit endpoints under `/api/v1`.
 
 Browser sessions are available under `/api/v1/browser`. Session creation, observation, verified actions, action history, takeover, return, restart, and stop all use the same privileged API authentication. Production automation is locked by default, so only loopback fixture URLs are accepted.
 
@@ -20,5 +20,7 @@ Reference ATS operations are available under `/api/v1/portals`. A run discovers 
 Challenge operations are available under `/api/v1/challenges`. Sessions persist detection evidence, typed questions, verified answers, timers, review fingerprints, recovery events, and CAPTCHA intervention state. Answer suggestions are deterministic and limited to encrypted contact facts or locked approved application answers. Model-route responses describe the capability tier for the governed AI Gateway; challenge code never calls a provider directly.
 
 The portal catalog under `/api/v1/portals/catalog` declares generic-agent workflows for all Phase 9 targets. `/identify` matches sanitized page evidence against domain and signal fingerprints, while `/replays/validate` reports per-portal accuracy. Every catalog entry has `production_enabled=false`; only the loopback Reference ATS executes application and confirmation actions.
+
+Communication operations are under `/api/v1/communications`. Gmail and Outlook payloads normalize to a shared message model before deterministic classification, correlation, and reply drafting. Protected analysis and draft payloads are AES-256-GCM ciphertext; searchable rows retain only provider identifiers, category, review state, timestamps, and workflow linkage. Calendar plans preserve proposed and prior event snapshots, while every send/create/update attempt uses a fingerprint, idempotency key, actor, status, and provider resource identifier. All live adapters remain unconfigured unless an OS-protected credential reference is explicitly authorized.
 
 Candidate, checkpoint, and candidate-knowledge routes require `JAP_MASTER_KEY`, a base64-encoded 32-byte local key. When `JAP_API_TOKEN` is configured, all `/api/v1` routes except health require the `X-Job-Apply-Pro-Token` header. The API never persists or returns either secret. OpenAPI documentation is available at `http://127.0.0.1:8765/api/docs` while the service is running.

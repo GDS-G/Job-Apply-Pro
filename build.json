@@ -1,7 +1,7 @@
 {
-  "name": "Portal Adapter Expansion",
-  "version": "0.9.0-alpha.1",
+  "name": "Communication & Scheduling",
+  "version": "0.10.0-alpha.1",
   "channel": "alpha",
-  "roadmap_phases": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "roadmap_phases": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   "production_automation_enabled": false
 }

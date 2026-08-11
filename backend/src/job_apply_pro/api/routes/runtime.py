@@ -18,6 +18,7 @@ class RuntimeStatus(BaseModel):
     candidate_knowledge_available: bool = True
     ai_gateway_available: bool = True
     portal_vertical_slice_available: bool = True
+    communication_scheduling_available: bool = True
 
 
 @router.get("/status", response_model=RuntimeStatus)

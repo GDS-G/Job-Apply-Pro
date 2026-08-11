@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Portal Adapter Expansion",
+        build="Communication & Scheduling",
         environment=settings.environment,
     )

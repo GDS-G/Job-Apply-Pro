@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Portal Adapter Expansion build
+## Communication & Scheduling build
 
-The active milestone is **Portal Adapter Expansion `v0.9.0-alpha.1`**. It adds production-disabled, replay-validated generic-agent workflows for LinkedIn, Indeed, Monster, CareerBuilder, Dice, ZipRecruiter, Glassdoor, company careers sites, Workday, Taleo, and Greenhouse. Each definition declares host boundaries, capabilities, page fingerprints, confirmation requirements, limitations, and regression status while the Reference ATS remains the only executable submission fixture.
+The active milestone is **Communication & Scheduling `v0.10.0-alpha.1`**. It adds provider-independent Gmail, Outlook, Google Calendar, and Outlook Calendar boundaries; normalized message classification and application correlation; review-first replies; exact document-version attachment checks; conflict-aware scheduling; deduplicated follow-ups; daily summaries; and a durable audit trail for every attempted provider mutation.
 
-Application services never call provider SDKs directly. External AI calls require an enabled routing policy and explicit consent; highly sensitive and restricted data are blocked from external providers. The reference ATS accepts loopback fixture origins only, and an elevated submission action requires a matching review fingerprint plus an explicit desktop confirmation. Production portals, email, and calendar accounts remain disabled.
+Application services never call provider SDKs directly. Provider adapters receive opaque OS-keychain credential references, while message and calendar content is encrypted in SQLite. An outbound email or calendar mutation requires the exact persisted fingerprint and idempotency key, and is recorded as confirmed only after a configured provider returns an immutable identifier. Live portal, email, and calendar accounts remain disabled by default.
 
 ## Architecture
 
@@ -18,6 +18,7 @@ backend/src/job_apply_pro/documents Bounded document extractors and strict claim
 backend/src/job_apply_pro/ai Provider adapters, registry, prompts, privacy, and routing
 backend/src/job_apply_pro/portals Typed portal adapters and verification contracts
 backend/src/job_apply_pro/challenges Detection, answer mapping, timing, and AI routing policy
+backend/src/job_apply_pro/integrations Provider-independent mail/calendar boundaries and fixtures
 packages/contracts        Versioned TypeScript contracts shared by desktop code
 backend/migrations        Alembic-managed SQLite schema
 docs/adr                  Architecture decision records
@@ -83,6 +84,8 @@ The reference portal API is under `/api/v1/portals`. `POST /reference/runs` prep
 The challenge API is under `/api/v1/challenges`. Detection persists the browser fingerprint, resume state, extracted questions, and timer. Suggestions come only from encrypted profile contact fields or locked approved answer-library entries. Legal attestations, signatures, and CAPTCHAs always require direct user action. Assessment completion requires verified answers, the current review fingerprint, and the fixed `COMPLETE CHALLENGE` phrase.
 
 The portal catalog is available at `/api/v1/portals/catalog`, with fingerprint identification at `/identify` and sanitized replay validation at `/replays/validate`. Catalog support means the generic workflow contract is implemented and replay-tested; it does not authorize live login, application completion, or submission.
+
+The Communication API is under `/api/v1/communications`. Analyses and reply drafts are encrypted at rest; message listing, draft creation, calendar planning, follow-ups, mutation audits, and daily summaries share authenticated contracts. Gmail, Outlook, Google Calendar, and Outlook Calendar adapters fail closed until local OAuth credentials and account authorization are configured. Sanitized fixture adapters are used for regression tests and never contact provider networks.
 
 ## Validation
 

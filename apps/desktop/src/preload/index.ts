@@ -63,6 +63,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
         sessionId,
         priorFingerprint,
       ),
+    listIntegrationHealth: () =>
+      ipcRenderer.invoke("communications:integrations"),
+    listCommunicationRecords: () =>
+      ipcRenderer.invoke("communications:records"),
+    getDailyCommunicationSummary: () =>
+      ipcRenderer.invoke("communications:daily-summary"),
     onStatus: (listener: (status: BackendRuntimeStatus) => void) => {
       const handler = (
         _event: Electron.IpcRendererEvent,
