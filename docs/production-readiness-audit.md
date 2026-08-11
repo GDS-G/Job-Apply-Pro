@@ -34,6 +34,6 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 3. A second signed candidate or prior signed release to prove update and rollback behavior end to end.
 4. Named authorized test accounts, integration owners, granted scopes, and legal/terms approval for each portal, mail provider, and calendar provider claimed as production-tested.
 5. Attached release-lab evidence for the manual rows in `docs/failure-injection-matrix.md`, including offline network, expired login, unavailable Edge, locked database, write denial/storage pressure, sleep/resume, uninstall/reinstall, update, and rollback.
-6. Named support and incident-response ownership with a private vulnerability-reporting route.
+6. ~~Named support and incident-response ownership with a private vulnerability-reporting route.~~ Resolved: the solo `@GDS-G` maintainer owns support and incident response, and GitHub Private vulnerability reporting is enabled.
 
-Until all six evidence groups exist, the application remains alpha and all real portal submission/provider-write capabilities stay disabled.
+Until evidence groups 1-5 exist, the application remains alpha and all real portal submission/provider-write capabilities stay disabled.

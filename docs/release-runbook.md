@@ -4,9 +4,39 @@
 
 - Clean protected release branch and version synchronized across `VERSION`, `build.json`, Python, npm packages, UI, health responses, and changelog.
 - Node 24, pnpm 11, Python 3.12, supported Windows runner, and frozen dependency lock.
-- Repository secrets `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` configured for the authorized GDS-G Windows certificate.
-- GitHub Actions release environment restricted to release maintainers.
+- Repository Actions secrets `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` configured for the authorized GDS-G Windows certificate. These are signing-certificate values, never portal, email, or GitHub account credentials.
+- The release is initiated manually by the solo `@GDS-G` maintainer through an exact version tag or `workflow_dispatch`. A required reviewer is optional and is not configured while the project has one maintainer.
+- The maintainer's GitHub account uses MFA or a passkey and has verified release-notification delivery.
 - A verified encrypted backup and a previous signed installer available for rollback rehearsal.
+
+## Solo-maintainer signing-secret setup
+
+The current workflow reads repository-level Actions secrets directly. In GitHub, open **Settings > Secrets and variables > Actions > Repository secrets**, then add these two secrets separately:
+
+1. `WIN_CSC_LINK`: the base64 encoding of an exportable Authenticode `.pfx`/`.p12` certificate. It is not a username, account password, certificate purchase link, or ordinary web URL.
+2. `WIN_CSC_KEY_PASSWORD`: the password chosen when that certificate was exported.
+
+If GDS-G does not yet own an exportable Windows code-signing certificate, leave both secrets absent and do not dispatch the release workflow. A self-signed certificate is suitable only for isolated development and does not satisfy publication evidence. When a production `.pfx` exists, copy its base64 value directly to the clipboard without writing or printing it:
+
+```powershell
+$certificatePath = 'C:\protected\GDS-G-code-signing.pfx'
+[Convert]::ToBase64String([IO.File]::ReadAllBytes($certificatePath)) | Set-Clipboard
+```
+
+Paste the clipboard into the `WIN_CSC_LINK` value field, add the secret, then clear the clipboard with `Set-Clipboard -Value ''`. Add `WIN_CSC_KEY_PASSWORD` in a second GitHub secret dialog. Never commit the certificate, encoded value, or export password. If the certificate is hardware-backed or provided through Azure Trusted Signing, update and validate the signing workflow for that provider instead of attempting to export it.
+
+Repository secrets are appropriate for the current solo-maintainer workflow because releases are manual and the release job fails closed without signing. If maintainers are added later, move the two values to a `production-release` environment, make the job reference that environment, restrict release tags, and add a required reviewer who is not the person initiating the release.
+
+## Account-backed integration validation
+
+Credentials are never accepted through chat, issues, pull requests, source files, documentation, fixtures, logs, or diagnostics. Any credential disclosed through one of those channels is considered compromised and is not eligible for validation evidence.
+
+- Portal sign-in is performed directly by the account owner in the isolated browser profile. Job Apply Pro may reuse the resulting encrypted browser session, but it does not read, record, export, or auto-fill the password itself.
+- MFA, email security codes, CAPTCHAs, legal attestations, and signatures are supervised user-intervention boundaries. The workflow pauses, observes a fresh page after the user completes the challenge, and resumes only when the expected portal state is verified.
+- Mail and calendar providers use OAuth with PKCE and least-privilege scopes. Raw mailbox passwords are never integration credentials.
+- The application does not automatically create portal accounts. Account creation and acceptance of provider terms remain direct user actions.
+- A live catalog entry remains `production_enabled=false` until the specific account, allowed actions, provider terms, test window, owner, and stop conditions are recorded and approved. Owning an account is not by itself permission to automate the provider.
+- Final application submission, outbound mail, and calendar mutations retain their existing explicit-review, fingerprint, idempotency, and confirmation requirements.
 
 ## Candidate validation
 

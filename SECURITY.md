@@ -2,6 +2,12 @@
 
 Job Apply Pro handles high-sensitivity applicant, browser, email, and calendar data. Report suspected vulnerabilities privately to the repository owner rather than opening a public issue.
 
+## Support and incident ownership
+
+The current support owner, release incident commander, and security-response owner is the solo repository maintainer, [`@GDS-G`](https://github.com/GDS-G). Security reports must use GitHub's enabled **Private vulnerability reporting** form under the repository's [Security advisories](https://github.com/GDS-G/Job-Apply-Pro/security/advisories) page. Do not disclose a suspected vulnerability, exploit, credential, candidate record, browser session, or diagnostic payload in a public issue or discussion.
+
+The repository owner triages private reports, preserves relevant release and diagnostic evidence, withdraws affected releases when required, coordinates remediation, and publishes a security advisory after a fix and disclosure plan are ready. This role assignment is valid for a solo-maintainer project; a second reviewer is recommended if another trusted maintainer is added, but is not a prerequisite for private reporting.
+
 ## Local protected data
 
 Core and later builds encrypt candidate contacts, application answers, workflow checkpoint payloads, imported document bytes, extracted document layouts, and approved answer-library text with AES-256-GCM. The Workbench desktop generates `JAP_MASTER_KEY` and persists only an operating-system-protected blob through Electron `safeStorage`. Standalone backend developers must provide the key through a secure local environment method. Each ciphertext is authenticated against its record context, so moving a protected value to another record causes decryption to fail.
@@ -13,6 +19,7 @@ Never log decrypted values, encryption keys, session tokens, or full application
 - Bind local services to loopback interfaces only.
 - Authenticate every privileged desktop-to-backend operation with an ephemeral session token.
 - Store secrets in an operating-system credential store; never in source or runtime logs.
+- Treat a password, token, certificate, cookie, or recovery code disclosed through chat, an issue, a pull request, documentation, a fixture, or a log as compromised; never use it for development or release validation.
 - Encrypt sensitive profile fields, browser-state references, backups, and evidence artifacts.
 - Keep Electron context isolation and renderer sandboxing enabled.
 - Validate every IPC, API, model, browser, and provider payload at the boundary.
@@ -40,6 +47,8 @@ Structured responses and tool arguments are JSON-Schema validated. Tools must be
 Browser automation runs in a separate Playwright process behind a constrained JSON-lines protocol. Every session has an explicit origin allowlist; while `production_automation_enabled` is false, only loopback fixture origins are accepted. Actions declare their target, preconditions, intended result, timeout, verification, retry limit, permission, and confirmation state. Elevated actions fail closed without confirmed approval.
 
 Persistent user-data directories may contain authenticated cookies and storage. Keep them inside the configured ignored runtime directory, never inspect or export them through renderer IPC, never copy them into backups without encryption, and never include session tokens in observations or traces shared outside the workstation.
+
+Portal credentials are entered only by the account owner into the portal's own login page. Job Apply Pro may preserve the resulting authenticated browser profile but never records or automatically creates accounts with raw portal passwords. MFA, email codes, CAPTCHAs, legal attestations, and signatures require direct user intervention; the workflow resumes only after a fresh verified observation.
 
 Imported document files remain encrypted at rest. For an approved upload, the browser service decrypts only the selected version into its session artifact directory, verifies the upload, and removes the plaintext staging directory immediately; stop cleanup repeats this deletion defensively.
 
