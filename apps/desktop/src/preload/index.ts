@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   BackendRuntimeStatus,
+  DesktopNotificationDestination,
+  DesktopNotificationStatus,
   DesktopUpdateStatus,
   CandidateProfileCreate,
   ChallengeAnswerCommand,
@@ -110,6 +112,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("communications:records"),
     getDailyCommunicationSummary: () =>
       ipcRenderer.invoke("communications:daily-summary"),
+    getDesktopNotificationStatus: () =>
+      ipcRenderer.invoke("notifications:status"),
+    refreshDesktopNotifications: () =>
+      ipcRenderer.invoke("notifications:refresh"),
+    setNativeNotificationsEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke("notifications:set-native-enabled", enabled),
     getOperationsDashboard: () => ipcRenderer.invoke("operations:dashboard"),
     listBackups: () => ipcRenderer.invoke("operations:backups"),
     listBackupSchedules: () =>
@@ -142,6 +150,27 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ) => listener(status);
       ipcRenderer.on("updates:status", handler);
       return () => ipcRenderer.removeListener("updates:status", handler);
+    },
+    onDesktopNotificationStatus: (
+      listener: (status: DesktopNotificationStatus) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        status: DesktopNotificationStatus,
+      ) => listener(status);
+      ipcRenderer.on("notifications:status", handler);
+      return () => ipcRenderer.removeListener("notifications:status", handler);
+    },
+    onDesktopNotificationActivated: (
+      listener: (destination: DesktopNotificationDestination) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        destination: DesktopNotificationDestination,
+      ) => listener(destination);
+      ipcRenderer.on("notifications:activated", handler);
+      return () =>
+        ipcRenderer.removeListener("notifications:activated", handler);
     },
     onStatus: (listener: (status: BackendRuntimeStatus) => void) => {
       const handler = (

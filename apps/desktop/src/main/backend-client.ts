@@ -18,6 +18,7 @@ import type {
   ChallengeSessionSnapshot,
   CommunicationRecord,
   DailyCommunicationSummary,
+  FollowUp,
   IntegrationHealth,
   IntegrationProvider,
   HelpTopic,
@@ -425,6 +426,10 @@ export class BackendClient {
 
   listCommunicationRecords(): Promise<CommunicationRecord[]> {
     return this.request("/communications/records");
+  }
+
+  listFollowUps(): Promise<FollowUp[]> {
+    return this.request("/communications/follow-ups");
   }
 
   getDailyCommunicationSummary(): Promise<DailyCommunicationSummary> {

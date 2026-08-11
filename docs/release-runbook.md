@@ -57,11 +57,11 @@ pnpm --filter @job-apply-pro/desktop package:dir
 pnpm --filter @job-apply-pro/desktop package:win
 ```
 
-Install the unsigned candidate only on an isolated test workstation. Verify first-start migration, restart, backup create/verify/stage/apply, diagnostics export/redaction, update UI, Edge browser launch, sleep/resume, and uninstall with retained user data. Execute failure injections for no network, backend termination, invalid token, missing staged file, changed restore fingerprint, corrupt backup, database lock, and unavailable browser runtime.
+Install the unsigned candidate only on an isolated test workstation. Verify first-start migration, restart, backup create/verify/stage/apply, diagnostics export/redaction, update UI, Edge browser launch, sleep/resume, and uninstall with retained user data. Confirm native notifications begin disabled, enabling persists across restart, generic alerts appear in Windows Notification Center without protected source text, click activation opens the fixed workbench destination, Focus Assist behaves as expected, disabling stops future native delivery, and in-app alerts remain visible. Execute failure injections for no network, backend termination, invalid token, missing staged file, changed restore fingerprint, corrupt backup, database lock, unavailable browser runtime, unsupported notification delivery, and sleep/resume while an action is pending.
 
 ## Signed publication
 
-1. Tag the exact approved commit `v0.18.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref.
+1. Tag the exact approved commit `v0.19.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref.
 2. The workflow tests, builds, requires the certificate, signs the NSIS installer, generates an SPDX JSON SBOM, verifies Authenticode, creates SHA-256 checksums and dependency inventories, and only then publishes a prerelease.
 3. Download the published installer on a clean supported Windows workstation. Verify `Get-AuthenticodeSignature` reports `Valid`, the subject is the expected publisher, and the SHA-256 value matches `SHA256SUMS.txt`.
 4. Install, launch, perform the smoke workflow, and confirm the update metadata resolves to the same signed artifact.

@@ -17,6 +17,7 @@ import type {
 } from "@job-apply-pro/contracts";
 
 import type { BackendSupervisor } from "./backend-supervisor.js";
+import type { DesktopNotificationManager } from "./notification-manager.js";
 import { readProviderConfigurationFile } from "./provider-configuration-file.js";
 import type { UpdateManager } from "./update-manager.js";
 
@@ -291,6 +292,7 @@ function challengeAnswer(value: unknown): ChallengeAnswerCommand {
 export function registerWorkbenchIpc(
   supervisor: BackendSupervisor,
   updates: UpdateManager,
+  notifications: DesktopNotificationManager,
 ): void {
   ipcMain.handle("workbench:get-status", () => supervisor.status);
   ipcMain.handle("workbench:list-workflows", () =>
@@ -565,6 +567,17 @@ export function registerWorkbenchIpc(
   );
   ipcMain.handle("communications:daily-summary", () =>
     supervisor.client.getDailyCommunicationSummary(),
+  );
+  ipcMain.handle("notifications:status", () => notifications.status);
+  ipcMain.handle("notifications:refresh", () => notifications.refresh());
+  ipcMain.handle(
+    "notifications:set-native-enabled",
+    (_event, enabledValue: unknown) => {
+      if (typeof enabledValue !== "boolean") {
+        throw new TypeError("Notification preference must be a boolean.");
+      }
+      return notifications.setNativeEnabled(enabledValue);
+    },
   );
   ipcMain.handle("operations:dashboard", () =>
     supervisor.client.getOperationsDashboard(),

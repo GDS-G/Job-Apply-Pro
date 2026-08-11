@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.19.0-alpha.1] - Unreleased
+
+### Added
+
+- Added an always-visible in-app notification center and opt-in native desktop delivery for intervention, provider-message, follow-up, backup, and update action states.
+- Added a typed, privacy-safe notification projection with fixed workbench destinations, bounded 60-second polling, a maximum of 50 active items, and no more than five new native alerts per refresh.
+- Added bounded local persistence for the native-delivery preference and 500 stable delivered identifiers, plus collection, deduplication, privacy, renderer interaction, and accessibility coverage.
+
+### Changed
+
+- Electron main now derives notification state from the existing authenticated workflow, challenge, communication, follow-up, backup, and update contracts and focuses the appropriate workbench section when an alert is selected.
+- The shared contract build identity is synchronized with the active release instead of retaining the older Document Ingestion Resilience identity.
+
+### Security
+
+- Native notification titles and bodies never include employer, job, candidate, sender, recipient, subject, message, follow-up reason, provider identifier, diagnostic, credential, or token content.
+- Native delivery is off by default, unsupported platforms retain in-app alerts, state input is limited to 64 KiB, malformed state fails closed, and notification activation accepts only four fixed local destinations.
+
 ## [0.18.0-alpha.1] - Unreleased
 
 ### Added

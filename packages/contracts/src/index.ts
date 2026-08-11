@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Document Ingestion Resilience",
-  version: "0.16.0-alpha.1",
+  name: "Actionable Desktop Notifications",
+  version: "0.19.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -582,6 +582,58 @@ export interface DailyCommunicationSummary {
   confirmed_mutations: number;
 }
 
+export type FollowUpStatus = "SCHEDULED" | "DUE" | "COMPLETED" | "CANCELLED";
+
+export interface FollowUp {
+  id: string;
+  workflow_id: string;
+  reason: string;
+  due_at: string;
+  channel: IntegrationProvider;
+  status: FollowUpStatus;
+  dedupe_key: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DesktopNotificationKind =
+  | "MFA_REQUIRED"
+  | "CAPTCHA_REQUIRED"
+  | "USER_ACTION_REQUIRED"
+  | "ASSESSMENT_REQUIRED"
+  | "WORKFLOW_FAILED"
+  | "SESSION_EXPIRING"
+  | "SESSION_EXPIRED"
+  | "RECRUITER_RESPONSE"
+  | "INTERVIEW_REQUEST"
+  | "OFFER_RECEIVED"
+  | "FOLLOW_UP_DUE"
+  | "BACKUP_FAILED"
+  | "UPDATE_FAILED";
+
+export type DesktopNotificationDestination =
+  "WORKFLOWS" | "CHALLENGES" | "COMMUNICATIONS" | "OPERATIONS";
+
+export interface DesktopNotificationItem {
+  id: string;
+  kind: DesktopNotificationKind;
+  title: string;
+  body: string;
+  destination: DesktopNotificationDestination;
+  severity: "info" | "warning" | "critical";
+  occurred_at: string;
+}
+
+export interface DesktopNotificationStatus {
+  native_enabled: boolean;
+  native_supported: boolean;
+  poll_interval_seconds: number;
+  active_notifications: DesktopNotificationItem[];
+  delivered_count: number;
+  last_checked_at?: string | null;
+  last_error?: string | null;
+}
+
 export type BackupCategory = "DATABASE" | "DOCUMENTS";
 export type BackupStatus = "CREATING" | "VERIFIED" | "FAILED";
 export type RestoreStatus = "STAGED" | "APPLIED" | "FAILED";
@@ -1133,6 +1185,11 @@ export interface DesktopBridge {
     ): Promise<ProviderMessageSyncResult>;
     listCommunicationRecords(): Promise<CommunicationRecord[]>;
     getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
+    getDesktopNotificationStatus(): Promise<DesktopNotificationStatus>;
+    refreshDesktopNotifications(): Promise<DesktopNotificationStatus>;
+    setNativeNotificationsEnabled(
+      enabled: boolean,
+    ): Promise<DesktopNotificationStatus>;
     getOperationsDashboard(): Promise<OperationsDashboard>;
     listBackups(): Promise<BackupManifest[]>;
     listBackupSchedules(): Promise<BackupSchedule[]>;
@@ -1151,6 +1208,12 @@ export interface DesktopBridge {
     downloadUpdate(): Promise<DesktopUpdateStatus>;
     installUpdate(): Promise<void>;
     onUpdateStatus(listener: (status: DesktopUpdateStatus) => void): () => void;
+    onDesktopNotificationStatus(
+      listener: (status: DesktopNotificationStatus) => void,
+    ): () => void;
+    onDesktopNotificationActivated(
+      listener: (destination: DesktopNotificationDestination) => void,
+    ): () => void;
     onStatus(listener: (status: BackendRuntimeStatus) => void): () => void;
   };
 }
