@@ -8,11 +8,9 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Browser Runtime v0.4.0-alpha.1"),
+      screen.getByText("Candidate Knowledge v0.5.0-alpha.1"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/production submission remains intentionally disabled/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/submission is disabled/i)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /create encrypted profile/i }),
     ).toBeInTheDocument();

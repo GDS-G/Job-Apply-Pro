@@ -13,6 +13,16 @@ const bridge: DesktopBridge = {
     }),
     listWorkflows: async () => [],
     listBrowserSessions: async () => [],
+    getCandidateKnowledge: async (profileId) => ({
+      profile_id: profileId,
+      documents: [],
+      claims: [],
+      answers: [],
+    }),
+    selectAndImportResume: async () => null,
+    reviewCandidateClaim: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     createCandidate: async () => {
       throw new Error("Not implemented in this test.");
     },

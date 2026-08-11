@@ -1,0 +1,220 @@
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
+from job_apply_pro.api.routes.core import get_cipher
+from job_apply_pro.config import get_settings
+from job_apply_pro.documents.extractors import DocumentExtractionError
+from job_apply_pro.domain.knowledge import (
+    AnswerLibraryCreate,
+    AnswerLibraryEntry,
+    CandidateClaim,
+    CandidateDocument,
+    CandidateDocumentVersion,
+    CandidateKnowledgeSnapshot,
+    ClaimReview,
+    DocumentExtraction,
+    DocumentImportResult,
+    DocumentKind,
+    ExperienceSummary,
+    RetrievalQuery,
+    RetrievalResult,
+)
+from job_apply_pro.security.encryption import DecryptionError, SensitiveDataCipher
+from job_apply_pro.security.keys import KeyConfigurationError
+from job_apply_pro.services.knowledge import (
+    CandidateKnowledgeConflictError,
+    CandidateKnowledgeError,
+    CandidateKnowledgeService,
+)
+from job_apply_pro.storage.database import get_session
+from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
+from job_apply_pro.storage.repositories import CandidateRepository
+
+router = APIRouter(prefix="/knowledge", tags=["candidate-knowledge"])
+SessionDependency = Annotated[Session, Depends(get_session)]
+CipherDependency = Annotated[SensitiveDataCipher, Depends(get_cipher)]
+
+
+def get_knowledge_service(
+    session: SessionDependency, cipher: CipherDependency
+) -> CandidateKnowledgeService:
+    settings = get_settings()
+    return CandidateKnowledgeService(
+        CandidateKnowledgeRepository(session),
+        CandidateRepository(session),
+        cipher,
+        document_data_dir=settings.document_data_dir,
+        document_max_bytes=settings.document_max_bytes,
+    )
+
+
+KnowledgeServiceDependency = Annotated[CandidateKnowledgeService, Depends(get_knowledge_service)]
+
+
+def _http_error(error: Exception) -> HTTPException:
+    if isinstance(error, LookupError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+    if isinstance(error, CandidateKnowledgeConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    if isinstance(error, (CandidateKnowledgeError, DocumentExtractionError)):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
+    if isinstance(error, (KeyConfigurationError, DecryptionError)):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Candidate knowledge encryption is unavailable",
+        )
+    raise error
+
+
+@router.post(
+    "/profiles/{profile_id}/documents",
+    response_model=DocumentImportResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_candidate_document(
+    profile_id: str,
+    service: KnowledgeServiceDependency,
+    file: Annotated[UploadFile, File()],
+    kind: Annotated[DocumentKind, Form()] = DocumentKind.RESUME,
+    display_name: Annotated[str, Form(min_length=1, max_length=200)] = "Imported resume",
+    variant_label: Annotated[str, Form(min_length=1, max_length=120)] = "General",
+    job_family_tags: Annotated[str, Form(max_length=1_000)] = "",
+    is_primary: Annotated[bool, Form()] = False,
+) -> DocumentImportResult:
+    settings = get_settings()
+    data = await file.read(settings.document_max_bytes + 1)
+    try:
+        return service.import_document(
+            profile_id,
+            file_name=file.filename or "document",
+            data=data,
+            kind=kind,
+            display_name=display_name,
+            variant_label=variant_label,
+            job_family_tags=job_family_tags.split(","),
+            is_primary=is_primary,
+        )
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        DocumentExtractionError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get("/profiles/{profile_id}/documents", response_model=list[CandidateDocument])
+def list_candidate_documents(
+    profile_id: str, service: KnowledgeServiceDependency
+) -> list[CandidateDocument]:
+    try:
+        return service.list_documents(profile_id)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.get("/documents/{document_id}/versions", response_model=list[CandidateDocumentVersion])
+def list_document_versions(
+    document_id: str, service: KnowledgeServiceDependency
+) -> list[CandidateDocumentVersion]:
+    try:
+        return service.list_versions(document_id)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.get("/document-versions/{version_id}/extraction", response_model=DocumentExtraction)
+def get_document_extraction(
+    version_id: str, service: KnowledgeServiceDependency
+) -> DocumentExtraction:
+    try:
+        return service.get_extraction(version_id)
+    except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.get("/profiles/{profile_id}/claims", response_model=list[CandidateClaim])
+def list_candidate_claims(
+    profile_id: str, service: KnowledgeServiceDependency
+) -> list[CandidateClaim]:
+    try:
+        return service.list_claims(profile_id)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/claims/{claim_id}/review", response_model=CandidateClaim)
+def review_candidate_claim(
+    claim_id: str, command: ClaimReview, service: KnowledgeServiceDependency
+) -> CandidateClaim:
+    try:
+        return service.review_claim(claim_id, command)
+    except (LookupError, CandidateKnowledgeConflictError) as error:
+        raise _http_error(error) from error
+
+
+@router.get("/profiles/{profile_id}/experience", response_model=list[ExperienceSummary])
+def calculate_candidate_experience(
+    profile_id: str, service: KnowledgeServiceDependency
+) -> list[ExperienceSummary]:
+    try:
+        return service.calculate_experience(profile_id)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/profiles/{profile_id}/answers",
+    response_model=AnswerLibraryEntry,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_answer_library_entry(
+    profile_id: str,
+    command: AnswerLibraryCreate,
+    service: KnowledgeServiceDependency,
+) -> AnswerLibraryEntry:
+    try:
+        return service.add_answer(profile_id, command)
+    except (
+        LookupError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get("/profiles/{profile_id}/answers", response_model=list[AnswerLibraryEntry])
+def list_answer_library(
+    profile_id: str, service: KnowledgeServiceDependency
+) -> list[AnswerLibraryEntry]:
+    try:
+        return service.list_answers(profile_id)
+    except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.post("/profiles/{profile_id}/retrieve", response_model=list[RetrievalResult])
+def retrieve_candidate_knowledge(
+    profile_id: str,
+    command: RetrievalQuery,
+    service: KnowledgeServiceDependency,
+) -> list[RetrievalResult]:
+    try:
+        return service.retrieve(profile_id, command)
+    except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.get("/profiles/{profile_id}/snapshot", response_model=CandidateKnowledgeSnapshot)
+def get_candidate_knowledge_snapshot(
+    profile_id: str, service: KnowledgeServiceDependency
+) -> CandidateKnowledgeSnapshot:
+    try:
+        return service.snapshot(profile_id)
+    except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error

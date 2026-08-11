@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Bot,
   BriefcaseBusiness,
+  Check,
   CircleStop,
   FileText,
   Gauge,
@@ -17,12 +18,15 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Upload,
   UserRound,
+  X,
 } from "lucide-react";
 
 import type {
   BackendRuntimeStatus,
   BrowserSessionSnapshot,
+  CandidateKnowledgeSnapshot,
   CandidateProfile,
   WorkflowControlAction,
   WorkflowRunSnapshot,
@@ -64,7 +68,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Browser Runtime alpha</span>
+        <span>Candidate Knowledge alpha</span>
       </div>
     </div>
   );
@@ -79,6 +83,9 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [knowledge, setKnowledge] = useState<CandidateKnowledgeSnapshot | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,6 +108,18 @@ export function App() {
         setProfileId((current) => current ?? first.profile_id);
       }
       setError(null);
+    } catch (caught) {
+      setError(readableError(caught));
+    }
+  }, []);
+
+  const refreshKnowledge = useCallback(async (targetProfileId: string) => {
+    try {
+      const snapshot =
+        await window.jobApplyPro.workbench.getCandidateKnowledge(
+          targetProfileId,
+        );
+      setKnowledge(snapshot);
     } catch (caught) {
       setError(readableError(caught));
     }
@@ -129,13 +148,20 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [refreshWorkflows, status.state]);
 
+  useEffect(() => {
+    if (status.state === "ready" && profileId) {
+      void refreshKnowledge(profileId);
+    }
+  }, [profileId, refreshKnowledge, status.state]);
+
   const metrics = useMemo(() => {
     const activeBrowsers = browserSessions.filter((item) =>
       ["ACTIVE", "USER_TAKEOVER"].includes(item.state),
     ).length;
-    const ready = workflows.filter(
-      (item) => item.state === "READY_TO_SUBMIT",
-    ).length;
+    const proposedClaims =
+      knowledge?.claims.filter(
+        (claim) => claim.verification_status === "PROPOSED",
+      ).length ?? 0;
     const active = workflows.filter(
       (item) => !["CLOSED", "FAILED_TERMINAL"].includes(item.state),
     ).length;
@@ -147,9 +173,9 @@ export function App() {
       },
       { label: "Active", value: active, detail: "Supervised mock runs" },
       {
-        label: "Awaiting review",
-        value: ready,
-        detail: "Submission remains locked",
+        label: "Claims to review",
+        value: proposedClaims,
+        detail: "Unverified facts stay locked out",
       },
       {
         label: "Browser sessions",
@@ -157,7 +183,7 @@ export function App() {
         detail: "Isolated & allowlisted",
       },
     ];
-  }, [browserSessions, workflows]);
+  }, [browserSessions, knowledge, workflows]);
 
   async function createProfile(form: FormData) {
     setBusy(true);
@@ -212,6 +238,38 @@ export function App() {
           item.workflow_id === updated.workflow_id ? updated : item,
         ),
       );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importResume() {
+    if (!profileId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const snapshot =
+        await window.jobApplyPro.workbench.selectAndImportResume(profileId);
+      if (snapshot) setKnowledge(snapshot);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewClaim(claimId: string, approved: boolean) {
+    if (!profileId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await window.jobApplyPro.workbench.reviewCandidateClaim(
+        claimId,
+        approved,
+      );
+      await refreshKnowledge(profileId);
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -276,10 +334,8 @@ export function App() {
         <div className="workspace">
           <section className="hero-row">
             <div>
-              <span className="eyebrow">
-                Phase 4 · Verified browser control
-              </span>
-              <h1>Supervised browser runtime</h1>
+              <span className="eyebrow">Phase 5 · Evidence-backed profile</span>
+              <h1>Candidate knowledge workbench</h1>
               <p>{status.message}</p>
             </div>
             <div className="hero-actions">
@@ -316,11 +372,10 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Browser Runtime v0.4.0-alpha.1</strong>
+              <strong>Candidate Knowledge v0.5.0-alpha.1</strong>
               <p>
-                Persistent, traceable browser sessions are available for
-                loopback fixtures. Production submission remains intentionally
-                disabled.
+                Imported documents are encrypted, extracted facts require
+                review, and only locked evidence can feed reusable answers.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -550,6 +605,86 @@ export function App() {
                 </form>
               )}
             </article>
+          </section>
+
+          <section className="panel knowledge-panel">
+            <div className="panel__header">
+              <div>
+                <h2>Candidate documents & evidence</h2>
+                <p>
+                  {knowledge
+                    ? `${knowledge.documents.length} encrypted document variants · ${knowledge.claims.length} evidence-backed claims`
+                    : "Create or select a candidate profile to begin"}
+                </p>
+              </div>
+              <button
+                className="button button--secondary"
+                disabled={busy || !profileId}
+                onClick={() => void importResume()}
+                type="button"
+              >
+                <Upload size={15} /> Import resume
+              </button>
+            </div>
+            <div className="knowledge-grid">
+              <div className="document-variants">
+                <strong>Resume variants</strong>
+                {knowledge?.documents.length ? (
+                  knowledge.documents.map((document) => (
+                    <div className="knowledge-row" key={document.id}>
+                      <FileText size={15} />
+                      <span>
+                        <b>{document.display_name}</b>
+                        <small>{document.variant_label}</small>
+                      </span>
+                      {document.is_primary ? <em>Primary</em> : null}
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state empty-state--compact">
+                    No candidate documents imported.
+                  </div>
+                )}
+              </div>
+              <div className="claim-review">
+                <strong>Manual fact review</strong>
+                {knowledge?.claims.some(
+                  (claim) => claim.verification_status === "PROPOSED",
+                ) ? (
+                  knowledge.claims
+                    .filter((claim) => claim.verification_status === "PROPOSED")
+                    .slice(0, 6)
+                    .map((claim) => (
+                      <div className="claim-row" key={claim.id}>
+                        <span>
+                          <b>{claim.canonical_key}</b>
+                          <small>{claim.statement}</small>
+                        </span>
+                        <button
+                          aria-label={`Approve ${claim.canonical_key}`}
+                          disabled={busy}
+                          onClick={() => void reviewClaim(claim.id, true)}
+                          type="button"
+                        >
+                          <Check size={13} />
+                        </button>
+                        <button
+                          aria-label={`Reject ${claim.canonical_key}`}
+                          disabled={busy}
+                          onClick={() => void reviewClaim(claim.id, false)}
+                          type="button"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))
+                ) : (
+                  <div className="empty-state empty-state--compact">
+                    No proposed facts are waiting for review.
+                  </div>
+                )}
+              </div>
+            </div>
           </section>
 
           <section className="panel timeline-panel">

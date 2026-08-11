@@ -1,5 +1,10 @@
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
+
 import type {
   BrowserSessionSnapshot,
+  CandidateClaim,
+  CandidateKnowledgeSnapshot,
   CandidateProfile,
   CandidateProfileCreate,
   MockWorkflowCreate,
@@ -38,6 +43,49 @@ export class BackendClient {
     return this.request(`/browser/sessions${query}`);
   }
 
+  getCandidateKnowledge(
+    profileId: string,
+  ): Promise<CandidateKnowledgeSnapshot> {
+    return this.request(
+      `/knowledge/profiles/${encodeURIComponent(profileId)}/snapshot`,
+    );
+  }
+
+  async importResume(
+    profileId: string,
+    filePath: string,
+  ): Promise<CandidateKnowledgeSnapshot> {
+    const data = await readFile(filePath);
+    const form = new FormData();
+    form.append("file", new Blob([data]), basename(filePath));
+    form.append("kind", "RESUME");
+    form.append("display_name", basename(filePath));
+    form.append("variant_label", "General");
+    form.append("is_primary", "false");
+    await this.request(
+      `/knowledge/profiles/${encodeURIComponent(profileId)}/documents`,
+      { method: "POST", body: form },
+    );
+    return this.getCandidateKnowledge(profileId);
+  }
+
+  reviewCandidateClaim(
+    claimId: string,
+    approved: boolean,
+  ): Promise<CandidateClaim> {
+    return this.request(
+      `/knowledge/claims/${encodeURIComponent(claimId)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          approved,
+          lock: approved,
+          permitted_use: approved ? "APPLICATIONS" : "PROFILE_ONLY",
+        }),
+      },
+    );
+  }
+
   createCandidate(input: CandidateProfileCreate): Promise<CandidateProfile> {
     return this.request("/candidates", {
       method: "POST",
@@ -66,10 +114,11 @@ export class BackendClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const isForm = init.body instanceof FormData;
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
-        "Content-Type": "application/json",
+        ...(isForm ? {} : { "Content-Type": "application/json" }),
         "X-Job-Apply-Pro-Token": this.token,
         ...init.headers,
       },

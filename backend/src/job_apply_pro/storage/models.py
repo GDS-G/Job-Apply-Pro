@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -52,7 +53,11 @@ class EvidenceSourceRow(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
+    document_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("document_versions.id"), nullable=True, index=True
+    )
     source_type: Mapped[str] = mapped_column(String(60))
+    source_label: Mapped[str] = mapped_column(String(255), default="Imported source")
     source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -66,11 +71,24 @@ class CandidateClaimRow(Base):
     evidence_source_id: Mapped[str | None] = mapped_column(
         ForeignKey("evidence_sources.id"), nullable=True
     )
+    canonical_key: Mapped[str] = mapped_column(String(160), index=True)
+    statement: Mapped[str] = mapped_column(Text)
     claim_type: Mapped[str] = mapped_column(String(80))
     value_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    source_location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    context_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     confidence: Mapped[float] = mapped_column(Float)
+    verification_status: Mapped[str] = mapped_column(String(20), index=True)
+    permitted_use: Mapped[str] = mapped_column(String(30))
+    sensitivity: Mapped[str] = mapped_column(String(20))
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    superseded_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("candidate_claims.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class DocumentRow(Base):
@@ -80,6 +98,10 @@ class DocumentRow(Base):
     profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
     kind: Mapped[str] = mapped_column(String(30))
     display_name: Mapped[str] = mapped_column(String(200))
+    variant_label: Mapped[str] = mapped_column(String(120), default="General")
+    job_family_tags_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -94,6 +116,10 @@ class DocumentVersionRow(Base):
     media_type: Mapped[str] = mapped_column(String(100))
     sha256: Mapped[str] = mapped_column(String(64))
     storage_path: Mapped[str] = mapped_column(Text)
+    encrypted_extraction: Mapped[str] = mapped_column(Text)
+    parser_version: Mapped[str] = mapped_column(String(100))
+    page_count: Mapped[int] = mapped_column(Integer)
+    character_count: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -161,6 +187,47 @@ class ApplicationAnswerRow(Base):
     confidence: Mapped[float] = mapped_column(Float)
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AnswerLibraryRow(Base):
+    __tablename__ = "answer_library"
+    __table_args__ = (Index("ix_answer_library_profile_updated", "profile_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
+    canonical_field: Mapped[str] = mapped_column(String(160), index=True)
+    encrypted_question: Mapped[str] = mapped_column(Text)
+    encrypted_answer: Mapped[str] = mapped_column(Text)
+    evidence_claim_ids_json: Mapped[list[str]] = mapped_column(JSON)
+    confidence: Mapped[float] = mapped_column(Float)
+    approved: Mapped[bool] = mapped_column(Boolean)
+    locked: Mapped[bool] = mapped_column(Boolean)
+    reuse_permission: Mapped[str] = mapped_column(String(30))
+    provenance_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RetrievalChunkRow(Base):
+    __tablename__ = "retrieval_chunks"
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_id", name="uq_retrieval_chunk_source"),
+        Index("ix_retrieval_chunks_profile_source", "profile_id", "source_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
+    source_type: Mapped[str] = mapped_column(String(30))
+    source_id: Mapped[str] = mapped_column(String(36))
+    canonical_key: Mapped[str] = mapped_column(String(160))
+    encrypted_content: Mapped[str] = mapped_column(Text)
+    token_hashes_json: Mapped[list[str]] = mapped_column(JSON)
+    vector_json: Mapped[list[float]] = mapped_column(JSON)
+    permitted_use: Mapped[str] = mapped_column(String(30))
+    evidence_claim_ids_json: Mapped[list[str]] = mapped_column(JSON)
+    provenance_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class WorkflowCheckpointRow(Base):

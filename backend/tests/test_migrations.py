@@ -29,5 +29,11 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "workflow_events",
         "browser_sessions",
         "browser_actions",
+        "documents",
+        "document_versions",
+        "evidence_sources",
+        "candidate_claims",
+        "answer_library",
+        "retrieval_chunks",
     } <= tables
     get_settings.cache_clear()

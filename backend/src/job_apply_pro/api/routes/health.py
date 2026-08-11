@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Browser Runtime",
+        build="Candidate Knowledge",
         environment=settings.environment,
     )
