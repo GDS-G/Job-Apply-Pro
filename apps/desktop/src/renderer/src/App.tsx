@@ -28,6 +28,7 @@ import type {
   BrowserSessionSnapshot,
   CandidateKnowledgeSnapshot,
   CandidateProfile,
+  PortalRunSnapshot,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -48,6 +49,9 @@ const stateLabels: Record<string, string> = {
   FORM_MAPPED: "Form mapped",
   ANSWERS_VALIDATED: "Answers validated",
   READY_TO_SUBMIT: "Ready for review",
+  SUBMISSION_ATTEMPTED: "Submission attempted",
+  SUBMISSION_CONFIRMED: "Submission confirmed",
+  TRACKING_ACTIVE: "Tracking active",
   USER_TAKEOVER: "Paused for takeover",
   FAILED_RETRYABLE: "Retry available",
   FAILED_TERMINAL: "Stopped",
@@ -68,7 +72,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>AI Gateway alpha</span>
+        <span>Portal vertical slice</span>
       </div>
     </div>
   );
@@ -80,6 +84,7 @@ export function App() {
   const [browserSessions, setBrowserSessions] = useState<
     BrowserSessionSnapshot[]
   >([]);
+  const [portalRuns, setPortalRuns] = useState<PortalRunSnapshot[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
@@ -96,12 +101,14 @@ export function App() {
 
   const refreshWorkflows = useCallback(async () => {
     try {
-      const [items, sessions] = await Promise.all([
+      const [items, sessions, runs] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
+        window.jobApplyPro.workbench.listPortalRuns(),
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
+      setPortalRuns(runs);
       const first = items[0];
       if (first) {
         setSelectedId((current) => current ?? first.workflow_id);
@@ -277,6 +284,52 @@ export function App() {
     }
   }
 
+  async function prepareReferencePortal(form: FormData) {
+    if (!profileId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const run = await window.jobApplyPro.workbench.prepareReferencePortal({
+        profile_id: profileId,
+        portal_origin: String(form.get("portal_origin")),
+        query: String(form.get("query")),
+        minimum_fit_score: 0.5,
+      });
+      setPortalRuns((current) => [
+        run,
+        ...current.filter((item) => item.id !== run.id),
+      ]);
+      await refreshWorkflows();
+      setSelectedId(run.workflow_id);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmReferencePortal(run: PortalRunSnapshot) {
+    setBusy(true);
+    setError(null);
+    try {
+      const completed =
+        await window.jobApplyPro.workbench.confirmReferencePortal(
+          run.id,
+          run.review_fingerprint,
+        );
+      setPortalRuns((current) =>
+        current.map((item) => (item.id === completed.id ? completed : item)),
+      );
+      await refreshWorkflows();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const latestPortalRun = portalRuns[0] ?? null;
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -307,8 +360,8 @@ export function App() {
               <ShieldCheck size={18} /> <strong>Supervised mode</strong>
             </div>
             <p>
-              Mock workflows can advance, pause, retry, and recover. Submission
-              is disabled.
+              Production submission is disabled. The loopback reference ATS
+              requires an explicit review confirmation.
             </p>
           </div>
           <button className="nav-item" type="button">
@@ -334,8 +387,10 @@ export function App() {
         <div className="workspace">
           <section className="hero-row">
             <div>
-              <span className="eyebrow">Phase 6 · Governed model access</span>
-              <h1>Supervised AI workbench</h1>
+              <span className="eyebrow">
+                Phase 7 · Complete portal workflow
+              </span>
+              <h1>Supervised application workbench</h1>
               <p>{status.message}</p>
             </div>
             <div className="hero-actions">
@@ -372,11 +427,11 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>AI Gateway v0.6.0-alpha.1</strong>
+              <strong>Portal Vertical Slice v0.7.0-alpha.1</strong>
               <p>
-                Provider-independent routing, privacy policy, strict schemas,
-                encrypted caching, and six bounded agent roles now sit above
-                locked candidate evidence.
+                Search, qualification, document selection, verified form fill,
+                upload, confirmation-gated submission, and tracking now run as
+                one persisted loopback reference workflow.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -682,6 +737,94 @@ export function App() {
                 ) : (
                   <div className="empty-state empty-state--compact">
                     No proposed facts are waiting for review.
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="panel portal-panel">
+            <div className="panel__header">
+              <div>
+                <h2>Reference ATS vertical slice</h2>
+                <p>
+                  Loopback fixtures only · production portal submission remains
+                  locked
+                </p>
+              </div>
+              <ShieldCheck size={19} />
+            </div>
+            <div className="portal-grid">
+              <form
+                action={(form) => void prepareReferencePortal(form)}
+                className="workbench-form"
+              >
+                <label>
+                  Fixture origin
+                  <input
+                    name="portal_origin"
+                    defaultValue="http://127.0.0.1:4173"
+                    required
+                    type="url"
+                  />
+                </label>
+                <label>
+                  Job query
+                  <input
+                    name="query"
+                    defaultValue="Python automation"
+                    required
+                    maxLength={200}
+                  />
+                </label>
+                <button
+                  className="button button--primary form-submit"
+                  disabled={busy || !profileId || !knowledge?.documents.length}
+                  type="submit"
+                >
+                  <Play size={16} /> Prepare verified application
+                </button>
+              </form>
+              <div className="portal-status">
+                {latestPortalRun ? (
+                  <>
+                    <span className="status-pill status-pill--safe">
+                      {stateLabels[latestPortalRun.state] ??
+                        latestPortalRun.state}
+                    </span>
+                    <strong>
+                      Fit{" "}
+                      {Math.round(latestPortalRun.qualification.score * 100)}%
+                    </strong>
+                    <p>
+                      {latestPortalRun.field_mappings.length} canonical fields ·{" "}
+                      {latestPortalRun.deduplicated
+                        ? "existing job reused"
+                        : "new job recorded"}
+                    </p>
+                    {latestPortalRun.submission_evidence ? (
+                      <small>
+                        Confirmation{" "}
+                        {latestPortalRun.submission_evidence.confirmation_code}
+                      </small>
+                    ) : null}
+                    {latestPortalRun.state === "READY_TO_SUBMIT" ? (
+                      <button
+                        className="button button--primary"
+                        disabled={busy}
+                        onClick={() =>
+                          void confirmReferencePortal(latestPortalRun)
+                        }
+                        type="button"
+                      >
+                        <ShieldCheck size={16} /> Confirm fixture submission
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="empty-state empty-state--compact">
+                    Import and approve a resume, then provide a running
+                    reference ATS fixture origin.
                   </div>
                 )}
               </div>

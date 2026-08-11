@@ -41,4 +41,10 @@ Browser automation runs in a separate Playwright process behind a constrained JS
 
 Persistent user-data directories may contain authenticated cookies and storage. Keep them inside the configured ignored runtime directory, never inspect or export them through renderer IPC, never copy them into backups without encryption, and never include session tokens in observations or traces shared outside the workstation.
 
-The Browser Runtime alpha remains a development build. Real portal automation and application submission are intentionally not authorized.
+Imported document files remain encrypted at rest. For an approved upload, the browser service decrypts only the selected version into its session artifact directory, verifies the upload, and removes the plaintext staging directory immediately; stop cleanup repeats this deletion defensively.
+
+## Portal submission boundary
+
+The reference ATS adapter is deliberately restricted to `localhost`, `127.0.0.1`, and `::1`. Discovery responses and browser-observed job identity must agree. A run stops at `READY_TO_SUBMIT` with a persisted page fingerprint. Submission is an elevated action and proceeds only when the desktop supplies the exact fingerprint and explicit `SUBMIT REFERENCE APPLICATION` phrase. A click is recorded as `SUBMISSION_ATTEMPTED`; `SUBMISSION_CONFIRMED` requires a supported confirmation page and parsed confirmation code. Missing or changed evidence becomes `SUBMISSION_UNCERTAIN`, never confirmed.
+
+The Portal Vertical Slice remains a development build. Real portal automation and application submission are intentionally not authorized.

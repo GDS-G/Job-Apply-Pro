@@ -3,6 +3,7 @@ import { dialog, ipcMain } from "electron";
 import type {
   CandidateProfileCreate,
   MockWorkflowCreate,
+  ReferencePortalRunCreate,
   WorkflowControlAction,
 } from "@job-apply-pro/contracts";
 
@@ -72,6 +73,31 @@ function mockWorkflowInput(value: unknown): MockWorkflowCreate {
   };
 }
 
+function referencePortalInput(value: unknown): ReferencePortalRunCreate {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Reference portal input is invalid.");
+  }
+  const portalOrigin = requiredText(
+    Reflect.get(value, "portal_origin"),
+    "Portal origin",
+    2_000,
+  );
+  const parsed = new URL(portalOrigin);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new TypeError("Portal origin must use HTTP or HTTPS.");
+  }
+  return {
+    profile_id: requiredText(
+      Reflect.get(value, "profile_id"),
+      "Profile id",
+      100,
+    ),
+    portal_origin: parsed.origin,
+    query: requiredText(Reflect.get(value, "query"), "Job query", 200),
+    minimum_fit_score: 0.5,
+  };
+}
+
 export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
   ipcMain.handle("workbench:get-status", () => supervisor.status);
   ipcMain.handle("workbench:list-workflows", () =>
@@ -124,6 +150,18 @@ export function registerWorkbenchIpc(supervisor: BackendSupervisor): void {
   );
   ipcMain.handle("workbench:start-mock", (_event, value: unknown) =>
     supervisor.client.startMockWorkflow(mockWorkflowInput(value)),
+  );
+  ipcMain.handle("portals:list-runs", () => supervisor.client.listPortalRuns());
+  ipcMain.handle("portals:prepare-reference", (_event, value: unknown) =>
+    supervisor.client.prepareReferencePortal(referencePortalInput(value)),
+  );
+  ipcMain.handle(
+    "portals:confirm-reference",
+    (_event, runIdValue: unknown, fingerprintValue: unknown) =>
+      supervisor.client.confirmReferencePortal(
+        requiredText(runIdValue, "Portal run id", 100),
+        requiredText(fingerprintValue, "Review fingerprint", 200),
+      ),
   );
   ipcMain.handle(
     "workbench:control",

@@ -36,5 +36,6 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "answer_library",
         "retrieval_chunks",
         "ai_cache",
+        "portal_runs",
     } <= tables
     get_settings.cache_clear()

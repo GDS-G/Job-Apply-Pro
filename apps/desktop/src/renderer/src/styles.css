@@ -1095,6 +1095,38 @@ h1 {
   cursor: pointer;
 }
 
+.portal-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(260px, 1fr);
+  gap: 20px;
+  padding: 18px;
+}
+
+.portal-status {
+  display: flex;
+  min-height: 150px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid #e8ebf2;
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.portal-status strong {
+  color: #3d4659;
+  font-size: 18px;
+}
+
+.portal-status p,
+.portal-status small {
+  margin: 0;
+  color: #7f899d;
+  font-size: 10px;
+}
+
 @media (max-width: 1160px) {
   .shell {
     grid-template-columns: 220px minmax(0, 1fr);
@@ -1106,6 +1138,9 @@ h1 {
     grid-template-columns: 1fr;
   }
   .knowledge-grid {
+    grid-template-columns: 1fr;
+  }
+  .portal-grid {
     grid-template-columns: 1fr;
   }
   .queue-item {

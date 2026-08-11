@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from shutil import rmtree
 from typing import Protocol
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -241,18 +242,52 @@ class BrowserRuntimeService:
 
     def stop(self, session_id: str) -> BrowserSessionSnapshot:
         record = self._active_record(session_id, allow_takeover=True)
-        result = self._worker.call("stop_session", {"session_id": session_id})
-        trace_path = str(result["trace_path"]) if result.get("trace_path") else None
-        stopped = self._repository.set_state(
-            session_id, BrowserSessionState.STOPPED, trace_path=trace_path
-        )
-        if record.observation is not None:
-            self._save_checkpoint(stopped, record.observation, pending_action=None)
-        return _public_snapshot(stopped)
+        try:
+            result = self._worker.call("stop_session", {"session_id": session_id})
+            trace_path = str(result["trace_path"]) if result.get("trace_path") else None
+            stopped = self._repository.set_state(
+                session_id, BrowserSessionState.STOPPED, trace_path=trace_path
+            )
+            if record.observation is not None:
+                self._save_checkpoint(stopped, record.observation, pending_action=None)
+            return _public_snapshot(stopped)
+        finally:
+            rmtree(Path(record.artifact_dir) / "staged-uploads", ignore_errors=True)
 
     def list_actions(self, session_id: str) -> list[BrowserActionResult]:
         self._record(session_id)
         return self._repository.list_actions(session_id)
+
+    def stage_encrypted_upload(
+        self,
+        session_id: str,
+        *,
+        version_id: str,
+        encrypted_path: str,
+        file_name: str,
+    ) -> str:
+        record = self._active_record(session_id)
+        source = Path(encrypted_path).resolve()
+        safe_name = Path(file_name).name
+        if not source.is_file() or not source.is_relative_to(self._browser_data_dir.parent):
+            raise BrowserPolicyError("Encrypted document is outside the approved runtime directory")
+        if not safe_name or safe_name != file_name:
+            raise BrowserPolicyError("Upload filename must not contain a path")
+        upload_dir = (Path(record.artifact_dir) / "staged-uploads").resolve()
+        if not upload_dir.is_relative_to(Path(record.artifact_dir).resolve()):
+            raise BrowserPolicyError("Upload staging directory escaped the browser session")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        destination = upload_dir / safe_name
+        plaintext = self._cipher.decrypt_bytes(
+            source.read_text(encoding="ascii"),
+            context=f"document:{version_id}:file",
+        )
+        destination.write_bytes(plaintext)
+        return str(destination)
+
+    def clear_staged_uploads(self, session_id: str) -> None:
+        record = self._record(session_id)
+        rmtree(Path(record.artifact_dir) / "staged-uploads", ignore_errors=True)
 
     def _record(self, session_id: str) -> BrowserSessionRecord:
         record = self._repository.get_record(session_id)

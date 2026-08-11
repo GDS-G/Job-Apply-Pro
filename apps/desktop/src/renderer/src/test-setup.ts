@@ -32,6 +32,13 @@ const bridge: DesktopBridge = {
     controlWorkflow: async () => {
       throw new Error("Not implemented in this test.");
     },
+    listPortalRuns: async () => [],
+    prepareReferencePortal: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    confirmReferencePortal: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     onStatus: () => () => undefined,
   },
 };

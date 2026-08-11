@@ -18,6 +18,14 @@ from job_apply_pro.domain.browser import (
 from job_apply_pro.domain.candidate import CandidateBackup, CandidateStatus
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
 from job_apply_pro.domain.jobs import Job, JobCreate
+from job_apply_pro.domain.portals import (
+    PortalCapability,
+    PortalFieldMapping,
+    PortalKind,
+    PortalQualification,
+    PortalRunSnapshot,
+    SubmissionEvidence,
+)
 from job_apply_pro.domain.workbench import WorkflowRunSnapshot
 from job_apply_pro.domain.workflow import (
     TransitionCommand,
@@ -32,7 +40,10 @@ from job_apply_pro.storage.models import (
     BrowserActionRow,
     BrowserSessionRow,
     CandidateProfileRow,
+    FitScoreRow,
+    JobRequirementRow,
     JobRow,
+    PortalRunRow,
     WorkflowCheckpointRow,
     WorkflowEventRow,
 )
@@ -191,6 +202,27 @@ class JobRepository:
 
     def get(self, job_id: str) -> Job | None:
         row = self._session.get(JobRow, job_id)
+        if row is None:
+            return None
+        return Job(
+            id=row.id,
+            source=row.source,
+            external_id=row.external_id,
+            employer=row.employer,
+            title=row.title,
+            location=row.location,
+            source_url=row.source_url,
+            description_hash=row.description_hash,
+            discovered_at=_utc(row.discovered_at),
+        )
+
+    def find_by_identity(self, source: str, external_id: str) -> Job | None:
+        row = self._session.scalar(
+            select(JobRow).where(
+                JobRow.source == source,
+                JobRow.external_id == external_id,
+            )
+        )
         if row is None:
             return None
         return Job(
@@ -442,6 +474,127 @@ class BrowserRuntimeRepository:
             BrowserActionRow.session_id == session_id
         )
         return int(self._session.scalar(statement) or 0)
+
+
+def _portal_run(row: PortalRunRow) -> PortalRunSnapshot:
+    return PortalRunSnapshot(
+        id=row.id,
+        portal=PortalKind(row.portal),
+        capabilities=[PortalCapability(value) for value in row.capabilities_json],
+        workflow_id=row.workflow_id,
+        application_id=row.application_id,
+        browser_session_id=row.browser_session_id,
+        profile_id=row.profile_id,
+        job_id=row.job_id,
+        state=WorkflowState(row.state),
+        portal_origin=row.portal_origin,
+        query=row.query,
+        deduplicated=row.deduplicated,
+        qualification=PortalQualification.model_validate(row.qualification_json),
+        selected_document_version_id=row.selected_document_version_id,
+        field_mappings=[
+            PortalFieldMapping.model_validate(value) for value in row.field_mappings_json
+        ],
+        review_fingerprint=row.review_fingerprint,
+        submission_evidence=(
+            SubmissionEvidence.model_validate(row.submission_evidence_json)
+            if row.submission_evidence_json is not None
+            else None
+        ),
+        trace_path=row.trace_path,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
+    )
+
+
+class PortalRunRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, run: PortalRunSnapshot) -> PortalRunSnapshot:
+        row = self._session.get(PortalRunRow, run.id)
+        values = {
+            "portal": run.portal.value,
+            "capabilities_json": [value.value for value in run.capabilities],
+            "workflow_id": run.workflow_id,
+            "application_id": run.application_id,
+            "browser_session_id": run.browser_session_id,
+            "profile_id": run.profile_id,
+            "job_id": run.job_id,
+            "state": run.state.value,
+            "portal_origin": run.portal_origin,
+            "query": run.query,
+            "deduplicated": run.deduplicated,
+            "qualification_json": run.qualification.model_dump(mode="json"),
+            "selected_document_version_id": run.selected_document_version_id,
+            "field_mappings_json": [value.model_dump(mode="json") for value in run.field_mappings],
+            "review_fingerprint": run.review_fingerprint,
+            "submission_evidence_json": (
+                run.submission_evidence.model_dump(mode="json")
+                if run.submission_evidence is not None
+                else None
+            ),
+            "trace_path": run.trace_path,
+            "updated_at": run.updated_at,
+        }
+        if row is None:
+            row = PortalRunRow(id=run.id, created_at=run.created_at, **values)
+            self._session.add(row)
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+        self._session.commit()
+        return run
+
+    def get(self, run_id: str) -> PortalRunSnapshot | None:
+        row = self._session.get(PortalRunRow, run_id)
+        return _portal_run(row) if row is not None else None
+
+    def list_runs(self) -> list[PortalRunSnapshot]:
+        rows = self._session.scalars(
+            select(PortalRunRow).order_by(PortalRunRow.updated_at.desc())
+        ).all()
+        return [_portal_run(row) for row in rows]
+
+    def add_job_analysis(
+        self,
+        *,
+        job_id: str,
+        profile_id: str,
+        requirements: list[str],
+        score: float,
+        explanation: dict[str, object],
+    ) -> None:
+        now = utc_now()
+        existing_requirements = self._session.scalar(
+            select(func.count(JobRequirementRow.id)).where(JobRequirementRow.job_id == job_id)
+        )
+        if not existing_requirements:
+            self._session.add_all(
+                [
+                    JobRequirementRow(
+                        id=str(uuid4()),
+                        job_id=job_id,
+                        category="reference-ats",
+                        text=requirement,
+                        required=True,
+                        evidence_json={"source": "reference-ats-detail"},
+                    )
+                    for requirement in requirements
+                ]
+            )
+        self._session.add(
+            FitScoreRow(
+                id=str(uuid4()),
+                job_id=job_id,
+                profile_id=profile_id,
+                score=score,
+                explanation_json=explanation,
+                model_version="deterministic-reference-v1",
+                created_at=now,
+            )
+        )
+        self._session.commit()
 
 
 class WorkbenchRepository:

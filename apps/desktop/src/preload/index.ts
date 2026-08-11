@@ -4,6 +4,7 @@ import type {
   BackendRuntimeStatus,
   CandidateProfileCreate,
   MockWorkflowCreate,
+  ReferencePortalRunCreate,
   WorkflowControlAction,
 } from "@job-apply-pro/contracts";
 
@@ -31,6 +32,11 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("workbench:start-mock", input),
     controlWorkflow: (workflowId: string, action: WorkflowControlAction) =>
       ipcRenderer.invoke("workbench:control", workflowId, action),
+    listPortalRuns: () => ipcRenderer.invoke("portals:list-runs"),
+    prepareReferencePortal: (input: ReferencePortalRunCreate) =>
+      ipcRenderer.invoke("portals:prepare-reference", input),
+    confirmReferencePortal: (runId: string, reviewFingerprint: string) =>
+      ipcRenderer.invoke("portals:confirm-reference", runId, reviewFingerprint),
     onStatus: (listener: (status: BackendRuntimeStatus) => void) => {
       const handler = (
         _event: Electron.IpcRendererEvent,

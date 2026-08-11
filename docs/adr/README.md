@@ -15,3 +15,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0011: Keyed hybrid retrieval and locked-fact precedence](0011-keyed-hybrid-retrieval-and-locked-fact-precedence.md)
 - [ADR-0012: Provider-independent governed AI Gateway](0012-provider-independent-governed-ai-gateway.md)
 - [ADR-0013: AI privacy, prompts, validation, and caching](0013-ai-privacy-prompts-validation-and-caching.md)
+- [ADR-0014: Reference ATS confirmed-submission boundary](0014-reference-ats-confirmed-submission-boundary.md)

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "AI Gateway",
-  version: "0.6.0-alpha.1",
+  name: "Portal Vertical Slice",
+  version: "0.7.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -148,6 +148,69 @@ export interface BrowserSessionSnapshot {
   allowed_origins: string[];
   observation?: BrowserObservation | null;
   action_count: number;
+  trace_path?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PortalCapability =
+  | "SEARCH"
+  | "JOB_EXTRACTION"
+  | "APPLICATION_LAUNCH"
+  | "MULTI_PAGE_FORM"
+  | "DOCUMENT_UPLOAD"
+  | "SUBMISSION"
+  | "CONFIRMATION";
+
+export interface PortalQualification {
+  score: number;
+  threshold: number;
+  eligible: boolean;
+  matched_terms: string[];
+  missing_terms: string[];
+  evidence_claim_ids: string[];
+}
+
+export interface PortalFieldMapping {
+  page_type: string;
+  canonical_field: string;
+  label: string;
+  required: boolean;
+}
+
+export interface SubmissionEvidence {
+  confirmation_code: string;
+  confirmation_url: string;
+  page_fingerprint: string;
+  visible_signal: string;
+  verified_at: string;
+}
+
+export interface ReferencePortalRunCreate {
+  profile_id: string;
+  portal_origin: string;
+  query: string;
+  minimum_fit_score: number;
+}
+
+export interface PortalRunSnapshot {
+  id: string;
+  portal: "REFERENCE_ATS";
+  capabilities: PortalCapability[];
+  workflow_id: string;
+  application_id: string;
+  browser_session_id: string;
+  profile_id: string;
+  job_id: string;
+  state: WorkflowState;
+  portal_origin: string;
+  query: string;
+  deduplicated: boolean;
+  qualification: PortalQualification;
+  selected_document_version_id: string;
+  field_mappings: PortalFieldMapping[];
+  review_fingerprint: string;
+  submission_evidence?: SubmissionEvidence | null;
   trace_path?: string | null;
   created_at: string;
   updated_at: string;
@@ -331,6 +394,14 @@ export interface DesktopBridge {
       workflowId: string,
       action: WorkflowControlAction,
     ): Promise<WorkflowRunSnapshot>;
+    listPortalRuns(): Promise<PortalRunSnapshot[]>;
+    prepareReferencePortal(
+      input: ReferencePortalRunCreate,
+    ): Promise<PortalRunSnapshot>;
+    confirmReferencePortal(
+      runId: string,
+      reviewFingerprint: string,
+    ): Promise<PortalRunSnapshot>;
     onStatus(listener: (status: BackendRuntimeStatus) => void): () => void;
   };
 }

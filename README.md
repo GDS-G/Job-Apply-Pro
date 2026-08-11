@@ -2,11 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## AI Gateway build
+## Portal Vertical Slice build
 
-The active milestone is **AI Gateway `v0.6.0-alpha.1`**. It adds one provider-independent boundary for OpenAI-compatible cloud providers, secondary compatible providers, and local llama.cpp servers; governed model routing; multimodal input; bounded function calls; strict structured output; embeddings and reranking; encrypted version-aware caching; cost/retry/fallback controls; privacy classification and redaction; six initial agent roles; and an evaluation harness.
+The active milestone is **Portal Vertical Slice `v0.7.0-alpha.1`**. It adds a complete reference-ATS workflow: deterministic job discovery and extraction, canonical deduplication, evidence-backed qualification, resume selection, multi-page field mapping and completion, decrypted session-scoped upload staging, explicit review approval, confirmed loopback submission, trace capture, and application tracking.
 
-Application services never call provider SDKs directly. External calls require an enabled routing policy and explicit consent; highly sensitive and restricted data are blocked from external providers. Model output is validated before persistence or use and cannot overwrite a locked candidate fact. Browser automation remains loopback-only, and this build does not submit applications or connect to production email, calendar, or job-portal accounts.
+Application services never call provider SDKs directly. External AI calls require an enabled routing policy and explicit consent; highly sensitive and restricted data are blocked from external providers. The reference ATS accepts loopback fixture origins only, and an elevated submission action requires a matching review fingerprint plus an explicit desktop confirmation. Production portals, email, and calendar accounts remain disabled.
 
 ## Architecture
 
@@ -16,6 +16,7 @@ backend/src/job_apply_pro FastAPI API, workflow domain, services, and storage
 backend/src/job_apply_pro/browser Isolated Playwright JSON-lines worker and client
 backend/src/job_apply_pro/documents Bounded document extractors and strict claim proposals
 backend/src/job_apply_pro/ai Provider adapters, registry, prompts, privacy, and routing
+backend/src/job_apply_pro/portals Typed portal adapters and verification contracts
 packages/contracts        Versioned TypeScript contracts shared by desktop code
 backend/migrations        Alembic-managed SQLite schema
 docs/adr                  Architecture decision records
@@ -75,6 +76,8 @@ Browser profiles default to `var/browser`, while screenshots and Playwright trac
 The Candidate Knowledge API is under `/api/v1/knowledge`. Supported imports are PDF, DOCX, RTF, TXT, and Markdown. Legacy binary `.doc` files must be converted with a trusted local office tool before import.
 
 The AI Gateway API is under `/api/v1/ai`. Provider secrets, model definitions, and routing policies are supplied as local JSON through `JAP_AI_CONFIG_JSON`; never commit that value. External endpoints require HTTPS, local endpoints require loopback, and an empty configuration leaves the gateway safely `not_configured`.
+
+The reference portal API is under `/api/v1/portals`. `POST /reference/runs` prepares a loopback fixture application through `READY_TO_SUBMIT`; `POST /runs/{id}/confirm` accepts only the exact persisted review fingerprint and records confirmation only after the adapter observes its approved confirmation signal. This release does not authorize real portal submission.
 
 ## Validation
 

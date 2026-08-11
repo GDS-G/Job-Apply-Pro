@@ -320,6 +320,32 @@ class AICacheRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class PortalRunRow(Base):
+    __tablename__ = "portal_runs"
+    __table_args__ = (Index("ix_portal_runs_workflow_updated", "workflow_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    portal: Mapped[str] = mapped_column(String(40))
+    capabilities_json: Mapped[list[str]] = mapped_column(JSON)
+    workflow_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    browser_session_id: Mapped[str] = mapped_column(ForeignKey("browser_sessions.id"), index=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    state: Mapped[str] = mapped_column(String(40), index=True)
+    portal_origin: Mapped[str] = mapped_column(Text)
+    query: Mapped[str] = mapped_column(String(200))
+    deduplicated: Mapped[bool] = mapped_column(Boolean)
+    qualification_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    selected_document_version_id: Mapped[str] = mapped_column(ForeignKey("document_versions.id"))
+    field_mappings_json: Mapped[list[dict[str, object]]] = mapped_column(JSON)
+    review_fingerprint: Mapped[str] = mapped_column(String(200))
+    submission_evidence_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    trace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ErrorRecordRow(Base):
     __tablename__ = "error_records"
 

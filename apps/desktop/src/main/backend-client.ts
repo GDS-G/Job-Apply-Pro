@@ -8,6 +8,8 @@ import type {
   CandidateProfile,
   CandidateProfileCreate,
   MockWorkflowCreate,
+  PortalRunSnapshot,
+  ReferencePortalRunCreate,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -113,7 +115,45 @@ export class BackendClient {
     );
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  listPortalRuns(): Promise<PortalRunSnapshot[]> {
+    return this.request("/portals/runs");
+  }
+
+  prepareReferencePortal(
+    input: ReferencePortalRunCreate,
+  ): Promise<PortalRunSnapshot> {
+    return this.request(
+      "/portals/reference/runs",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+      120_000,
+    );
+  }
+
+  confirmReferencePortal(
+    runId: string,
+    reviewFingerprint: string,
+  ): Promise<PortalRunSnapshot> {
+    return this.request(
+      `/portals/runs/${encodeURIComponent(runId)}/confirm`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          review_fingerprint: reviewFingerprint,
+          confirmation_phrase: "SUBMIT REFERENCE APPLICATION",
+        }),
+      },
+      120_000,
+    );
+  }
+
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    timeoutMs = 10_000,
+  ): Promise<T> {
     const isForm = init.body instanceof FormData;
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
@@ -122,7 +162,7 @@ export class BackendClient {
         "X-Job-Apply-Pro-Token": this.token,
         ...init.headers,
       },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
       const payload: unknown = await response.json().catch(() => null);
