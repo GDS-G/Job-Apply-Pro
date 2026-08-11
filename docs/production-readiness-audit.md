@@ -7,7 +7,7 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 | Requirement | Implementation evidence | Validation evidence | Result |
 | --- | --- | --- | --- |
 | Performance and stress testing | Bounded diagnostic queries, workflow limits, startup deadline | 2,000-job test under 3 seconds; packaged startup under 60 seconds; backend coverage gate at least 80% | Source/packaged candidate complete |
-| Security testing and threat model | `SECURITY.md`, `docs/threat-model.md`, strict boundaries | pnpm audit, pip-audit, Gitleaks, CodeQL for Python and JavaScript/TypeScript, encryption/auth/privacy tests | Source complete; final `main` Security run green at `e887e60` |
+| Security testing and threat model | `SECURITY.md`, `docs/threat-model.md`, strict boundaries | pnpm audit, pip-audit, Gitleaks, CodeQL for Python and JavaScript/TypeScript, encryption/auth/privacy tests | Source complete; maintenance `main` Security run green at `df11fff` |
 | Accessibility | Semantic renderer and UI Automation exposure | axe serious/critical gate plus real packaged-window inspection | Candidate complete; human contrast/keyboard review remains release-lab evidence |
 | Signed installer | Electron Builder NSIS, `forceCodeSigning=true`, Authenticode verifier | Unsigned local candidate correctly reports `NotSigned` and is rejected by metadata script | Implementation complete; signed artifact blocked by certificate |
 | Automatic updates | Explicit check/download/install state machine, signature verification, downgrade rejection | Pure policy tests and packaged UI inspection | Source complete; signed end-to-end update requires two signed versions |
@@ -39,16 +39,22 @@ The `main` branch is governed for a solo maintainer: changes require a pull requ
 
 Local formatting, linting, strict TypeScript and mypy checks, all 57 backend tests at 81.19% coverage, all 4 desktop tests, the production build, frozen-backend build and smoke test, unpacked Windows package, pnpm audit, and pip-audit passed. The final unsigned NSIS candidate `Job-Apply-Pro-0.12.1-alpha.1-x64.exe` is 163,110,670 bytes with SHA-256 `61B134377725C5254A44488732883EAD4A351035B2CE9AC1EBCE4B225BB8564F`; Authenticode reports `NotSigned` as required for a local candidate without release credentials. PyPDF 6.15.0 excludes `PYSEC-2026-3655` and `PYSEC-2026-3656`.
 
+### Maintenance refresh integration
+
+PR #28 merged the independently validated release head `e048c9e237233a966afb224ae7d109df583165f3` as `main` commit `df11fff62d7c42d0b4bbfdc31766f7118b79be22`; the two commits have identical trees. The [pull-request CI run](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/31512966833) passed the complete Windows validation and packaging workflow, while its [Security run](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/31512966805) passed dependency audit, secret scanning, and both CodeQL analyses. The post-merge [CI run](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/31513466807) repeated the entire validation and packaging workflow successfully on `main`, and the corresponding [Security run](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/31513466743) passed all four required security jobs.
+
+The eleven compatible or intentionally declined Dependabot PRs were closed after #28 merged. Node type declarations remain on the Node 24 major, and Vite remains on the Vite 7 line supported by electron-vite 5. The obsolete `models/Llama-3.1-8B` gitlink is removed from the superproject because no application code references it and it had no `.gitmodules` definition; local model assets remain ignored and are not deleted by this cleanup.
+
 ## Current release classification
 
-`Maintenance Refresh v0.12.1-alpha.1` is the current source-complete, packaged Windows alpha candidate. It preserves the production-hardening behavior and safety boundaries while refreshing the supported build and dependency baseline. It is not a stable production release because no organization certificate or authorized live provider/portal accounts have been supplied. The release workflow must not be dispatched and no catalog entry may set `production_enabled=true` until those external controls exist.
+`Maintenance Refresh v0.12.1-alpha.1` is the current source-complete, packaged Windows alpha candidate. It preserves the production-hardening behavior and safety boundaries while refreshing the supported build and dependency baseline. It is not a stable production release because no organization certificate or provider-specific legal/terms approval and safe live-validation record have been supplied. Credentials pasted into chat are not a suitable automation or secret-storage route; live validation requires owner-controlled manual sign-in, with MFA, CAPTCHA, and one-time codes completed by the owner. The release workflow must not be dispatched and no catalog entry may set `production_enabled=true` until those external controls exist.
 
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
 2. A signed `v0.12.1-alpha.1` installer whose Authenticode subject and SHA-256 checksum match the release record.
 3. A second signed candidate or prior signed release to prove update and rollback behavior end to end.
-4. Named authorized test accounts, integration owners, granted scopes, and legal/terms approval for each portal, mail provider, and calendar provider claimed as production-tested.
+4. Provider-specific legal/terms approval, granted scopes, validation ownership, and sanitized evidence for every portal, mail provider, and calendar provider claimed as production-tested. Account passwords remain owner-controlled and are entered manually rather than stored in source, documentation, CI, or chat-driven automation.
 5. Attached release-lab evidence for the manual rows in `docs/failure-injection-matrix.md`, including offline network, expired login, unavailable Edge, locked database, write denial/storage pressure, sleep/resume, uninstall/reinstall, update, and rollback.
 6. ~~Named support and incident-response ownership with a private vulnerability-reporting route.~~ Resolved: the solo `@GDS-G` maintainer owns support and incident response, and GitHub Private vulnerability reporting is enabled.
 
