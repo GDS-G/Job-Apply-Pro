@@ -489,6 +489,14 @@ class CommunicationConfigurationRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ProviderSyncStateRow(Base):
+    __tablename__ = "provider_sync_states"
+
+    provider: Mapped[str] = mapped_column(String(40), primary_key=True)
+    encrypted_cursor: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class OAuthCredentialRow(Base):
     __tablename__ = "oauth_credentials"
 

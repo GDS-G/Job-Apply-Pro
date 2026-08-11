@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Actionable Desktop Notifications v0.19.0-alpha.1"),
+      screen.getByText("Incremental Provider Sync v0.20.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -91,6 +91,8 @@ describe("App", () => {
         imported_count: 1,
         duplicate_count: 1,
         record_ids: ["record-1", "record-1"],
+        sync_mode: "INCREMENTAL",
+        cursor_updated_at: "2026-08-11T23:00:00Z",
       });
 
     render(<App />);
@@ -100,7 +102,9 @@ describe("App", () => {
 
     expect(sync).toHaveBeenCalledWith("GMAIL");
     expect(
-      await screen.findByText(/fetched 2, imported 1, already present 1/i),
+      await screen.findByText(
+        /incremental sync fetched 2, imported 1, already present 1/i,
+      ),
     ).toBeInTheDocument();
   });
 

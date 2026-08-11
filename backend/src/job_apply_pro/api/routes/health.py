@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Actionable Desktop Notifications",
+        build="Incremental Provider Sync",
         environment=settings.environment,
     )

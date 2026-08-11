@@ -3,12 +3,30 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+from pydantic import SecretStr
+
 from job_apply_pro.domain.communications import (
     CalendarEventSnapshot,
     IntegrationProvider,
     NormalizedMessage,
     OutboundDraft,
+    ProviderSyncMode,
 )
+
+
+class ProviderMessageBatch:
+    """Internal provider result whose opaque cursor must not cross the API boundary."""
+
+    def __init__(
+        self,
+        *,
+        messages: list[NormalizedMessage],
+        cursor: SecretStr,
+        mode: ProviderSyncMode,
+    ) -> None:
+        self.messages = messages
+        self.cursor = cursor
+        self.mode = mode
 
 
 def normalize_gmail_message(payload: dict[str, object]) -> NormalizedMessage:
@@ -85,6 +103,10 @@ class MessageProviderAdapter(Protocol):
 
     def list_messages(self, *, since: datetime | None = None) -> list[NormalizedMessage]: ...
 
+    def sync_messages(
+        self, *, cursor: SecretStr | None, since: datetime | None = None
+    ) -> ProviderMessageBatch: ...
+
     def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str: ...
 
 
@@ -106,6 +128,12 @@ class DisabledMessageProvider:
 
     def list_messages(self, *, since: datetime | None = None) -> list[NormalizedMessage]:
         del since
+        raise ProviderNotConfiguredError(f"{self.provider.value} read access is not configured")
+
+    def sync_messages(
+        self, *, cursor: SecretStr | None, since: datetime | None = None
+    ) -> ProviderMessageBatch:
+        del cursor, since
         raise ProviderNotConfiguredError(f"{self.provider.value} read access is not configured")
 
     def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str:
@@ -139,11 +167,22 @@ class FixtureMessageProvider:
         self.provider = provider
         self._messages = messages or []
         self.sent: list[tuple[str, str]] = []
+        self.sync_count = 0
 
     def list_messages(self, *, since: datetime | None = None) -> list[NormalizedMessage]:
         return [
             message for message in self._messages if since is None or message.received_at >= since
         ]
+
+    def sync_messages(
+        self, *, cursor: SecretStr | None, since: datetime | None = None
+    ) -> ProviderMessageBatch:
+        self.sync_count += 1
+        return ProviderMessageBatch(
+            messages=self.list_messages(since=since),
+            cursor=SecretStr(f"fixture-cursor-{self.sync_count}"),
+            mode=(ProviderSyncMode.INITIAL if cursor is None else ProviderSyncMode.INCREMENTAL),
+        )
 
     def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str:
         self.sent.append((draft.id, idempotency_key))

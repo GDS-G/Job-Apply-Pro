@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Actionable Desktop Notifications"
+    BUILD_NAME = "Incremental Provider Sync"
 
     def __init__(
         self,

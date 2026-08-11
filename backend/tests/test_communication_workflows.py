@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -26,12 +27,14 @@ from job_apply_pro.integrations.communications import (
     FixtureCalendarProvider,
     FixtureMessageProvider,
     MessageProviderAdapter,
+    ProviderMutationError,
     ProviderNotConfiguredError,
     normalize_gmail_message,
     normalize_outlook_message,
 )
 from job_apply_pro.integrations.configuration import (
     CommunicationConfigurationError,
+    ProviderConnectionConfig,
     build_communication_configuration,
 )
 from job_apply_pro.main import create_app
@@ -40,7 +43,7 @@ from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.communications import CommunicationService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
 from job_apply_pro.storage.database import get_session
-from job_apply_pro.storage.models import CommunicationRecordRow
+from job_apply_pro.storage.models import CommunicationRecordRow, ProviderSyncStateRow
 
 
 def _service(
@@ -190,15 +193,78 @@ def test_provider_message_sync_imports_once_and_reports_duplicates(session: Sess
 
     assert first.fetched_count == first.imported_count == 1
     assert first.duplicate_count == 0
+    assert first.sync_mode.value == "INITIAL"
     assert second.fetched_count == second.duplicate_count == 1
     assert second.imported_count == 0
+    assert second.sync_mode.value == "INCREMENTAL"
     assert second.record_ids == first.record_ids
+    sync_state = session.get(ProviderSyncStateRow, IntegrationProvider.GMAIL.value)
+    assert sync_state is not None
+    assert "fixture-cursor" not in sync_state.encrypted_cursor
+    assert sync_state.encrypted_cursor.startswith("jap:v1:test-v1:")
     with pytest.raises(ValueError, match="mail provider"):
         service.sync_provider_messages(
             IntegrationProvider.GOOGLE_CALENDAR,
             since=None,
             workflows=[],
         )
+
+
+def test_provider_sync_cursor_advances_only_after_import_and_is_account_bound(
+    session: Session,
+) -> None:
+    wrong_account_message = _message().model_copy(update={"provider": IntegrationProvider.OUTLOOK})
+    failing_adapter = FixtureMessageProvider(IntegrationProvider.GMAIL, [wrong_account_message])
+    failing_service = _service(session, message_provider=failing_adapter)
+    with pytest.raises(ProviderMutationError, match="wrong account type"):
+        failing_service.sync_provider_messages(IntegrationProvider.GMAIL, since=None, workflows=[])
+    assert session.get(ProviderSyncStateRow, IntegrationProvider.GMAIL.value) is None
+
+    repository = CommunicationRepository(session, SensitiveDataCipher(StaticKeyProvider(b"c" * 32)))
+    adapter = FixtureMessageProvider(IntegrationProvider.GMAIL, [_message()])
+    first_service = CommunicationService(
+        repository,
+        message_adapters={IntegrationProvider.GMAIL: adapter},
+        provider_configs={
+            IntegrationProvider.GMAIL: ProviderConnectionConfig(
+                provider=IntegrationProvider.GMAIL,
+                credential_reference="oauth:gmail:first",
+            )
+        },
+    )
+    second_service = CommunicationService(
+        repository,
+        message_adapters={IntegrationProvider.GMAIL: adapter},
+        provider_configs={
+            IntegrationProvider.GMAIL: ProviderConnectionConfig(
+                provider=IntegrationProvider.GMAIL,
+                credential_reference="oauth:gmail:second",
+            )
+        },
+    )
+
+    assert (
+        first_service.sync_provider_messages(
+            IntegrationProvider.GMAIL, since=None, workflows=[]
+        ).sync_mode.value
+        == "INITIAL"
+    )
+    assert (
+        second_service.sync_provider_messages(
+            IntegrationProvider.GMAIL, since=None, workflows=[]
+        ).sync_mode.value
+        == "INITIAL"
+    )
+    second_binding = hashlib.sha256(b"GMAIL\0oauth:gmail:second\0").hexdigest()
+    current_state = repository.get_sync_state(IntegrationProvider.GMAIL, second_binding)
+    assert current_state is not None
+    stale_result = repository.save_sync_state(
+        IntegrationProvider.GMAIL,
+        SecretStr("stale-concurrent-cursor"),
+        second_binding,
+        None,
+    )
+    assert stale_result.cursor.get_secret_value() == current_state.cursor.get_secret_value()
 
 
 def test_provider_message_sync_api_returns_sanitized_counts(
@@ -226,6 +292,8 @@ def test_provider_message_sync_api_returns_sanitized_counts(
             "imported_count": 1,
             "duplicate_count": 0,
             "record_ids": response.json()["record_ids"],
+            "sync_mode": "INITIAL",
+            "cursor_updated_at": response.json()["cursor_updated_at"],
         }
         assert len(response.json()["record_ids"]) == 1
     finally:
