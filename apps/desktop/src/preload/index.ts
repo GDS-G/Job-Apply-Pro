@@ -6,6 +6,7 @@ import type {
   CandidateProfileCreate,
   ChallengeAnswerCommand,
   ChallengeSessionCreate,
+  IntegrationProvider,
   MockWorkflowCreate,
   ReferencePortalRunCreate,
   WorkflowControlAction,
@@ -66,6 +67,10 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ),
     listIntegrationHealth: () =>
       ipcRenderer.invoke("communications:integrations"),
+    startProviderAuthorization: (provider: IntegrationProvider) =>
+      ipcRenderer.invoke("communications:oauth-start", provider),
+    revokeProviderAuthorization: (provider: IntegrationProvider) =>
+      ipcRenderer.invoke("communications:oauth-revoke", provider),
     listCommunicationRecords: () =>
       ipcRenderer.invoke("communications:records"),
     getDailyCommunicationSummary: () =>

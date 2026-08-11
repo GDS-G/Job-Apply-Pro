@@ -18,24 +18,45 @@ from job_apply_pro.domain.communications import (
     FollowUp,
     FollowUpCreate,
     IntegrationHealth,
+    IntegrationProvider,
     MessageCategory,
     MutationAudit,
     MutationConfirmation,
     NormalizedMessage,
+    OAuthAuthorizationRequest,
+    OAuthAuthorizationState,
+    OAuthCallbackResult,
     OutboundDraft,
     SchedulingPlanRequest,
     SchedulingRecommendation,
 )
-from job_apply_pro.integrations.communications import ProviderNotConfiguredError
+from job_apply_pro.integrations.communications import (
+    CalendarProviderAdapter,
+    MessageProviderAdapter,
+    ProviderNotConfiguredError,
+)
 from job_apply_pro.integrations.configuration import (
     CommunicationConfigurationError,
+    ProviderConnectionConfig,
     build_communication_configuration,
+)
+from job_apply_pro.integrations.oauth import (
+    OAuthAuthorizationError,
+    OAuthConfigurationError,
+    OAuthConnectionService,
+)
+from job_apply_pro.integrations.provider_clients import (
+    GmailMessageProvider,
+    GoogleCalendarProvider,
+    OutlookCalendarProvider,
+    OutlookMessageProvider,
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.communications import CommunicationService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
+from job_apply_pro.storage.oauth_repository import OAuthRepository
 from job_apply_pro.storage.repositories import WorkbenchRepository
 
 router = APIRouter(prefix="/communications", tags=["communications"])
@@ -53,10 +74,52 @@ def get_communication_service(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Communication provider configuration is invalid",
         ) from error
+    clients = {item.provider: item for item in configuration.oauth_clients}
+    oauth = OAuthConnectionService(OAuthRepository(session, cipher), clients)
+    configured = {item.provider: item for item in configuration.providers}
+    for provider, client in clients.items():
+        state = oauth.state(provider)
+        configured[provider] = ProviderConnectionConfig(
+            provider=provider,
+            credential_reference=state.credential_reference,
+            account_hint=state.account_hint,
+            granted_scopes=state.granted_scopes or client.requested_scopes,
+            read_enabled=True,
+            write_enabled=any(
+                scope.endswith(
+                    ("gmail.send", "Mail.Send", "calendar.events", "Calendars.ReadWrite")
+                )
+                for scope in (state.granted_scopes or client.requested_scopes)
+            ),
+        )
+    message_adapters: dict[IntegrationProvider, MessageProviderAdapter] = {}
+    calendar_adapters: dict[IntegrationProvider, CalendarProviderAdapter] = {}
+    if (
+        IntegrationProvider.GMAIL in clients
+        and oauth.state(IntegrationProvider.GMAIL).status.value == "CONNECTED"
+    ):
+        message_adapters[IntegrationProvider.GMAIL] = GmailMessageProvider(oauth)
+    if (
+        IntegrationProvider.OUTLOOK in clients
+        and oauth.state(IntegrationProvider.OUTLOOK).status.value == "CONNECTED"
+    ):
+        message_adapters[IntegrationProvider.OUTLOOK] = OutlookMessageProvider(oauth)
+    if (
+        IntegrationProvider.GOOGLE_CALENDAR in clients
+        and oauth.state(IntegrationProvider.GOOGLE_CALENDAR).status.value == "CONNECTED"
+    ):
+        calendar_adapters[IntegrationProvider.GOOGLE_CALENDAR] = GoogleCalendarProvider(oauth)
+    if (
+        IntegrationProvider.OUTLOOK_CALENDAR in clients
+        and oauth.state(IntegrationProvider.OUTLOOK_CALENDAR).status.value == "CONNECTED"
+    ):
+        calendar_adapters[IntegrationProvider.OUTLOOK_CALENDAR] = OutlookCalendarProvider(oauth)
     return CommunicationService(
         CommunicationRepository(session, cipher),
+        message_adapters=message_adapters or None,
+        calendar_adapters=calendar_adapters or None,
         automatic_categories=configuration.automatic_categories,
-        provider_configs={item.provider: item for item in configuration.providers},
+        provider_configs=configured,
         knowledge_repository=CandidateKnowledgeRepository(session),
     )
 
@@ -64,9 +127,73 @@ def get_communication_service(
 ServiceDependency = Annotated[CommunicationService, Depends(get_communication_service)]
 
 
+def get_oauth_service(
+    session: SessionDependency, cipher: CipherDependency
+) -> OAuthConnectionService:
+    try:
+        configuration = build_communication_configuration(get_settings().communication_config_json)
+    except CommunicationConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Communication provider configuration is invalid",
+        ) from error
+    return OAuthConnectionService(
+        OAuthRepository(session, cipher),
+        {item.provider: item for item in configuration.oauth_clients},
+    )
+
+
+OAuthServiceDependency = Annotated[OAuthConnectionService, Depends(get_oauth_service)]
+
+
 @router.get("/integrations", response_model=list[IntegrationHealth])
 def integration_health(service: ServiceDependency) -> list[IntegrationHealth]:
     return service.health()
+
+
+@router.post(
+    "/oauth/{provider}/start",
+    response_model=OAuthAuthorizationRequest,
+    status_code=status.HTTP_201_CREATED,
+)
+def start_oauth(
+    provider: IntegrationProvider, service: OAuthServiceDependency
+) -> OAuthAuthorizationRequest:
+    try:
+        return service.start(provider)
+    except OAuthConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+
+
+@router.get("/oauth/callback", response_model=OAuthCallbackResult)
+def oauth_callback(
+    code: Annotated[str, Query(min_length=1, max_length=4_000)],
+    state: Annotated[str, Query(min_length=32, max_length=200)],
+    service: OAuthServiceDependency,
+) -> OAuthCallbackResult:
+    try:
+        return service.complete(code=code, state=state)
+    except OAuthAuthorizationError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+
+
+@router.get("/oauth/{provider}", response_model=OAuthAuthorizationState)
+def oauth_state(
+    provider: IntegrationProvider, service: OAuthServiceDependency
+) -> OAuthAuthorizationState:
+    return service.state(provider)
+
+
+@router.post("/oauth/{provider}/revoke", response_model=OAuthAuthorizationState)
+def revoke_oauth(
+    provider: IntegrationProvider, service: OAuthServiceDependency
+) -> OAuthAuthorizationState:
+    try:
+        return service.revoke(provider)
+    except OAuthAuthorizationError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
 
 @router.post("/analyze", response_model=CommunicationRecord, status_code=201)

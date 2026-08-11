@@ -4,7 +4,7 @@
 
 This audit maps the current repository to the authoritative **Job Apply Pro Documentation** Google Doc. It supplements the phase-oriented release notes; it does not narrow the long-term product scope. Explicit current user direction, accepted ADRs, and versioned contracts remain higher priority than older implementation notes when they conflict.
 
-The earlier phrase “source-complete” meant that the planned Phase 0–12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Portal Readiness `v0.12.2-alpha.1` removes that ambiguity.
+The earlier phrase “source-complete” meant that the planned Phase 0–12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Portal Readiness `v0.12.2-alpha.1` removed that ambiguity; Provider Connectivity `v0.13.0-alpha.1` closes the provider OAuth and official-adapter source gap without claiming external authorization.
 
 ## Status meanings
 
@@ -27,7 +27,7 @@ The earlier phrase “source-complete” meant that the planned Phase 0–12 ver
 | Reference ATS discovery-through-confirmation vertical slice | Implemented and automated | `portals/reference_ats.py`, `ReferencePortalService`, loopback fixture and portal vertical-slice tests | Retain as the safe executable regression reference |
 | LinkedIn, Indeed, Monster, CareerBuilder, Dice, ZipRecruiter, Glassdoor, Workday, Taleo, Greenhouse, and company-career support | Implemented, replay-only | Production-disabled catalog, typed generic-agent strategy, expanded sanitized portal replay corpus | Portal-specific or supervised generic execution beyond identification; authorized live fingerprints, terms review, limits, regression evidence, and production enablement per capability |
 | CAPTCHA, questionnaire, assessment, and quiz framework | Implemented for controlled fixtures | Challenge domain, detection, answer mapping, routing, durable service, API, renderer, and challenge tests | Authorized live-provider/tool routing and real timed/visual workflow evidence |
-| Gmail, Outlook, Google Calendar, and Outlook Calendar | Partial | Common contracts, normalization, classification, correlation, mutation planning/audit, disabled and fixture adapters | OAuth 2.0/PKCE authorization, token refresh/revocation, official API adapters, consent/scopes UI, provider sandbox and live validation |
+| Gmail, Outlook, Google Calendar, and Outlook Calendar | Implemented, externally gated | Common contracts; encrypted OAuth/PKCE session and token persistence; refresh/revocation boundaries; official Gmail, Microsoft Graph, Google Calendar, and Outlook Calendar adapters; consent/scope UI; deterministic HTTP provider tests | Owner/provider client registration, Google verification or Microsoft administrator consent where required, provider sandbox/live validation, attachment retrieval and richer pagination/webhook evidence |
 | Application tracking, reports, model cost, portal health, diagnostics, help, and daily scheduling | Implemented and automated for local records | Operations/communication/support services, renderer dashboard, export and reconciliation tests | Broader UX depth, real-provider health, desktop notifications, and user acceptance testing |
 | Encrypted local backup, schedules, verification, staged/offline restore | Implemented and automated | Backup/operations services, offline restore CLI, migrations and recovery tests | Optional encrypted Google Drive/OneDrive transport adapters and physical failure-injection rows |
 | Signed entitlement and payment boundaries | Partial; payment deferred by roadmap | Signed entitlement verification, development license state, fail-closed payment interface | Commercial provider integration is explicitly deferrable; production entitlement issuance remains external |
@@ -49,11 +49,10 @@ The catalog additionally defines bounded rules for login, MFA, CAPTCHA, document
 
 ## Next source-controlled implementation order
 
-1. Implement OAuth 2.0 Authorization Code with PKCE connection management and official Gmail/Microsoft Graph/Google Calendar provider adapters without accepting raw account passwords.
-2. Add a supervised generic portal execution plan that consumes verified observations, persists per-step evidence, and stops before legal attestations or final submission unless a current policy grants the exact action.
-3. Expand document ingestion and generation, including trusted legacy DOC conversion, OCR/layout fallbacks, tailored document variants, and submitted-document retention.
-4. Expand desktop interaction tests, desktop notifications, provider configuration UX, and real portal/provider health evidence.
-5. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.
+1. Add a supervised generic portal execution plan that consumes verified observations, persists per-step evidence, and stops before legal attestations or final submission unless a current policy grants the exact action.
+2. Expand document ingestion and generation, including trusted legacy DOC conversion, OCR/layout fallbacks, tailored document variants, and submitted-document retention.
+3. Expand desktop interaction tests, desktop notifications, provider configuration import/validation UX, provider pagination/attachment handling, and authorized live provider health evidence.
+4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.
 
 ## External evidence that cannot be replaced by source tests
 

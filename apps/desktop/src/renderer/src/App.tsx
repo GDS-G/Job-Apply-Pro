@@ -37,8 +37,9 @@ import type {
   CommunicationRecord,
   DailyCommunicationSummary,
   DesktopUpdateStatus,
-  IntegrationHealth,
   HelpTopic,
+  IntegrationHealth,
+  IntegrationProvider,
   OperationsDashboard,
   PortalAdapterDefinition,
   PortalRunSnapshot,
@@ -195,6 +196,38 @@ export function App() {
       setError(readableError(caught));
     }
   }, []);
+
+  const startProviderAuthorization = useCallback(
+    async (provider: IntegrationProvider) => {
+      setBusy(true);
+      try {
+        await window.jobApplyPro.workbench.startProviderAuthorization(provider);
+        setError(null);
+      } catch (caught) {
+        setError(readableError(caught));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
+  const revokeProviderAuthorization = useCallback(
+    async (provider: IntegrationProvider) => {
+      setBusy(true);
+      try {
+        await window.jobApplyPro.workbench.revokeProviderAuthorization(
+          provider,
+        );
+        await refreshWorkflows();
+      } catch (caught) {
+        setError(readableError(caught));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshWorkflows],
+  );
 
   const refreshKnowledge = useCallback(async (targetProfileId: string) => {
     try {
@@ -716,7 +749,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Portal Readiness v0.12.2-alpha.1</strong>
+              <strong>Provider Connectivity v0.13.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1567,6 +1600,40 @@ export function App() {
                     {integration.status.replaceAll("_", " ")}
                   </span>
                   <small>{integration.message}</small>
+                  {integration.account_hint ? (
+                    <small>{integration.account_hint}</small>
+                  ) : null}
+                  {integration.granted_scopes.length ? (
+                    <small>
+                      {integration.granted_scopes.length} reviewed OAuth scopes
+                      · {integration.read_enabled ? "read" : "no read"} ·{" "}
+                      {integration.write_enabled ? "write" : "no write"}
+                    </small>
+                  ) : null}
+                  {integration.status === "AUTHORIZATION_REQUIRED" ? (
+                    <button
+                      className="button button--primary"
+                      disabled={busy}
+                      onClick={() =>
+                        void startProviderAuthorization(integration.provider)
+                      }
+                      type="button"
+                    >
+                      Review & connect
+                    </button>
+                  ) : null}
+                  {integration.status === "CONNECTED" ? (
+                    <button
+                      className="button button--danger"
+                      disabled={busy}
+                      onClick={() =>
+                        void revokeProviderAuthorization(integration.provider)
+                      }
+                      type="button"
+                    >
+                      Revoke access
+                    </button>
+                  ) : null}
                 </article>
               ))}
             </div>

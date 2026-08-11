@@ -395,6 +395,31 @@ class CommunicationRecordRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class OAuthCredentialRow(Base):
+    __tablename__ = "oauth_credentials"
+
+    credential_reference: Mapped[str] = mapped_column(String(200), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    encrypted_token_set: Mapped[str] = mapped_column(Text)
+    granted_scopes_json: Mapped[list[str]] = mapped_column(JSON)
+    account_hint: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthAuthorizationSessionRow(Base):
+    __tablename__ = "oauth_authorization_sessions"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    client_id: Mapped[str] = mapped_column(String(500))
+    redirect_uri: Mapped[str] = mapped_column(Text)
+    requested_scopes_json: Mapped[list[str]] = mapped_column(JSON)
+    encrypted_code_verifier: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class OutboundDraftRow(Base):
     __tablename__ = "outbound_drafts"
     __table_args__ = (Index("ix_outbound_drafts_workflow_updated", "workflow_id", "updated_at"),)
