@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from typing import cast
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -18,14 +19,150 @@ from job_apply_pro.domain.communications import (
 from job_apply_pro.integrations.communications import ProviderMutationError
 from job_apply_pro.integrations.oauth import AccessTokenProvider, OAuthAuthorizationError
 
+MAX_PROVIDER_RESPONSE_BYTES = 5_000_000
+MAX_PROVIDER_PAGES = 10
+MAX_PROVIDER_ITEMS = 1_000
+MAX_ATTACHMENT_PAGES = 5
+MAX_ATTACHMENTS_PER_MESSAGE = 100
+MAX_ATTACHMENT_NAME_CHARACTERS = 500
+MAX_CONTINUATION_TOKEN_CHARACTERS = 8_000
+MAX_GMAIL_MIME_PARTS = 500
+MAX_ENCODED_MESSAGE_BODY_CHARACTERS = 200_000
+MAX_MESSAGE_BODY_CHARACTERS = 100_000
+
 
 def _json(response: httpx.Response, action: str) -> dict[str, object]:
     if response.status_code >= 400:
         raise ProviderMutationError(f"Provider {action} failed with HTTP {response.status_code}")
-    payload = response.json()
+    if len(response.content) > MAX_PROVIDER_RESPONSE_BYTES:
+        raise ProviderMutationError(f"Provider {action} response exceeded the byte limit")
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ProviderMutationError(f"Provider {action} returned invalid JSON") from error
     if not isinstance(payload, dict):
         raise ProviderMutationError(f"Provider {action} returned an invalid response")
     return payload
+
+
+def _collection(payload: dict[str, object], key: str, action: str) -> list[dict[str, object]]:
+    values = payload.get(key, [])
+    if not isinstance(values, list):
+        raise ProviderMutationError(f"Provider {action} returned an invalid collection")
+    return [value for value in values if isinstance(value, dict)]
+
+
+def _google_collection(
+    client: httpx.Client,
+    *,
+    url: str,
+    params: dict[str, str | int],
+    headers: dict[str, str],
+    collection_key: str,
+    action: str,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    page_params = dict(params)
+    seen_tokens: set[str] = set()
+    for _ in range(MAX_PROVIDER_PAGES):
+        payload = _json(client.get(url, params=page_params, headers=headers), action)
+        page_items = _collection(payload, collection_key, action)
+        if len(items) + len(page_items) > MAX_PROVIDER_ITEMS:
+            raise ProviderMutationError(f"Provider {action} exceeded the item limit")
+        items.extend(page_items)
+        token = payload.get("nextPageToken")
+        if token is None:
+            return items
+        if (
+            not isinstance(token, str)
+            or not token
+            or len(token) > MAX_CONTINUATION_TOKEN_CHARACTERS
+        ):
+            raise ProviderMutationError(f"Provider {action} returned an invalid page token")
+        if token in seen_tokens:
+            raise ProviderMutationError(f"Provider {action} returned a repeated page token")
+        seen_tokens.add(token)
+        page_params = {**params, "pageToken": token}
+    raise ProviderMutationError(f"Provider {action} exceeded the page limit")
+
+
+def _validated_graph_next_link(value: object, *, path_prefix: str, action: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > MAX_CONTINUATION_TOKEN_CHARACTERS:
+        raise ProviderMutationError(f"Provider {action} returned an invalid next link")
+    parsed = urlsplit(value)
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ProviderMutationError(f"Provider {action} returned an invalid next link") from error
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "graph.microsoft.com"
+        or port not in {None, 443}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or parsed.path != path_prefix
+    ):
+        raise ProviderMutationError(f"Provider {action} returned an untrusted next link")
+    return value
+
+
+def _graph_collection(
+    client: httpx.Client,
+    *,
+    url: str,
+    params: dict[str, str] | None,
+    headers: dict[str, str],
+    path_prefix: str,
+    action: str,
+    max_pages: int = MAX_PROVIDER_PAGES,
+    max_items: int = MAX_PROVIDER_ITEMS,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    next_url = url
+    next_params = params
+    seen_links: set[str] = set()
+    for _ in range(max_pages):
+        payload = _json(client.get(next_url, params=next_params, headers=headers), action)
+        page_items = _collection(payload, "value", action)
+        if len(items) + len(page_items) > max_items:
+            raise ProviderMutationError(f"Provider {action} exceeded the item limit")
+        items.extend(page_items)
+        next_link = _validated_graph_next_link(
+            payload.get("@odata.nextLink"), path_prefix=path_prefix, action=action
+        )
+        if next_link is None:
+            return items
+        if next_link in seen_links:
+            raise ProviderMutationError(f"Provider {action} returned a repeated next link")
+        seen_links.add(next_link)
+        next_url = next_link
+        next_params = None
+    raise ProviderMutationError(f"Provider {action} exceeded the page limit")
+
+
+def _path_segment(value: object) -> str:
+    return quote(str(value), safe="")
+
+
+def _attachment_names(values: Iterable[object], action: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        name = value.strip()
+        if not name or name in seen:
+            continue
+        if len(name) > MAX_ATTACHMENT_NAME_CHARACTERS:
+            raise ProviderMutationError(f"Provider {action} attachment name exceeded the limit")
+        seen.add(name)
+        names.append(name)
+        if len(names) > MAX_ATTACHMENTS_PER_MESSAGE:
+            raise ProviderMutationError(f"Provider {action} exceeded the attachment limit")
+    return names
 
 
 def _token_headers(tokens: AccessTokenProvider, provider: IntegrationProvider) -> dict[str, str]:
@@ -37,40 +174,48 @@ def _token_headers(tokens: AccessTokenProvider, provider: IntegrationProvider) -
 
 
 def _decode_base64url(value: str) -> str:
+    if len(value) > MAX_ENCODED_MESSAGE_BODY_CHARACTERS:
+        raise ProviderMutationError("Provider Gmail message fetch body exceeded the limit")
     padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(f"{value}{padding}").decode("utf-8", errors="replace")
+    try:
+        decoded = base64.urlsafe_b64decode(f"{value}{padding}").decode("utf-8", errors="replace")
+    except (ValueError, TypeError) as error:
+        raise ProviderMutationError(
+            "Provider Gmail message fetch returned invalid body data"
+        ) from error
+    if len(decoded) > MAX_MESSAGE_BODY_CHARACTERS:
+        raise ProviderMutationError("Provider Gmail message fetch body exceeded the limit")
+    return decoded
+
+
+def _gmail_payload_nodes(payload: dict[str, object]) -> list[dict[str, object]]:
+    nodes: list[dict[str, object]] = []
+    pending = [payload]
+    while pending:
+        current = pending.pop()
+        nodes.append(current)
+        if len(nodes) > MAX_GMAIL_MIME_PARTS:
+            raise ProviderMutationError("Provider Gmail message fetch exceeded the MIME part limit")
+        parts = current.get("parts")
+        if isinstance(parts, list):
+            pending.extend(reversed([part for part in parts if isinstance(part, dict)]))
+    return nodes
 
 
 def _gmail_body(payload: dict[str, object]) -> str:
-    body = payload.get("body")
-    if isinstance(body, dict) and isinstance(body.get("data"), str):
-        return _decode_base64url(str(body["data"]))
-    parts = payload.get("parts")
-    if isinstance(parts, list):
-        for part in parts:
-            if isinstance(part, dict) and part.get("mimeType") == "text/plain":
-                value = _gmail_body(part)
-                if value:
-                    return value
-        for part in parts:
-            if isinstance(part, dict):
-                value = _gmail_body(part)
-                if value:
-                    return value
+    nodes = _gmail_payload_nodes(payload)
+    for node in [*filter(lambda item: item.get("mimeType") == "text/plain", nodes), *nodes]:
+        body = node.get("body")
+        if isinstance(body, dict) and isinstance(body.get("data"), str):
+            value = _decode_base64url(str(body["data"]))
+            if value:
+                return value
     return ""
 
 
 def _gmail_attachments(payload: dict[str, object]) -> list[str]:
-    names: list[str] = []
-    filename = payload.get("filename")
-    if isinstance(filename, str) and filename:
-        names.append(filename)
-    parts = payload.get("parts")
-    if isinstance(parts, list):
-        for part in parts:
-            if isinstance(part, dict):
-                names.extend(_gmail_attachments(part))
-    return names
+    names = [node.get("filename") for node in _gmail_payload_nodes(payload)]
+    return _attachment_names(names, "Gmail message fetch")
 
 
 def _parse_datetime(value: str, time_zone: str = "UTC") -> datetime:
@@ -95,24 +240,26 @@ class GmailMessageProvider:
         params: dict[str, str | int] = {"maxResults": 100}
         if since is not None:
             params["q"] = f"after:{int(since.timestamp())}"
-        payload = _json(
-            self._client.get(
-                f"{self._base}/messages",
-                params=params,
-                headers=_token_headers(self._tokens, self.provider),
-            ),
-            "Gmail message listing",
+        items = _google_collection(
+            self._client,
+            url=f"{self._base}/messages",
+            params=params,
+            headers=_token_headers(self._tokens, self.provider),
+            collection_key="messages",
+            action="Gmail message listing",
         )
-        items = payload.get("messages", [])
         messages: list[NormalizedMessage] = []
-        if not isinstance(items, list):
-            return messages
+        seen_message_ids: set[str] = set()
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                 continue
+            message_id = str(item["id"])
+            if message_id in seen_message_ids:
+                continue
+            seen_message_ids.add(message_id)
             raw = _json(
                 self._client.get(
-                    f"{self._base}/messages/{quote(str(item['id']))}",
+                    f"{self._base}/messages/{_path_segment(message_id)}",
                     params={"format": "full"},
                     headers=_token_headers(self._tokens, self.provider),
                 ),
@@ -192,21 +339,24 @@ class OutlookMessageProvider:
         }
         if since is not None:
             params["$filter"] = f"receivedDateTime ge {since.astimezone(UTC).isoformat()}"
-        payload = _json(
-            self._client.get(
-                f"{self._base}/messages",
-                params=params,
-                headers=_token_headers(self._tokens, self.provider),
-            ),
-            "Outlook message listing",
+        values = _graph_collection(
+            self._client,
+            url=f"{self._base}/messages",
+            params=params,
+            headers=_token_headers(self._tokens, self.provider),
+            path_prefix="/v1.0/me/messages",
+            action="Outlook message listing",
         )
-        values = payload.get("value", [])
-        if not isinstance(values, list):
-            return []
         messages: list[NormalizedMessage] = []
+        seen_message_ids: set[str] = set()
         for raw in values:
-            if not isinstance(raw, dict):
+            message_id = raw.get("id")
+            received_at = raw.get("receivedDateTime")
+            if not isinstance(message_id, str) or not message_id or message_id in seen_message_ids:
                 continue
+            if not isinstance(received_at, str) or not received_at:
+                continue
+            seen_message_ids.add(message_id)
             sender = raw.get("sender", {})
             sender_address = sender.get("emailAddress", {}) if isinstance(sender, dict) else {}
             to_items = raw.get("toRecipients", [])
@@ -221,8 +371,8 @@ class OutlookMessageProvider:
             messages.append(
                 NormalizedMessage(
                     provider=self.provider,
-                    provider_message_id=str(raw["id"]),
-                    provider_thread_id=str(raw.get("conversationId", raw["id"])),
+                    provider_message_id=message_id,
+                    provider_thread_id=str(raw.get("conversationId", message_id)),
                     sender=(
                         str(sender_address.get("address", "unknown@example.invalid"))
                         if isinstance(sender_address, dict)
@@ -231,10 +381,32 @@ class OutlookMessageProvider:
                     recipients=recipients,
                     subject=str(raw.get("subject", "")),
                     body_text=str(raw.get("bodyPreview", "")),
-                    received_at=_parse_datetime(str(raw["receivedDateTime"])),
+                    received_at=_parse_datetime(received_at),
+                    attachment_names=(
+                        self._attachment_names(message_id)
+                        if raw.get("hasAttachments") is True
+                        else []
+                    ),
                 )
             )
         return messages
+
+    def _attachment_names(self, message_id: str) -> list[str]:
+        path = f"/v1.0/me/messages/{_path_segment(message_id)}/attachments"
+        values = _graph_collection(
+            self._client,
+            url=f"https://graph.microsoft.com{path}",
+            params={"$select": "name,isInline,size"},
+            headers=_token_headers(self._tokens, self.provider),
+            path_prefix=path,
+            action="Outlook attachment listing",
+            max_pages=MAX_ATTACHMENT_PAGES,
+            max_items=MAX_ATTACHMENTS_PER_MESSAGE,
+        )
+        return _attachment_names(
+            [value.get("name") for value in values if value.get("isInline") is not True],
+            "Outlook attachment listing",
+        )
 
     def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str:
         headers = _token_headers(self._tokens, self.provider)
@@ -255,7 +427,7 @@ class OutlookMessageProvider:
         if not isinstance(message_id, str) or not message_id:
             raise ProviderMutationError("Outlook draft did not return a message identifier")
         response = self._client.post(
-            f"{self._base}/messages/{quote(message_id)}/send", headers=headers
+            f"{self._base}/messages/{_path_segment(message_id)}/send", headers=headers
         )
         if response.status_code >= 400:
             raise ProviderMutationError(f"Outlook send failed with HTTP {response.status_code}")
@@ -271,25 +443,20 @@ class GoogleCalendarProvider:
         self._client = client or httpx.Client(timeout=30)
 
     def list_events(self, *, start_at: datetime, end_at: datetime) -> list[CalendarEventSnapshot]:
-        payload = _json(
-            self._client.get(
-                self._base,
-                params={
-                    "timeMin": start_at.isoformat(),
-                    "timeMax": end_at.isoformat(),
-                    "singleEvents": "true",
-                    "maxResults": 250,
-                },
-                headers=_token_headers(self._tokens, self.provider),
-            ),
-            "Google Calendar event listing",
+        items = _google_collection(
+            self._client,
+            url=self._base,
+            params={
+                "timeMin": start_at.isoformat(),
+                "timeMax": end_at.isoformat(),
+                "singleEvents": "true",
+                "maxResults": 250,
+            },
+            headers=_token_headers(self._tokens, self.provider),
+            collection_key="items",
+            action="Google Calendar event listing",
         )
-        items = payload.get("items", [])
-        return (
-            [self._event(item) for item in items if isinstance(item, dict)]
-            if isinstance(items, list)
-            else []
-        )
+        return [self._event(item) for item in items]
 
     def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
         payload = _json(
@@ -308,7 +475,7 @@ class GoogleCalendarProvider:
     def update_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
         payload = _json(
             self._client.put(
-                f"{self._base}/{quote(event.provider_event_id)}",
+                f"{self._base}/{_path_segment(event.provider_event_id)}",
                 json=self._payload(event),
                 headers={
                     **_token_headers(self._tokens, self.provider),
@@ -367,20 +534,19 @@ class OutlookCalendarProvider:
         self._client = client or httpx.Client(timeout=30)
 
     def list_events(self, *, start_at: datetime, end_at: datetime) -> list[CalendarEventSnapshot]:
-        payload = _json(
-            self._client.get(
-                "https://graph.microsoft.com/v1.0/me/calendarView",
-                params={"startDateTime": start_at.isoformat(), "endDateTime": end_at.isoformat()},
-                headers=_token_headers(self._tokens, self.provider),
-            ),
-            "Outlook Calendar event listing",
+        values = _graph_collection(
+            self._client,
+            url="https://graph.microsoft.com/v1.0/me/calendarView",
+            params={
+                "startDateTime": start_at.isoformat(),
+                "endDateTime": end_at.isoformat(),
+                "$top": "250",
+            },
+            headers=_token_headers(self._tokens, self.provider),
+            path_prefix="/v1.0/me/calendarView",
+            action="Outlook Calendar event listing",
         )
-        values = payload.get("value", [])
-        return (
-            [self._event(item) for item in values if isinstance(item, dict)]
-            if isinstance(values, list)
-            else []
-        )
+        return [self._event(item) for item in values]
 
     def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
         payload = _json(
@@ -399,7 +565,7 @@ class OutlookCalendarProvider:
     def update_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
         payload = _json(
             self._client.patch(
-                f"{self._base}/{quote(event.provider_event_id)}",
+                f"{self._base}/{_path_segment(event.provider_event_id)}",
                 json=self._payload(event),
                 headers={
                     **_token_headers(self._tokens, self.provider),

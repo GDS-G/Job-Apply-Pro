@@ -25,6 +25,7 @@ import type {
   OperationsDashboard,
   OAuthAuthorizationRequest,
   OAuthAuthorizationState,
+  ProviderMessageSyncResult,
   PortalRunSnapshot,
   PortalAdapterDefinition,
   ReferencePortalRunCreate,
@@ -382,6 +383,16 @@ export class BackendClient {
     return this.request(
       `/communications/oauth/${encodeURIComponent(provider)}/revoke`,
       { method: "POST" },
+    );
+  }
+
+  syncProviderMessages(
+    provider: IntegrationProvider,
+  ): Promise<ProviderMessageSyncResult> {
+    return this.request(
+      `/communications/providers/${encodeURIComponent(provider)}/messages/sync`,
+      { method: "POST" },
+      120_000,
     );
   }
 

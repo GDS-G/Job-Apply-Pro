@@ -485,6 +485,13 @@ export function registerWorkbenchIpc(
         integrationProvider(providerValue),
       ),
   );
+  ipcMain.handle(
+    "communications:messages-sync",
+    (_event, providerValue: unknown) =>
+      supervisor.client.syncProviderMessages(
+        integrationProvider(providerValue),
+      ),
+  );
   ipcMain.handle("communications:records", () =>
     supervisor.client.listCommunicationRecords(),
   );

@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.17.0-alpha.1] - Unreleased
+
+### Added
+
+- Added authenticated, desktop-accessible Gmail and Outlook message synchronization with encrypted record storage, provider/message deduplication, and sanitized fetched/imported/duplicate counts.
+- Added bounded multi-page reads for Gmail, Outlook mail, Google Calendar, and Outlook Calendar using each provider's official continuation contract.
+- Added Outlook attachment-name metadata retrieval without downloading attachment content, plus desktop interaction coverage for connected-provider synchronization.
+
+### Changed
+
+- Gmail MIME traversal is iterative and bounded; duplicate message identifiers and attachment names are suppressed before persistence or display.
+- Provider reads now reject oversized responses, excessive pages/items, invalid collections, repeated continuation state, and overlong attachment or continuation metadata.
+
+### Security
+
+- Microsoft Graph continuation URLs must remain HTTPS on the exact Graph host, port, API path, and contain no user information or fragment before the bearer token is sent.
+- Attachment reads select metadata only, ignore inline resources, never return bytes to Electron, and remain limited to 100 attachment names per message.
+
 ## [0.16.0-alpha.1] - Unreleased
 
 ### Added

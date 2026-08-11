@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Document Ingestion Resilience build
+## Provider Data Resilience build
 
-The active milestone is **Document Ingestion Resilience `v0.16.0-alpha.1`**. It adds bounded legacy DOC conversion, opt-in scanned-PDF OCR, extraction warnings, DOCX archive preflight checks, and packaged PDFium license material. It retains evidence-bound DOCX/PDF generation, supervised portal execution, encrypted OAuth/PKCE provider connectivity, and the Portal Readiness baselines.
+The active milestone is **Provider Data Resilience `v0.17.0-alpha.1`**. It adds authenticated Gmail/Outlook message synchronization, bounded pagination across official mail and calendar adapters, encrypted provider/message deduplication, attachment-name metadata without attachment downloads, and strict Microsoft continuation-origin checks. It retains bounded document ingestion, evidence-bound DOCX/PDF generation, supervised portal execution, encrypted OAuth/PKCE connectivity, and the Portal Readiness baselines.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
@@ -84,6 +84,8 @@ The AI Gateway API is under `/api/v1/ai`. Provider secrets, model definitions, a
 The reference portal API is under `/api/v1/portals`. `POST /reference/runs` prepares a loopback fixture application through `READY_TO_SUBMIT`; `POST /runs/{id}/confirm` accepts only the exact persisted review fingerprint and records confirmation only after the adapter observes its approved confirmation signal. This release does not authorize real portal submission.
 
 The challenge API is under `/api/v1/challenges`. Detection persists the browser fingerprint, resume state, extracted questions, and timer. Suggestions come only from encrypted profile contact fields or locked approved answer-library entries. Legal attestations, signatures, and CAPTCHAs always require direct user action. Assessment completion requires verified answers, the current review fingerprint, and the fixed `COMPLETE CHALLENGE` phrase.
+
+Connected Gmail and Outlook accounts can be read through `POST /api/v1/communications/providers/{provider}/messages/sync`. The desktop exposes this as **Sync messages** only after reviewed OAuth authorization grants read access. Provider reads stop after ten pages or 1,000 items and reject repeated or untrusted continuation state. Outlook attachment handling reads bounded filename metadata only; it does not download attachment content. Imported messages are analyzed and encrypted locally, and repeat syncs reuse the existing record for the same provider message ID.
 
 The portal catalog is available at `/api/v1/portals/catalog`, with fingerprint identification at `/identify` and sanitized replay validation at `/replays/validate`. Catalog support means the generic workflow contract is implemented and replay-tested; it does not authorize live login, application completion, or submission.
 

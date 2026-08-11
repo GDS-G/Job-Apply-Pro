@@ -98,6 +98,8 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("communications:oauth-start", provider),
     revokeProviderAuthorization: (provider: IntegrationProvider) =>
       ipcRenderer.invoke("communications:oauth-revoke", provider),
+    syncProviderMessages: (provider: IntegrationProvider) =>
+      ipcRenderer.invoke("communications:messages-sync", provider),
     listCommunicationRecords: () =>
       ipcRenderer.invoke("communications:records"),
     getDailyCommunicationSummary: () =>

@@ -91,6 +91,13 @@ const bridge: DesktopBridge = {
       status: "AUTHORIZATION_REQUIRED",
       granted_scopes: [],
     }),
+    syncProviderMessages: async (provider) => ({
+      provider,
+      fetched_count: 0,
+      imported_count: 0,
+      duplicate_count: 0,
+      record_ids: [],
+    }),
     listCommunicationRecords: async () => [],
     getDailyCommunicationSummary: async () => ({
       generated_at: new Date(0).toISOString(),

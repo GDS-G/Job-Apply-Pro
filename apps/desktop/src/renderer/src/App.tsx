@@ -148,6 +148,9 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ingestionWarnings, setIngestionWarnings] = useState<string[]>([]);
+  const [providerSyncMessage, setProviderSyncMessage] = useState<string | null>(
+    null,
+  );
 
   const selected =
     workflows.find((workflow) => workflow.workflow_id === selectedId) ??
@@ -235,6 +238,25 @@ export function App() {
           provider,
         );
         await refreshWorkflows();
+      } catch (caught) {
+        setError(readableError(caught));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshWorkflows],
+  );
+
+  const syncProviderMessages = useCallback(
+    async (provider: IntegrationProvider) => {
+      setBusy(true);
+      try {
+        const result =
+          await window.jobApplyPro.workbench.syncProviderMessages(provider);
+        await refreshWorkflows();
+        setProviderSyncMessage(
+          `${provider.replaceAll("_", " ")}: fetched ${result.fetched_count}, imported ${result.imported_count}, already present ${result.duplicate_count}.`,
+        );
       } catch (caught) {
         setError(readableError(caught));
       } finally {
@@ -911,7 +933,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Document Ingestion Resilience v0.16.0-alpha.1</strong>
+              <strong>Provider Data Resilience v0.17.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2063,20 +2085,48 @@ export function App() {
                     </button>
                   ) : null}
                   {integration.status === "CONNECTED" ? (
-                    <button
-                      className="button button--danger"
-                      disabled={busy}
-                      onClick={() =>
-                        void revokeProviderAuthorization(integration.provider)
-                      }
-                      type="button"
-                    >
-                      Revoke access
-                    </button>
+                    <>
+                      {!integration.provider.includes("CALENDAR") &&
+                      integration.read_enabled ? (
+                        <button
+                          className="button button--primary"
+                          disabled={busy}
+                          onClick={() =>
+                            void syncProviderMessages(integration.provider)
+                          }
+                          type="button"
+                        >
+                          Sync messages
+                        </button>
+                      ) : null}
+                      <button
+                        className="button button--danger"
+                        disabled={busy}
+                        onClick={() =>
+                          void revokeProviderAuthorization(integration.provider)
+                        }
+                        type="button"
+                      >
+                        Revoke access
+                      </button>
+                    </>
                   ) : null}
                 </article>
               ))}
             </div>
+            {providerSyncMessage ? (
+              <div className="provider-sync-status" role="status">
+                <Check size={16} />
+                <span>{providerSyncMessage}</span>
+                <button
+                  aria-label="Dismiss provider sync result"
+                  onClick={() => setProviderSyncMessage(null)}
+                  type="button"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            ) : null}
             <div className="communication-list">
               {communications.length ? (
                 communications.slice(0, 5).map((record) => (

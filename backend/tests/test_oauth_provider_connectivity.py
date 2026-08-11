@@ -21,6 +21,7 @@ from job_apply_pro.domain.communications import (
     OAuthTokenSet,
     OutboundDraft,
 )
+from job_apply_pro.integrations.communications import ProviderMutationError
 from job_apply_pro.integrations.configuration import OAuthClientConfig
 from job_apply_pro.integrations.oauth import (
     OAuthAuthorizationError,
@@ -321,6 +322,182 @@ def test_official_mail_adapters_normalize_and_send_with_provider_ids() -> None:
     )
 
 
+def test_mail_adapters_follow_bounded_pages_and_collect_attachment_metadata() -> None:
+    requests: list[httpx.Request] = []
+
+    def gmail_message(message_id: str) -> dict[str, object]:
+        return {
+            "id": message_id,
+            "threadId": f"thread-{message_id}",
+            "internalDate": "1786471200000",
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "recruiter@example.test"},
+                    {"name": "To", "value": "owner@example.test"},
+                    {"name": "Subject", "value": message_id},
+                ],
+                "parts": [
+                    {"mimeType": "text/plain", "body": {"data": "Q2hvb3NlIGEgdGltZQ"}},
+                    {"filename": "resume.pdf"},
+                    {"filename": "resume.pdf"},
+                ],
+            },
+        }
+
+    def outlook_message(message_id: str, *, attachments: bool) -> dict[str, object]:
+        return {
+            "id": message_id,
+            "conversationId": f"thread-{message_id}",
+            "sender": {"emailAddress": {"address": "recruiter@example.test"}},
+            "toRecipients": [{"emailAddress": {"address": "owner@example.test"}}],
+            "subject": message_id,
+            "bodyPreview": "Choose a time",
+            "receivedDateTime": "2026-08-11T18:00:00Z",
+            "hasAttachments": attachments,
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path.endswith("/gmail/v1/users/me/messages"):
+            if request.url.params.get("pageToken") == "gmail-page-2":
+                return httpx.Response(
+                    200,
+                    json={"messages": [{"id": "gmail-2"}, {"id": "gmail-1"}]},
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "messages": [{"id": "gmail-1"}],
+                    "nextPageToken": "gmail-page-2",
+                },
+            )
+        if "/gmail/v1/users/me/messages/" in path:
+            return httpx.Response(200, json=gmail_message(path.rsplit("/", 1)[-1]))
+        if path.endswith("/v1.0/me/messages"):
+            if request.url.params.get("$skiptoken") == "outlook-page-2":
+                return httpx.Response(
+                    200,
+                    json={"value": [outlook_message("outlook-2", attachments=False)]},
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "value": [outlook_message("outlook-1", attachments=True)],
+                    "@odata.nextLink": (
+                        "https://graph.microsoft.com/v1.0/me/messages?$skiptoken=outlook-page-2"
+                    ),
+                },
+            )
+        if path.endswith("/v1.0/me/messages/outlook-1/attachments"):
+            if request.url.params.get("$skiptoken") == "attachment-page-2":
+                return httpx.Response(
+                    200,
+                    json={
+                        "value": [
+                            {"name": "resume.pdf", "isInline": False},
+                            {"name": "cover-letter.docx", "isInline": False},
+                        ]
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "value": [
+                        {"name": "resume.pdf", "isInline": False},
+                        {"name": "signature.png", "isInline": True},
+                    ],
+                    "@odata.nextLink": (
+                        "https://graph.microsoft.com/v1.0/me/messages/outlook-1/attachments?"
+                        "$skiptoken=attachment-page-2"
+                    ),
+                },
+            )
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    gmail = GmailMessageProvider(StaticTokens(), client=client).list_messages()
+    outlook = OutlookMessageProvider(StaticTokens(), client=client).list_messages()
+
+    assert [message.provider_message_id for message in gmail] == ["gmail-1", "gmail-2"]
+    assert gmail[0].attachment_names == ["resume.pdf"]
+    assert [message.provider_message_id for message in outlook] == ["outlook-1", "outlook-2"]
+    assert outlook[0].attachment_names == ["resume.pdf", "cover-letter.docx"]
+    attachment_requests = [
+        request for request in requests if request.url.path.endswith("/outlook-1/attachments")
+    ]
+    assert len(attachment_requests) == 2
+    assert dict(attachment_requests[0].url.params) == {"$select": "name,isInline,size"}
+    assert "$select" not in attachment_requests[1].url.params
+
+
+def test_provider_pagination_rejects_cycles_and_untrusted_graph_links() -> None:
+    def gmail_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"messages": [], "nextPageToken": "repeated-token"},
+        )
+
+    gmail = GmailMessageProvider(
+        StaticTokens(), client=httpx.Client(transport=httpx.MockTransport(gmail_handler))
+    )
+    with pytest.raises(ProviderMutationError, match="repeated page token"):
+        gmail.list_messages()
+
+    def outlook_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "value": [],
+                "@odata.nextLink": "https://attacker.example/v1.0/me/messages?page=2",
+            },
+        )
+
+    outlook = OutlookMessageProvider(
+        StaticTokens(), client=httpx.Client(transport=httpx.MockTransport(outlook_handler))
+    )
+    with pytest.raises(ProviderMutationError, match="untrusted next link"):
+        outlook.list_messages()
+
+
+def test_provider_response_and_gmail_mime_limits_fail_closed() -> None:
+    oversized = GmailMessageProvider(
+        StaticTokens(),
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, content=b"{" + b" " * 5_000_001 + b"}")
+            )
+        ),
+    )
+    with pytest.raises(ProviderMutationError, match="response exceeded the byte limit"):
+        oversized.list_messages()
+
+    def mime_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/gmail/v1/users/me/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "gmail-deep"}]})
+        return httpx.Response(
+            200,
+            json={
+                "id": "gmail-deep",
+                "threadId": "thread-deep",
+                "internalDate": "1786471200000",
+                "payload": {
+                    "headers": [
+                        {"name": "From", "value": "recruiter@example.test"},
+                        {"name": "To", "value": "owner@example.test"},
+                    ],
+                    "parts": [{"filename": f"part-{index}.txt"} for index in range(500)],
+                },
+            },
+        )
+
+    deep_mime = GmailMessageProvider(
+        StaticTokens(), client=httpx.Client(transport=httpx.MockTransport(mime_handler))
+    )
+    with pytest.raises(ProviderMutationError, match="MIME part limit"):
+        deep_mime.list_messages()
+
+
 def test_official_calendar_adapters_list_create_and_update() -> None:
     start = datetime(2026, 8, 20, 15, tzinfo=UTC)
     event = CalendarEventSnapshot(
@@ -393,3 +570,67 @@ def test_official_calendar_adapters_list_create_and_update() -> None:
     assert outlook.update_event(event, idempotency_key="outlook-update-1") == (
         "outlook-event-saved"
     )
+
+
+def test_calendar_adapters_follow_provider_pagination_contracts() -> None:
+    start = datetime(2026, 8, 20, 15, tzinfo=UTC)
+
+    def google_event(event_id: str) -> dict[str, object]:
+        return {
+            "id": event_id,
+            "summary": event_id,
+            "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+            "end": {
+                "dateTime": (start + timedelta(hours=1)).isoformat(),
+                "timeZone": "UTC",
+            },
+            "attendees": [],
+        }
+
+    def outlook_event(event_id: str) -> dict[str, object]:
+        return {
+            "id": event_id,
+            "subject": event_id,
+            "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+            "end": {
+                "dateTime": (start + timedelta(hours=1)).isoformat(),
+                "timeZone": "UTC",
+            },
+            "attendees": [],
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/calendar/v3/calendars/primary/events"):
+            if request.url.params.get("pageToken") == "google-page-2":
+                return httpx.Response(200, json={"items": [google_event("google-2")]})
+            return httpx.Response(
+                200,
+                json={
+                    "items": [google_event("google-1")],
+                    "nextPageToken": "google-page-2",
+                },
+            )
+        if path.endswith("/v1.0/me/calendarView"):
+            if request.url.params.get("$skiptoken") == "outlook-page-2":
+                return httpx.Response(200, json={"value": [outlook_event("outlook-2")]})
+            return httpx.Response(
+                200,
+                json={
+                    "value": [outlook_event("outlook-1")],
+                    "@odata.nextLink": (
+                        "https://graph.microsoft.com/v1.0/me/calendarView?$skiptoken=outlook-page-2"
+                    ),
+                },
+            )
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    google = GoogleCalendarProvider(StaticTokens(), client=client).list_events(
+        start_at=start, end_at=start + timedelta(days=1)
+    )
+    outlook = OutlookCalendarProvider(StaticTokens(), client=client).list_events(
+        start_at=start, end_at=start + timedelta(days=1)
+    )
+    assert [event.provider_event_id for event in google] == ["google-1", "google-2"]
+    assert [event.provider_event_id for event in outlook] == ["outlook-1", "outlook-2"]
