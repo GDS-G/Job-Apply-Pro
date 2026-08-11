@@ -35,6 +35,13 @@ _FLOW_CAPABILITIES = [
     PortalCapability.CONFIRMATION,
 ]
 
+_REQUIRED_REPLAY_PAGE_TYPES = {
+    "APPLICATION_FORM",
+    "CONFIRMATION",
+    "JOB_DETAIL",
+    "JOB_SEARCH_RESULTS",
+}
+
 
 def _definition(
     kind: PortalKind,
@@ -65,13 +72,48 @@ def _definition(
                 capability=PortalCapability.JOB_EXTRACTION,
             ),
             PortalFingerprintRule(
+                page_type="LOGIN",
+                required_signals=[brand, "sign in"],
+                capability=PortalCapability.LOGIN,
+            ),
+            PortalFingerprintRule(
+                page_type="MFA",
+                required_signals=[brand, "verification code"],
+                capability=PortalCapability.MFA,
+            ),
+            PortalFingerprintRule(
+                page_type="CAPTCHA",
+                required_signals=[brand, "security check"],
+                capability=PortalCapability.CAPTCHA,
+            ),
+            PortalFingerprintRule(
                 page_type="APPLICATION_FORM",
                 required_signals=[brand, "submit"],
                 capability=PortalCapability.MULTI_PAGE_FORM,
             ),
             PortalFingerprintRule(
+                page_type="DOCUMENT_UPLOAD",
+                required_signals=[brand, "upload resume"],
+                capability=PortalCapability.DOCUMENT_UPLOAD,
+            ),
+            PortalFingerprintRule(
+                page_type="QUESTIONNAIRE",
+                required_signals=[brand, "application questions"],
+                capability=PortalCapability.QUESTIONNAIRE,
+            ),
+            PortalFingerprintRule(
+                page_type="ASSESSMENT",
+                required_signals=[brand, "assessment"],
+                capability=PortalCapability.ASSESSMENT,
+            ),
+            PortalFingerprintRule(
+                page_type="SUBMISSION_REVIEW",
+                required_signals=[brand, "review application"],
+                capability=PortalCapability.SUBMISSION,
+            ),
+            PortalFingerprintRule(
                 page_type="CONFIRMATION",
-                required_signals=[brand, "application"],
+                required_signals=[brand, "application received"],
                 capability=PortalCapability.CONFIRMATION,
             ),
         ],
@@ -82,6 +124,8 @@ def _definition(
         ),
         support_status=PortalSupportStatus.REPLAY_VALIDATED,
         production_enabled=False,
+        replay_validated_page_types=sorted(_REQUIRED_REPLAY_PAGE_TYPES),
+        live_validated_page_types=[],
         limitations=[
             "Production execution is disabled",
             "Live fingerprints require supervised validation before enablement",
@@ -168,7 +212,7 @@ class PortalCatalog:
         self,
         *,
         url: str,
-        page_type: str,
+        page_type: str | None,
         visible_text: str,
         control_labels: list[str],
         page_fingerprint: str,
@@ -186,16 +230,34 @@ class PortalCatalog:
             self.get(PortalKind.COMPANY_CAREERS),
         )
         haystack = " ".join([visible_text, *control_labels]).casefold()
-        candidates = [rule for rule in definition.fingerprints if rule.page_type == page_type]
+        candidates = [
+            rule
+            for rule in definition.fingerprints
+            if page_type is None or rule.page_type == page_type
+        ]
         if not candidates:
             raise PortalCatalogError(
                 f"{definition.display_name} does not recognize page type {page_type}"
             )
-        rule = candidates[0]
+        scored = [
+            (
+                len([signal for signal in rule.required_signals if signal.casefold() in haystack])
+                / len(rule.required_signals),
+                rule,
+            )
+            for rule in candidates
+        ]
+        confidence, rule = max(scored, key=lambda item: item[0])
+        if confidence < rule.minimum_confidence:
+            raise PortalCatalogError(
+                "Portal fingerprint confidence "
+                f"{confidence:.2f} is below {rule.minimum_confidence:.2f}"
+            )
+        tied = [candidate for score, candidate in scored if score == confidence]
+        if page_type is None and len(tied) > 1:
+            names = ", ".join(sorted(candidate.page_type for candidate in tied))
+            raise PortalCatalogError(f"Portal fingerprint is ambiguous across {names}")
         matched = [signal for signal in rule.required_signals if signal.casefold() in haystack]
-        confidence = len(matched) / len(rule.required_signals)
-        if confidence < 0.5:
-            raise PortalCatalogError("Portal fingerprint confidence is below 0.50")
         intervention = rule.capability in {
             PortalCapability.LOGIN,
             PortalCapability.MFA,
@@ -205,7 +267,7 @@ class PortalCatalog:
         return PortalPageMatch(
             portal=definition.kind,
             capability=rule.capability,
-            page_type=page_type,
+            page_type=rule.page_type,
             confidence=confidence,
             matched_signals=matched,
             page_fingerprint=page_fingerprint,
@@ -217,6 +279,9 @@ class PortalCatalog:
         for definition in self._definitions:
             portal_cases = [case for case in cases if case.portal is definition.kind]
             passed = 0
+            confirmation_cases = 0
+            confirmation_passed = 0
+            false_positives = 0
             for case in portal_cases:
                 if not case.sanitized:
                     raise PortalCatalogError(f"Replay case {case.id} is not sanitized")
@@ -230,9 +295,23 @@ class PortalCatalog:
                     )
                 except PortalCatalogError:
                     continue
-                passed += int(
-                    match.portal is case.portal and match.capability is case.expected_capability
+                case_passed = (
+                    match.portal is case.portal
+                    and match.capability is case.expected_capability
+                    and match.page_type == case.page_type
                 )
+                if case.expected_confirmation is not None:
+                    confirmation_cases += 1
+                    confirmed = self.verify_confirmation(
+                        case.portal,
+                        page_type=case.page_type,
+                        visible_text=case.visible_text,
+                        confirmation_identifier=case.confirmation_identifier,
+                    )
+                    confirmation_passed += int(confirmed is case.expected_confirmation)
+                    false_positives += int(confirmed and not case.expected_confirmation)
+                    case_passed = case_passed and confirmed is case.expected_confirmation
+                passed += int(case_passed)
             total = len(portal_cases)
             results.append(
                 PortalRegressionMetric(
@@ -240,7 +319,20 @@ class PortalCatalog:
                     cases=total,
                     passed=passed,
                     fingerprint_accuracy=passed / total if total else 0,
-                    confirmation_false_positives=0,
+                    confirmation_false_positives=false_positives,
+                    confirmation_cases=confirmation_cases,
+                    confirmation_passed=confirmation_passed,
+                    page_types_exercised=sorted({case.page_type for case in portal_cases}),
+                    capabilities_exercised=sorted(
+                        {case.expected_capability for case in portal_cases},
+                        key=lambda item: item.value,
+                    ),
+                    required_replay_coverage=(
+                        {case.page_type for case in portal_cases} >= _REQUIRED_REPLAY_PAGE_TYPES
+                        and confirmation_cases >= 2
+                        and confirmation_passed == confirmation_cases
+                        and false_positives == 0
+                    ),
                     support_status=definition.support_status,
                 )
             )

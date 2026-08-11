@@ -65,6 +65,7 @@ class PortalFingerprintRule(BaseModel):
     page_type: str = Field(min_length=1, max_length=100)
     required_signals: list[str] = Field(min_length=1, max_length=20)
     capability: PortalCapability
+    minimum_confidence: float = Field(default=1.0, gt=0, le=1)
 
 
 class PortalConfirmationRule(BaseModel):
@@ -87,6 +88,8 @@ class PortalAdapterDefinition(BaseModel):
     confirmation: PortalConfirmationRule
     support_status: PortalSupportStatus
     production_enabled: bool = False
+    replay_validated_page_types: list[str] = Field(default_factory=list, max_length=100)
+    live_validated_page_types: list[str] = Field(default_factory=list, max_length=100)
     limitations: list[str] = Field(default_factory=list, max_length=20)
     adapter_version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
 
@@ -107,7 +110,7 @@ class PortalPageProbe(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     url: str = Field(min_length=1, max_length=2_000)
-    page_type: str = Field(min_length=1, max_length=100)
+    page_type: str | None = Field(default=None, min_length=1, max_length=100)
     visible_text: str = Field(max_length=20_000)
     control_labels: list[str] = Field(default_factory=list, max_length=100)
     page_fingerprint: str = Field(min_length=1, max_length=200)
@@ -123,6 +126,8 @@ class PortalReplayCase(BaseModel):
     visible_text: str = Field(max_length=20_000)
     control_labels: list[str] = Field(default_factory=list, max_length=100)
     expected_capability: PortalCapability
+    confirmation_identifier: str | None = Field(default=None, max_length=200)
+    expected_confirmation: bool | None = None
     sanitized: bool = True
 
 
@@ -134,6 +139,11 @@ class PortalRegressionMetric(BaseModel):
     passed: int = Field(ge=0)
     fingerprint_accuracy: float = Field(ge=0, le=1)
     confirmation_false_positives: int = Field(ge=0)
+    confirmation_cases: int = Field(ge=0)
+    confirmation_passed: int = Field(ge=0)
+    page_types_exercised: list[str]
+    capabilities_exercised: list[PortalCapability]
+    required_replay_coverage: bool
     support_status: PortalSupportStatus
 
 

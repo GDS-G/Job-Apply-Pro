@@ -2,11 +2,13 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Maintenance Refresh build
+## Portal Readiness build
 
-The active milestone is **Maintenance Refresh `v0.12.1-alpha.1`**. It preserves the production-hardening runtime and safety model while updating the supported Node 24 toolchain, Python framework/type/report dependencies, accessibility checks, workflow actions, and dependency-maintenance policy.
+The active milestone is **Portal Readiness `v0.12.2-alpha.1`**. It preserves the production-hardening runtime and dependency baseline while deepening the safe replay contracts for every named portal, exposing replay-versus-live coverage, and replacing the earlier broad source-complete claim with requirement-level traceability.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
+
+This remains an alpha foundation. The loopback Reference ATS is the only executable submission adapter; named live portals and mail/calendar provider writes remain disabled until provider-specific implementation, authorization, and supervised validation are complete. See `docs/requirements-traceability.md` for the current product-scope audit.
 
 ## Architecture
 

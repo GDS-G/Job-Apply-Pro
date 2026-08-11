@@ -17,7 +17,7 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 | Support diagnostics/telemetry | Typed authenticated diagnostics, bounded error telemetry, explicit redacted export | Redaction test, stress test, packaged post-restore diagnostic check | Complete for local support scope |
 | Release and rollback procedure | Version/tag enforcement, signed build, SPDX SBOM, hashes, inventories, staged publication | Workflow syntax/CI; exact signed rollback drill | Implementation complete; signed drill blocked by certificate/prior release |
 | Real Windows desktop validation | Bundled backend, Edge channel, NSIS candidate | Real unpacked window launch, accessibility readback, backend connection, clean shutdown | Unsigned candidate complete |
-| Required integrations | Production-disabled catalog and credential-reference adapters | Sanitized fixtures, replay, loopback reference ATS | Not production-authorized; external accounts/legal approval required |
+| Required integrations | Production-disabled catalog and credential-reference adapters | Expanded sanitized fixtures, replay, loopback Reference ATS | Partial source implementation; provider OAuth and live portal execution remain in addition to external authorization |
 
 ### Python advisory resolution
 
@@ -45,14 +45,24 @@ PR #28 merged the independently validated release head `e048c9e237233a966afb224a
 
 The eleven compatible or intentionally declined Dependabot PRs were closed after #28 merged. Dependabot vulnerability alerts and automated security updates are enabled, with no open Dependabot, code-scanning, or secret-scanning alerts at this audit. Node type declarations remain on the Node 24 major, and Vite remains on the Vite 7 line supported by electron-vite 5. The obsolete `models/Llama-3.1-8B` gitlink is removed from the superproject because no application code references it and it had no `.gitmodules` definition; local model assets remain ignored and are not deleted by this cleanup.
 
+### Product completion audit correction
+
+The authoritative feature and roadmap tabs contain long-term requirements beyond the completed Phase 0–12 vertical slices. Therefore, “source-complete” is no longer used as a claim about the entire product. `docs/requirements-traceability.md` records implemented, replay-only, externally gated, partial, and explicitly deferred scope. Portal Readiness `v0.12.2-alpha.1` begins closing the remaining source gaps by expanding every named portal replay profile and exposing replay-versus-live coverage without granting production authority.
+
+### Portal Readiness local validation
+
+`Portal Readiness v0.12.2-alpha.1` was validated with Node 24.14.0, pnpm 11.16.0 against the pnpm 11 lockfile, and Python 3.12.13. Formatting, linting, strict TypeScript and mypy checks, all 57 backend tests at 81.26% coverage, all 4 desktop tests, and the production build passed. The packaged Python backend was rebuilt and passed the frozen-runtime smoke test; the unpacked Windows application and NSIS installer were then built successfully. Both pnpm audit and pip-audit reported no known dependency vulnerabilities; pip-audit correctly skipped only the unpublished local `job-apply-pro-backend` package at `0.12.2a1`.
+
+The unsigned local installer `Job-Apply-Pro-0.12.2-alpha.1-x64.exe` is 163,114,408 bytes with SHA-256 `2A4E23D34318F25C5BD48AADF503789533C267B8C15692AAFC2658AB9223579F`. Its bundled backend executable is 16,596,227 bytes with SHA-256 `67C2E806EF615E4D422CF1BBBDC2F714B667B3ED8CFFAE62B36AF17509FE096E`. Authenticode reports `NotSigned` for both, as expected when local packaging is deliberately run without release credentials. The generated update metadata identifies `0.12.2-alpha.1` and the matching 163,114,408-byte installer; it is validation evidence only and must not be published as a production update.
+
 ## Current release classification
 
-`Maintenance Refresh v0.12.1-alpha.1` is the current source-complete, packaged Windows alpha candidate. It preserves the production-hardening behavior and safety boundaries while refreshing the supported build and dependency baseline. It is not a stable production release because no organization certificate or provider-specific legal/terms approval and safe live-validation record have been supplied. Credentials pasted into chat are not a suitable automation or secret-storage route; live validation requires owner-controlled manual sign-in, with MFA, CAPTCHA, and one-time codes completed by the owner. The release workflow must not be dispatched and no catalog entry may set `production_enabled=true` until those external controls exist.
+`Portal Readiness v0.12.2-alpha.1` is the current Windows alpha source candidate. It preserves the production-hardening and dependency baselines while making remaining product scope explicit and deepening safe portal replay evidence. It is not feature-complete or a stable production release: provider OAuth adapters, named live-portal execution, portions of document generation/import, cross-platform packaging, and other traceability items remain source work, while signing, provider authorization, and physical release-lab evidence remain external gates. Credentials pasted into chat are not a suitable automation or secret-storage route; live validation requires owner-controlled manual sign-in, with MFA, CAPTCHA, and one-time codes completed by the owner. The release workflow must not be dispatched and no catalog entry may set `production_enabled=true` until the relevant source and external controls exist.
 
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
-2. A signed `v0.12.1-alpha.1` installer whose Authenticode subject and SHA-256 checksum match the release record.
+2. A signed current-version installer whose Authenticode subject and SHA-256 checksum match the release record.
 3. A second signed candidate or prior signed release to prove update and rollback behavior end to end.
 4. Provider-specific legal/terms approval, granted scopes, validation ownership, and sanitized evidence for every portal, mail provider, and calendar provider claimed as production-tested. Account passwords remain owner-controlled and are entered manually rather than stored in source, documentation, CI, or chat-driven automation.
 5. Attached release-lab evidence for the manual rows in `docs/failure-injection-matrix.md`, including offline network, expired login, unavailable Edge, locked database, write denial/storage pressure, sleep/resume, uninstall/reinstall, update, and rollback.
