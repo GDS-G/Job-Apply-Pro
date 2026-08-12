@@ -497,6 +497,27 @@ class ProviderSyncStateRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ProviderCalendarEventRow(Base):
+    __tablename__ = "provider_calendar_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "event_fingerprint",
+            name="uq_provider_calendar_event_fingerprint",
+        ),
+        Index("ix_provider_calendar_event_window", "provider", "starts_at", "ends_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    event_fingerprint: Mapped[str] = mapped_column(String(64))
+    binding_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    encrypted_event: Mapped[str] = mapped_column(Text)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class OAuthCredentialRow(Base):
     __tablename__ = "oauth_credentials"
 

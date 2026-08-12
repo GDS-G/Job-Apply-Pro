@@ -334,6 +334,26 @@ class ProviderMessageSyncResult(BaseModel):
     cursor_updated_at: datetime
 
 
+class SyncedCalendarEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    provider: IntegrationProvider
+    event: CalendarEventSnapshot
+    synced_at: datetime
+
+
+class ProviderCalendarSyncResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    provider: IntegrationProvider
+    fetched_count: int = Field(ge=0, le=1_000)
+    stored_count: int = Field(ge=0, le=1_000)
+    removed_count: int = Field(ge=0, le=1_000)
+    window_start: datetime
+    window_end: datetime
+    synced_at: datetime
+
+
 class ProviderSyncState(BaseModel):
     """Internal encrypted synchronization cursor; never return it through the API."""
 

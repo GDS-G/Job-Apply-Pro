@@ -687,6 +687,68 @@ def test_official_calendar_adapters_list_create_and_update() -> None:
     )
 
 
+def test_calendar_adapters_normalize_all_day_and_omit_cancelled_events() -> None:
+    start = datetime(2026, 8, 20, 15, tzinfo=UTC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "www.googleapis.com":
+            assert request.url.params["singleEvents"] == "true"
+            assert request.url.params["showDeleted"] == "false"
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": "all-day-1",
+                            "summary": "Interview day",
+                            "start": {"date": "2026-08-21", "timeZone": "UTC"},
+                            "end": {"date": "2026-08-22", "timeZone": "UTC"},
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "value": [
+                    {
+                        "id": "active-1",
+                        "subject": "Phone screen",
+                        "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+                        "end": {
+                            "dateTime": (start + timedelta(hours=1)).isoformat(),
+                            "timeZone": "UTC",
+                        },
+                        "attendees": [],
+                        "isCancelled": False,
+                    },
+                    {
+                        "id": "cancelled-1",
+                        "subject": "Cancelled interview",
+                        "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+                        "end": {
+                            "dateTime": (start + timedelta(hours=1)).isoformat(),
+                            "timeZone": "UTC",
+                        },
+                        "attendees": [],
+                        "isCancelled": True,
+                    },
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    google_events = GoogleCalendarProvider(StaticTokens(), client=client).list_events(
+        start_at=start, end_at=start + timedelta(days=3)
+    )
+    outlook_events = OutlookCalendarProvider(StaticTokens(), client=client).list_events(
+        start_at=start, end_at=start + timedelta(days=3)
+    )
+
+    assert google_events[0].start_at == datetime(2026, 8, 21, tzinfo=UTC)
+    assert [event.provider_event_id for event in outlook_events] == ["active-1"]
+
+
 def test_calendar_adapters_follow_provider_pagination_contracts() -> None:
     start = datetime(2026, 8, 20, 15, tzinfo=UTC)
 

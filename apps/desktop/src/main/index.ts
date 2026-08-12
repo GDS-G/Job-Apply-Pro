@@ -115,19 +115,27 @@ app
         if (!backendSupervisor || !updateManager) {
           throw new Error("Desktop services are not initialized.");
         }
-        const [workflows, challenges, communications, followUps, backups] =
-          await Promise.all([
-            backendSupervisor.client.listWorkflows(),
-            backendSupervisor.client.listChallengeSessions(),
-            backendSupervisor.client.listCommunicationRecords(),
-            backendSupervisor.client.listFollowUps(),
-            backendSupervisor.client.listBackups(),
-          ]);
+        const [
+          workflows,
+          challenges,
+          communications,
+          followUps,
+          calendarEvents,
+          backups,
+        ] = await Promise.all([
+          backendSupervisor.client.listWorkflows(),
+          backendSupervisor.client.listChallengeSessions(),
+          backendSupervisor.client.listCommunicationRecords(),
+          backendSupervisor.client.listFollowUps(),
+          backendSupervisor.client.listSyncedCalendarEvents(),
+          backendSupervisor.client.listBackups(),
+        ]);
         return {
           workflows,
           challenges,
           communications,
           followUps,
+          calendarEvents,
           backups,
           updateStatus: updateManager.status,
         };

@@ -27,6 +27,12 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert (
             client.post("/api/v1/communications/providers/GMAIL/messages/sync").status_code == 401
         )
+        assert (
+            client.post(
+                "/api/v1/communications/providers/GOOGLE_CALENDAR/calendar/sync"
+            ).status_code
+            == 401
+        )
         assert client.get("/api/v1/operations/dashboard").status_code == 401
         assert client.get("/api/v1/operations/diagnostics").status_code == 401
         assert client.post("/api/v1/operations/backup-schedules/run-due").status_code == 401
@@ -38,7 +44,7 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert response.status_code == 200
         assert response.json() == {
             "status": "ready",
-            "version": "0.20.0-alpha.1",
+            "version": "0.21.0-alpha.1",
             "automation_enabled": False,
             "browser_runtime_available": True,
             "candidate_knowledge_available": True,

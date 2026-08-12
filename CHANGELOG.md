@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.21.0-alpha.1] - Unreleased
+
+### Added
+
+- Added authenticated, manual Google Calendar and Outlook Calendar synchronization across a one-day lookback and 60-day future window.
+- Added encrypted local calendar-event snapshots, deterministic full-window reconciliation, stale-event removal, and Alembic migration `20260811_0015`.
+- Added privacy-safe 24-hour and one-hour interview reminders derived from the local snapshot, plus calendar sync controls and sanitized reconciliation status in Electron.
+
+### Changed
+
+- Desktop notification polling reads locally persisted calendar state and never polls Google or Microsoft on the 60-second notification interval.
+- Google Calendar reads explicitly expand recurring instances and omit deleted events; Outlook Calendar reads omit cancelled instances. All-day Google events are normalized without failing the synchronization batch.
+
+### Security
+
+- Calendar titles, attendees, conferencing URLs, locations, and provider event identifiers are encrypted at rest and excluded from sync-result and notification text.
+- Live calendar access still requires owner-registered OAuth clients, owner-controlled browser authorization, reviewed least-privilege scopes, and provider approval; fixtures contain no credentials or private account data.
+
 ## [0.20.0-alpha.1] - Unreleased
 
 ### Added

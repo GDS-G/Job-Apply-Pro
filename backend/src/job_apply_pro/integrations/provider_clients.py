@@ -658,6 +658,7 @@ class GoogleCalendarProvider:
                 "timeMin": start_at.isoformat(),
                 "timeMax": end_at.isoformat(),
                 "singleEvents": "true",
+                "showDeleted": "false",
                 "maxResults": 250,
             },
             headers=_token_headers(self._tokens, self.provider),
@@ -698,13 +699,17 @@ class GoogleCalendarProvider:
     def _event(raw: dict[str, object]) -> CalendarEventSnapshot:
         start = cast(dict[str, object], raw.get("start", {}))
         end = cast(dict[str, object], raw.get("end", {}))
+        start_value = start.get("dateTime") or start.get("date")
+        end_value = end.get("dateTime") or end.get("date")
+        if not start_value or not end_value:
+            raise ProviderMutationError("Google Calendar event omitted its time interval")
         attendees = raw.get("attendees", [])
         attendee_items = attendees if isinstance(attendees, list) else []
         return CalendarEventSnapshot(
             provider_event_id=str(raw["id"]),
             title=str(raw.get("summary", "Calendar event")),
-            start_at=_parse_datetime(str(start["dateTime"]), str(start.get("timeZone", "UTC"))),
-            end_at=_parse_datetime(str(end["dateTime"]), str(end.get("timeZone", "UTC"))),
+            start_at=_parse_datetime(str(start_value), str(start.get("timeZone", "UTC"))),
+            end_at=_parse_datetime(str(end_value), str(end.get("timeZone", "UTC"))),
             time_zone=str(start.get("timeZone", "UTC")),
             attendees=[
                 str(item["email"])
@@ -754,7 +759,7 @@ class OutlookCalendarProvider:
             path_prefix="/v1.0/me/calendarView",
             action="Outlook Calendar event listing",
         )
-        return [self._event(item) for item in values]
+        return [self._event(item) for item in values if item.get("isCancelled") is not True]
 
     def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
         payload = _json(

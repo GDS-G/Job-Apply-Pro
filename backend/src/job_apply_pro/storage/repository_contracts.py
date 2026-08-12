@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Protocol
 
 from pydantic import SecretStr
@@ -19,6 +20,7 @@ from job_apply_pro.domain.candidate import CandidateBackup
 from job_apply_pro.domain.challenges import ChallengeEvent, ChallengeSessionSnapshot
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
 from job_apply_pro.domain.communications import (
+    CalendarEventSnapshot,
     CalendarMutationPlan,
     CommunicationRecord,
     FollowUp,
@@ -26,6 +28,7 @@ from job_apply_pro.domain.communications import (
     MutationAudit,
     OutboundDraft,
     ProviderSyncState,
+    SyncedCalendarEvent,
 )
 from job_apply_pro.domain.jobs import Job, JobCreate, JobRequirement
 from job_apply_pro.domain.knowledge import (
@@ -224,6 +227,24 @@ class CommunicationRepositoryProtocol(Protocol):
         binding_fingerprint: str,
         expected_cursor: SecretStr | None,
     ) -> ProviderSyncState: ...
+
+    def reconcile_calendar_events(
+        self,
+        provider: IntegrationProvider,
+        binding_fingerprint: str,
+        events: list[CalendarEventSnapshot],
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> tuple[list[SyncedCalendarEvent], int]: ...
+
+    def list_calendar_events(
+        self,
+        binding_fingerprints: dict[IntegrationProvider, str],
+        *,
+        start_at: datetime,
+        end_at: datetime,
+    ) -> list[SyncedCalendarEvent]: ...
 
     def save_draft(self, draft: OutboundDraft) -> OutboundDraft: ...
 

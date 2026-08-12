@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Incremental Provider Sync build
+## Calendar Interview Awareness build
 
-The active milestone is **Incremental Provider Sync `v0.20.0-alpha.1`**. It replaces repeated mail enumeration with the providers' official incremental-read contracts: Gmail history IDs and Microsoft Graph Inbox delta links. Opaque cursors are account-bound, AES-256-GCM encrypted, bounded, and saved only after every returned message is durably processed. Expired provider state triggers one bounded recovery full synchronization. Electron receives only initial/incremental/recovery mode, counts, local record IDs, and update time—never cursor contents. The build retains privacy-safe desktop notifications, encrypted provider configuration, bounded document ingestion, evidence-bound generation, supervised portal execution, and the Portal Readiness baselines.
+The active milestone is **Calendar Interview Awareness `v0.21.0-alpha.1`**. It adds owner-initiated Google Calendar and Outlook Calendar reads across a fixed one-day lookback and 60-day future window, encrypts the resulting local snapshot, reconciles removed events, and derives generic 24-hour and one-hour interview reminders without placing private event details in notifications. The 60-second notification loop reads only local state; provider access occurs only when the user selects **Sync calendar**. The build retains encrypted incremental mail sync, privacy-safe desktop notifications, bounded document ingestion, evidence-bound generation, supervised portal execution, and the Portal Readiness baselines.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
