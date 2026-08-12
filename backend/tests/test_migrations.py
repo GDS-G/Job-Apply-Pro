@@ -127,6 +127,7 @@ def test_answer_revision_migration_backfills_ciphertext_without_decryption(
         "document_generation_audits",
         "document_selection_audits",
         "answer_library_revisions",
+        "application_answers",
         "submitted_document_evidence",
         "communication_configurations",
         "provider_sync_states",
@@ -136,4 +137,31 @@ def test_answer_revision_migration_backfills_ciphertext_without_decryption(
         column["name"] for column in inspector.get_columns("document_generation_audits")
     }
     assert {"template", "ranking_mode", "ranking_method"} <= audit_columns
+    application_answer_columns = {
+        column["name"] for column in inspector.get_columns("application_answers")
+    }
+    assert {
+        "profile_id",
+        "job_id",
+        "revision",
+        "encrypted_question",
+        "encrypted_normalized_question",
+        "status",
+        "source_type",
+        "source_answer_id",
+        "library_answer_id",
+        "evidence_claim_ids_json",
+        "retrieval_results_json",
+        "provider_id",
+        "model_id",
+        "prompt_version",
+        "policy_version",
+        "encrypted_generated_value",
+        "character_limit",
+        "character_limit_applied",
+        "limitations_json",
+        "user_edited",
+        "reuse_permission",
+        "updated_at",
+    } <= application_answer_columns
     get_settings.cache_clear()

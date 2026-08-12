@@ -8,6 +8,10 @@ from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
 from job_apply_pro.documents.extractors import DocumentExtractionError, DocumentIngestionOptions
 from job_apply_pro.domain.applications import (
+    ApplicationAnswer,
+    ApplicationAnswerDraftRequest,
+    ApplicationAnswerPromotion,
+    ApplicationAnswerReview,
     SubmittedDocumentCapture,
     SubmittedDocumentEvidence,
 )
@@ -335,6 +339,76 @@ def retrieve_candidate_knowledge(
 ) -> list[RetrievalResult]:
     try:
         return service.retrieve(profile_id, command)
+    except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/application-answers/draft",
+    response_model=ApplicationAnswer,
+    status_code=status.HTTP_201_CREATED,
+)
+def draft_application_answer(
+    command: ApplicationAnswerDraftRequest,
+    service: KnowledgeServiceDependency,
+) -> ApplicationAnswer:
+    try:
+        return service.draft_application_answer(command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.put("/application-answers/{answer_id}/review", response_model=ApplicationAnswer)
+def review_application_answer(
+    answer_id: str,
+    command: ApplicationAnswerReview,
+    service: KnowledgeServiceDependency,
+) -> ApplicationAnswer:
+    try:
+        return service.review_application_answer(answer_id, command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.post("/application-answers/{answer_id}/promote", response_model=ApplicationAnswer)
+def promote_application_answer(
+    answer_id: str,
+    command: ApplicationAnswerPromotion,
+    service: KnowledgeServiceDependency,
+) -> ApplicationAnswer:
+    try:
+        return service.promote_application_answer(answer_id, command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/applications/{application_id}/answers",
+    response_model=list[ApplicationAnswer],
+)
+def list_application_answers(
+    application_id: str, service: KnowledgeServiceDependency
+) -> list[ApplicationAnswer]:
+    try:
+        return service.list_application_answers(application_id)
     except (LookupError, KeyConfigurationError, DecryptionError) as error:
         raise _http_error(error) from error
 

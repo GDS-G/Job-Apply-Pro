@@ -239,6 +239,14 @@ Runtime source commit `99ccd90` produced the unsigned installer `Job-Apply-Pro-0
 
 Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
 
+### Answer Provenance & Drafting source validation
+
+`Answer Provenance & Drafting v0.27.0-alpha.1` converts each encountered application question into an encrypted application-scoped audit record. Retrieval prefers an approved library answer for the exact canonical field. When explicitly enabled, governed AI receives only retrieved locked claims, must return citations drawn from that set, and leaves the record in `NEEDS_REVIEW`. No model output is automatically learned, submitted, or promoted.
+
+Reviewed save and reusable promotion are distinct revision-checked operations with distinct exact confirmation phrases and native desktop warnings. Promotion accepts only `REVIEWED` state and atomically commits the promoted application answer, locked approved library row, immutable first revision, and retrieval chunk. Migration `20260812_0019` persists the question, normalized form, ownership, revision, state, source, retrieval/evidence, provider/model/prompt/policy, generated ciphertext, confidence, limits, limitations, corrections, permissions, and timestamps; old rows are marked for review and backfilled without decryption. ADR-0036 records the design.
+
+Initial source validation passed strict Prettier/Ruff formatting, oxlint/Ruff lint, TypeScript/mypy checks, all 16 desktop tests, and all 113 backend tests at or above the 80% coverage gate. Production build, dependency audit, packaging, artifact hashes, signature state, and protected GitHub evidence will be recorded after the runtime source commit is fixed. Testing uses sanitized fixtures only and does not consume portal-account passwords.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

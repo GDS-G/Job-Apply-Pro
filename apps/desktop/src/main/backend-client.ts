@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 import type {
+  ApplicationAnswer,
+  ApplicationAnswerDraftInput,
+  ApplicationAnswerReviewInput,
   BackupManifest,
   BackupSchedule,
   BackupVerification,
@@ -124,6 +127,55 @@ export class BackendClient {
   listAnswerRevisions(answerId: string): Promise<AnswerLibraryRevision[]> {
     return this.request(
       `/knowledge/answers/${encodeURIComponent(answerId)}/revisions`,
+    );
+  }
+
+  draftApplicationAnswer(
+    input: ApplicationAnswerDraftInput,
+  ): Promise<ApplicationAnswer> {
+    return this.request("/knowledge/application-answers/draft", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  listApplicationAnswers(applicationId: string): Promise<ApplicationAnswer[]> {
+    return this.request(
+      `/knowledge/applications/${encodeURIComponent(applicationId)}/answers`,
+    );
+  }
+
+  reviewApplicationAnswer(
+    answerId: string,
+    expectedRevision: number,
+    input: ApplicationAnswerReviewInput,
+  ): Promise<ApplicationAnswer> {
+    return this.request(
+      `/knowledge/application-answers/${encodeURIComponent(answerId)}/review`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          ...input,
+          expected_revision: expectedRevision,
+          confirmation_phrase: "SAVE REVIEWED APPLICATION ANSWER",
+        }),
+      },
+    );
+  }
+
+  promoteApplicationAnswer(
+    answerId: string,
+    expectedRevision: number,
+  ): Promise<ApplicationAnswer> {
+    return this.request(
+      `/knowledge/application-answers/${encodeURIComponent(answerId)}/promote`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          confirmation_phrase: "PROMOTE REVIEWED ANSWER",
+        }),
+      },
     );
   }
 

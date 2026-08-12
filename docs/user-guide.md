@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Governed Answer Library `v0.26.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Answer Provenance & Drafting `v0.27.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.26.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.27.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -80,6 +80,14 @@ To select a resume for an application:
 4. Select **Review & select**, then approve the native dialog. If the job, requirements, document versions, exclusions, or preferences changed, selection fails and you must rank again.
 
 The application stores the exact immutable document-version ID and a durable audit of the score, reasons, criteria, and review fingerprint. Ranking is deterministic and local; it does not infer missing experience or prove eligibility. Keep seniority and industry wording in the job title, requirements, or your variant tags when those distinctions matter.
+
+## Review application questions and drafts
+
+Use **Application answer provenance** after creating an application. Select the application, enter the exact question as shown by the employer, provide a stable canonical field such as `work.authorization`, and copy the portal character limit when one is shown. **Draft answer** first looks for a reviewed reusable answer for that field. Leave AI drafting disabled to record an unresolved question without invoking a model.
+
+When governed AI drafting is enabled, the model receives only retrieved locked claims and limited job context. Check external-processing consent only when you authorize an externally configured provider; local routes do not require that consent. A generated answer must cite retrieved claims and always remains review-required. Read the displayed source, evidence IDs, provider/model/prompt identity, confidence, limits, and limitations.
+
+Edit the text and evidence list, then select **Review & save** and approve the native dialog. This saves an application-specific reviewed revision; it does not change locked profile facts. Use **Promote reviewed answer** only when the wording should become a locked reusable library entry. Promotion has a second native confirmation and rejects stale or unreviewed records. No operation in this panel signs into or submits to a portal.
 
 Legacy DOC and scanned-PDF support are opt-in because they invoke local document tools. Install LibreOffice and/or Tesseract from their official distributions, then configure exact absolute executable paths in the Windows user environment and restart Job Apply Pro. Do not enter command lines or portal credentials:
 

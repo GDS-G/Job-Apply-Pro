@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Governed Answer Library",
+        build="Answer Provenance & Drafting",
         environment=settings.environment,
     )

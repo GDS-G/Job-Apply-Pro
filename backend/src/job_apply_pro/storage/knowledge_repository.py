@@ -8,6 +8,9 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.applications import (
+    ApplicationAnswerRecord,
+    ApplicationAnswerSource,
+    ApplicationAnswerStatus,
     ApplicationDocumentRole,
     SubmittedDocumentEvidence,
 )
@@ -34,6 +37,7 @@ from job_apply_pro.domain.knowledge import (
 from job_apply_pro.storage.models import (
     AnswerLibraryRevisionRow,
     AnswerLibraryRow,
+    ApplicationAnswerRow,
     ApplicationRow,
     CandidateClaimRow,
     DocumentGenerationAuditRow,
@@ -158,6 +162,39 @@ def _chunk(row: RetrievalChunkRow) -> RetrievalChunkRecord:
         provenance=row.provenance_json,
         created_at=_utc(row.created_at),
         updated_at=_utc(row.updated_at),
+    )
+
+
+def _application_answer(row: ApplicationAnswerRow) -> ApplicationAnswerRecord:
+    return ApplicationAnswerRecord(
+        id=row.id,
+        application_id=row.application_id,
+        profile_id=row.profile_id or "",
+        job_id=row.job_id or "",
+        revision=row.revision,
+        encrypted_question=row.encrypted_question,
+        encrypted_normalized_question=row.encrypted_normalized_question,
+        canonical_field=row.canonical_field,
+        encrypted_value=row.encrypted_value,
+        status=ApplicationAnswerStatus(row.status),
+        source_type=ApplicationAnswerSource(row.source_type),
+        source_answer_id=row.source_answer_id,
+        library_answer_id=row.library_answer_id,
+        evidence_claim_ids=row.evidence_claim_ids_json,
+        retrieval_results=row.retrieval_results_json,
+        provider_id=row.provider_id,
+        model_id=row.model_id,
+        prompt_version=row.prompt_version,
+        policy_version=row.policy_version,
+        confidence=row.confidence,
+        encrypted_generated_value=row.encrypted_generated_value,
+        character_limit=row.character_limit,
+        character_limit_applied=row.character_limit_applied,
+        limitations=row.limitations_json,
+        user_edited=row.user_edited,
+        reuse_permission=row.reuse_permission,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at or row.created_at),
     )
 
 
@@ -415,6 +452,79 @@ class CandidateKnowledgeRepository:
             raise
         return answer
 
+    def add_application_answer(self, answer: ApplicationAnswerRecord) -> ApplicationAnswerRecord:
+        try:
+            self._session.add(self._application_answer_row(answer))
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return answer
+
+    def get_application_answer(self, answer_id: str) -> ApplicationAnswerRecord | None:
+        row = self._session.get(ApplicationAnswerRow, answer_id)
+        return _application_answer(row) if row is not None else None
+
+    def list_application_answers(self, application_id: str) -> list[ApplicationAnswerRecord]:
+        rows = self._session.scalars(
+            select(ApplicationAnswerRow)
+            .where(ApplicationAnswerRow.application_id == application_id)
+            .order_by(
+                ApplicationAnswerRow.updated_at.desc(), ApplicationAnswerRow.created_at.desc()
+            )
+        ).all()
+        return [_application_answer(row) for row in rows]
+
+    def update_application_answer(
+        self, answer: ApplicationAnswerRecord, expected_revision: int
+    ) -> ApplicationAnswerRecord:
+        row = self._session.get(ApplicationAnswerRow, answer.id)
+        if row is None:
+            raise LookupError(f"Application answer {answer.id} was not found")
+        try:
+            result: CursorResult[object] = self._session.connection().execute(
+                update(ApplicationAnswerRow)
+                .where(
+                    ApplicationAnswerRow.id == answer.id,
+                    ApplicationAnswerRow.revision == expected_revision,
+                )
+                .values(**self._application_answer_values(answer))
+            )
+            if result.rowcount != 1:
+                raise ValueError("Application answer revision is stale")
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return answer
+
+    def promote_application_answer(
+        self,
+        application_answer: ApplicationAnswerRecord,
+        expected_revision: int,
+        library_answer: AnswerLibraryRecord,
+        retrieval_chunk: RetrievalChunkRecord,
+    ) -> ApplicationAnswerRecord:
+        try:
+            result: CursorResult[object] = self._session.connection().execute(
+                update(ApplicationAnswerRow)
+                .where(
+                    ApplicationAnswerRow.id == application_answer.id,
+                    ApplicationAnswerRow.revision == expected_revision,
+                )
+                .values(**self._application_answer_values(application_answer))
+            )
+            if result.rowcount != 1:
+                raise ValueError("Application answer revision is stale")
+            self._session.add(self._answer_row(library_answer))
+            self._session.add(self._answer_revision_row(library_answer))
+            self._replace_answer_chunk(library_answer.id, retrieval_chunk)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return application_answer
+
     def get_answer(self, answer_id: str) -> AnswerLibraryRecord | None:
         row = self._session.get(AnswerLibraryRow, answer_id)
         return _answer(row) if row is not None else None
@@ -487,6 +597,70 @@ class CandidateKnowledgeRepository:
             provenance_json=answer.provenance,
             created_at=answer.updated_at,
         )
+
+    @staticmethod
+    def _answer_row(answer: AnswerLibraryRecord) -> AnswerLibraryRow:
+        return AnswerLibraryRow(
+            id=answer.id,
+            revision=answer.revision,
+            profile_id=answer.profile_id,
+            canonical_field=answer.canonical_field,
+            encrypted_question=answer.encrypted_question,
+            encrypted_answer=answer.encrypted_answer,
+            evidence_claim_ids_json=answer.evidence_claim_ids,
+            confidence=answer.confidence,
+            approved=answer.approved,
+            locked=answer.locked,
+            reuse_permission=answer.reuse_permission.value,
+            provenance_json=answer.provenance,
+            created_at=answer.created_at,
+            updated_at=answer.updated_at,
+        )
+
+    @staticmethod
+    def _application_answer_row(answer: ApplicationAnswerRecord) -> ApplicationAnswerRow:
+        return ApplicationAnswerRow(
+            id=answer.id,
+            application_id=answer.application_id,
+            created_at=answer.created_at,
+            **CandidateKnowledgeRepository._application_answer_values(answer),
+        )
+
+    @staticmethod
+    def _application_answer_values(answer: ApplicationAnswerRecord) -> dict[str, object]:
+        return {
+            "profile_id": answer.profile_id,
+            "job_id": answer.job_id,
+            "revision": answer.revision,
+            "encrypted_question": answer.encrypted_question,
+            "encrypted_normalized_question": answer.encrypted_normalized_question,
+            "canonical_field": answer.canonical_field,
+            "encrypted_value": answer.encrypted_value,
+            "provenance": answer.source_type.value,
+            "status": answer.status.value,
+            "source_type": answer.source_type.value,
+            "source_answer_id": answer.source_answer_id,
+            "library_answer_id": answer.library_answer_id,
+            "evidence_claim_ids_json": answer.evidence_claim_ids,
+            "retrieval_results_json": answer.retrieval_results,
+            "provider_id": answer.provider_id,
+            "model_id": answer.model_id,
+            "prompt_version": answer.prompt_version,
+            "policy_version": answer.policy_version,
+            "confidence": answer.confidence,
+            "encrypted_generated_value": answer.encrypted_generated_value,
+            "character_limit": answer.character_limit,
+            "character_limit_applied": answer.character_limit_applied,
+            "limitations_json": answer.limitations,
+            "user_edited": answer.user_edited,
+            "reuse_permission": answer.reuse_permission,
+            "approved": answer.status
+            in {
+                ApplicationAnswerStatus.REVIEWED,
+                ApplicationAnswerStatus.PROMOTED,
+            },
+            "updated_at": answer.updated_at,
+        }
 
     def list_answers(self, profile_id: str) -> list[AnswerLibraryRecord]:
         statement = (
