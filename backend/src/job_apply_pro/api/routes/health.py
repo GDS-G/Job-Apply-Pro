@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Calendar Interview Awareness",
+        build="Native Gemini Fallback",
         environment=settings.environment,
     )

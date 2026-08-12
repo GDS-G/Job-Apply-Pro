@@ -31,3 +31,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0027: Encrypted provider configuration control](0027-encrypted-provider-configuration-control.md)
 - [ADR-0028: Privacy-safe actionable desktop notifications](0028-privacy-safe-desktop-notifications.md)
 - [ADR-0029: Encrypt incremental provider synchronization state](0029-encrypted-incremental-provider-sync.md)
+- [ADR-0030: Encrypted calendar interview awareness](0030-encrypted-calendar-interview-awareness.md)
+- [ADR-0031: Native Gemini secondary provider](0031-native-gemini-secondary-provider.md)

@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.22.0-alpha.1] - Unreleased
+
+### Added
+
+- Added a native Google Gemini Interactions API adapter for stateless text completion, structured JSON output, client-side function declarations/calls, usage accounting, and bounded batch embeddings.
+- Added an explicit `GEMINI` provider kind and configuration factory routing so the secondary cloud path no longer depends on the OpenAI-compatible wire contract.
+- Added sanitized deterministic adapter tests for request/response translation, embeddings, fixed endpoint validation, and unsupported image-URL rejection.
+
+### Changed
+
+- The AI Gateway can now route and fall back across genuinely independent OpenAI-compatible, Gemini, and loopback llama.cpp adapters while preserving existing consent, classification, budget, timeout, schema, and tool-call enforcement.
+- Gemini requests opt out of server-side interaction storage and place API credentials only in the required `x-goog-api-key` header to the exact Google Generative Language API host.
+
+### Security
+
+- Gemini credentials cannot be sent to an operator-configurable host or path; the adapter requires the exact HTTPS `generativelanguage.googleapis.com/v1beta` base URL, disables redirects, bounds response bodies, and emits sanitized failures.
+- Remote image URLs are rejected until a separately governed trusted upload, MIME validation, and retention boundary exists. This release makes no live-provider availability, quota, privacy-policy, or production-readiness claim.
+
 ## [0.21.0-alpha.1] - Unreleased
 
 ### Added
