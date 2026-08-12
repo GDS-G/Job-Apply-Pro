@@ -1156,6 +1156,79 @@ h1 {
   border-radius: 99px;
 }
 
+.answer-library {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(320px, 1.15fr);
+  gap: 18px;
+  padding: 4px 18px 18px;
+}
+
+.answer-library__form {
+  align-content: start;
+  padding: 0;
+}
+
+.answer-library__evidence {
+  display: grid;
+  gap: 6px;
+  color: #657087;
+  font-size: 9px;
+}
+
+.answer-library__entries {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.answer-entry {
+  padding: 10px;
+  background: #f8f9fc;
+  border: 1px solid #e5e8f0;
+  border-radius: 9px;
+}
+
+.answer-entry summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.answer-entry summary span {
+  display: grid;
+  min-width: 0;
+}
+
+.answer-entry summary small,
+.answer-revision small {
+  color: #8791a4;
+  font-size: 8.5px;
+}
+
+.answer-entry summary em {
+  color: #2a7d62;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.answer-entry[open] summary {
+  margin-bottom: 12px;
+}
+
+.answer-revision {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px;
+  color: #59657b;
+  font-size: 9px;
+  background: white;
+  border-radius: 7px;
+}
+
 .selection-results {
   gap: 10px;
 }
@@ -1672,6 +1745,9 @@ h1 {
     grid-template-columns: 1fr;
   }
   .knowledge-grid {
+    grid-template-columns: 1fr;
+  }
+  .answer-library {
     grid-template-columns: 1fr;
   }
   .portal-grid {

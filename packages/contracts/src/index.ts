@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Explainable Resume Selection",
-  version: "0.25.0-alpha.1",
+  name: "Governed Answer Library",
+  version: "0.26.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -932,6 +932,7 @@ export interface CandidateClaim {
 
 export interface AnswerLibraryEntry {
   id: string;
+  revision: number;
   profile_id: string;
   question: string;
   canonical_field: string;
@@ -944,6 +945,35 @@ export interface AnswerLibraryEntry {
   provenance: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export interface AnswerLibraryInput {
+  question: string;
+  canonical_field: string;
+  answer: string;
+  evidence_claim_ids: string[];
+  confidence: number;
+  approved: boolean;
+  locked: boolean;
+  reuse_permission: ClaimPermittedUse;
+  provenance: Record<string, unknown>;
+}
+
+export interface AnswerLibraryRevision {
+  id: string;
+  answer_id: string;
+  profile_id: string;
+  revision: number;
+  question: string;
+  canonical_field: string;
+  answer: string;
+  evidence_claim_ids: string[];
+  confidence: number;
+  approved: boolean;
+  locked: boolean;
+  reuse_permission: ClaimPermittedUse;
+  provenance: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface CandidateKnowledgeSnapshot {
@@ -1216,6 +1246,16 @@ export interface DesktopBridge {
       claimId: string,
       approved: boolean,
     ): Promise<CandidateClaim>;
+    createAnswer(
+      profileId: string,
+      input: AnswerLibraryInput,
+    ): Promise<AnswerLibraryEntry | null>;
+    updateAnswer(
+      answerId: string,
+      expectedRevision: number,
+      input: AnswerLibraryInput,
+    ): Promise<AnswerLibraryEntry | null>;
+    listAnswerRevisions(answerId: string): Promise<AnswerLibraryRevision[]>;
     previewTailoredDocument(
       input: TailoredDocumentRequest,
     ): Promise<TailoredDocumentPreview>;

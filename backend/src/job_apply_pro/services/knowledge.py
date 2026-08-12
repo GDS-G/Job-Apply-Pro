@@ -23,6 +23,8 @@ from job_apply_pro.domain.knowledge import (
     AnswerLibraryCreate,
     AnswerLibraryEntry,
     AnswerLibraryRecord,
+    AnswerLibraryRevision,
+    AnswerLibraryUpdate,
     CandidateClaim,
     CandidateDocument,
     CandidateDocumentVersion,
@@ -850,21 +852,14 @@ class CandidateKnowledgeService:
 
     def add_answer(self, profile_id: str, command: AnswerLibraryCreate) -> AnswerLibraryEntry:
         self._profile(profile_id)
-        claims = [self._repository.get_claim(claim_id) for claim_id in command.evidence_claim_ids]
-        if any(
-            claim is None
-            or claim.profile_id != profile_id
-            or claim.verification_status is not ClaimVerificationStatus.VERIFIED
-            or not claim.locked
-            for claim in claims
-        ):
-            raise CandidateKnowledgeConflictError(
-                "Answer evidence must reference locked verified claims from this profile"
-            )
+        if command.confirmation_phrase != "SAVE REVIEWED ANSWER":
+            raise CandidateKnowledgeError("Answer save confirmation phrase is invalid")
+        self._validate_answer_evidence(profile_id, command.evidence_claim_ids)
         answer_id = str(uuid4())
         now = utc_now()
         record = AnswerLibraryRecord(
             id=answer_id,
+            revision=1,
             profile_id=profile_id,
             canonical_field=command.canonical_field,
             encrypted_question=self._cipher.encrypt_bytes(
@@ -886,25 +881,127 @@ class CandidateKnowledgeService:
             created_at=now,
             updated_at=now,
         )
-        self._repository.add_answer(record)
-        if record.approved and record.locked:
-            self._repository.upsert_chunk(
-                self._chunk(
-                    source_type="ANSWER",
-                    source_id=record.id,
-                    profile_id=profile_id,
-                    canonical_key=record.canonical_field,
-                    content=f"{command.question}\n{command.answer}",
-                    permitted_use=record.reuse_permission,
-                    evidence_claim_ids=record.evidence_claim_ids,
-                    provenance=record.provenance,
-                )
+        chunk = (
+            self._chunk(
+                source_type="ANSWER",
+                source_id=record.id,
+                profile_id=profile_id,
+                canonical_key=record.canonical_field,
+                content=f"{command.question}\n{command.answer}",
+                permitted_use=record.reuse_permission,
+                evidence_claim_ids=record.evidence_claim_ids,
+                provenance=record.provenance,
             )
+            if record.approved and record.locked
+            else None
+        )
+        self._repository.add_answer(record, chunk)
         return self._public_answer(record)
+
+    def update_answer(self, answer_id: str, command: AnswerLibraryUpdate) -> AnswerLibraryEntry:
+        existing = self._repository.get_answer(answer_id)
+        if existing is None:
+            raise LookupError(f"Answer library entry {answer_id} was not found")
+        if command.expected_revision != existing.revision:
+            raise CandidateKnowledgeConflictError(
+                "Answer changed; refresh and review the latest revision"
+            )
+        if command.confirmation_phrase != "SAVE REVIEWED ANSWER":
+            raise CandidateKnowledgeError("Answer update confirmation phrase is invalid")
+        self._validate_answer_evidence(existing.profile_id, command.evidence_claim_ids)
+        now = utc_now()
+        updated = existing.model_copy(
+            update={
+                "revision": existing.revision + 1,
+                "canonical_field": command.canonical_field,
+                "encrypted_question": self._cipher.encrypt_bytes(
+                    command.question.encode(), context=f"answer:{answer_id}:question"
+                ),
+                "encrypted_answer": self._cipher.encrypt_bytes(
+                    command.answer.encode(), context=f"answer:{answer_id}:value"
+                ),
+                "evidence_claim_ids": command.evidence_claim_ids,
+                "confidence": command.confidence,
+                "approved": command.approved,
+                "locked": command.locked,
+                "reuse_permission": command.reuse_permission,
+                "provenance": {
+                    **command.provenance,
+                    "source": "USER_REVIEWED_CORRECTION",
+                    "previous_revision": existing.revision,
+                    "retrieval_policy": "locked-facts-only",
+                },
+                "updated_at": now,
+            }
+        )
+        chunk = (
+            self._chunk(
+                source_type="ANSWER",
+                source_id=updated.id,
+                profile_id=updated.profile_id,
+                canonical_key=updated.canonical_field,
+                content=f"{command.question}\n{command.answer}",
+                permitted_use=updated.reuse_permission,
+                evidence_claim_ids=updated.evidence_claim_ids,
+                provenance=updated.provenance,
+            )
+            if updated.approved and updated.locked
+            else None
+        )
+        try:
+            saved = self._repository.update_answer(updated, command.expected_revision, chunk)
+        except ValueError as error:
+            raise CandidateKnowledgeConflictError(
+                "Answer changed; refresh and review the latest revision"
+            ) from error
+        return self._public_answer(saved)
+
+    def list_answer_revisions(self, answer_id: str) -> list[AnswerLibraryRevision]:
+        answer = self._repository.get_answer(answer_id)
+        if answer is None:
+            raise LookupError(f"Answer library entry {answer_id} was not found")
+        return [
+            AnswerLibraryRevision(
+                id=revision.id,
+                answer_id=revision.answer_id,
+                profile_id=revision.profile_id,
+                revision=revision.revision,
+                question=self._cipher.decrypt_bytes(
+                    revision.encrypted_question,
+                    context=f"answer:{answer_id}:question",
+                ).decode(),
+                canonical_field=revision.canonical_field,
+                answer=self._cipher.decrypt_bytes(
+                    revision.encrypted_answer,
+                    context=f"answer:{answer_id}:value",
+                ).decode(),
+                evidence_claim_ids=revision.evidence_claim_ids,
+                confidence=revision.confidence,
+                approved=revision.approved,
+                locked=revision.locked,
+                reuse_permission=revision.reuse_permission,
+                provenance=revision.provenance,
+                created_at=revision.created_at,
+            )
+            for revision in self._repository.list_answer_revisions(answer_id)
+        ]
 
     def list_answers(self, profile_id: str) -> list[AnswerLibraryEntry]:
         self._profile(profile_id)
         return [self._public_answer(record) for record in self._repository.list_answers(profile_id)]
+
+    def _validate_answer_evidence(self, profile_id: str, claim_ids: list[str]) -> None:
+        claims = [self._repository.get_claim(claim_id) for claim_id in claim_ids]
+        if any(
+            claim is None
+            or claim.profile_id != profile_id
+            or claim.verification_status is not ClaimVerificationStatus.VERIFIED
+            or not claim.locked
+            for claim in claims
+        ):
+            raise CandidateKnowledgeConflictError(
+                "Answer evidence must reference locked verified claims from this profile"
+            )
 
     def retrieve(self, profile_id: str, command: RetrievalQuery) -> list[RetrievalResult]:
         self._profile(profile_id)
@@ -969,6 +1066,7 @@ class CandidateKnowledgeService:
     def _public_answer(self, record: AnswerLibraryRecord) -> AnswerLibraryEntry:
         return AnswerLibraryEntry(
             id=record.id,
+            revision=record.revision,
             profile_id=record.profile_id,
             question=self._cipher.decrypt_bytes(
                 record.encrypted_question, context=f"answer:{record.id}:question"

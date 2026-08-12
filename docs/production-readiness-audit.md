@@ -227,6 +227,16 @@ All 109 backend tests passed at 82.98% total coverage and all 16 desktop tests p
 
 Exact runtime source head `2849d6ce7b380fe46a75c7df41408e71d29bac5e` produced the unsigned installer `Job-Apply-Pro-0.25.0-alpha.1-x64.exe`, 169,648,853 bytes, SHA-256 `7EEB7FA1FAF8CCF89D063D4A8E40A0A58BBDC1C91B90C6CB3462F29C838F6060`. The bundled backend executable is 18,446,954 bytes with SHA-256 `D929302B997774746886FD2EF24614B242D613B7AD98885B660905735F962F3A`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `90CC658C452425E0F808082C9D01629711EFD11AB1A294CF7CAB43B3D0F4B42C`. All three report `NotSigned`, as expected without release credentials. The packaged-backend smoke, NSIS installer, unpacked application, PDFium DLL, and pypdfium2 license tree passed/persisted. This documentation-only evidence update does not alter runtime output.
 
+### Governed Answer Library source validation
+
+`Governed Answer Library v0.26.0-alpha.1` adds explicit creation and correction of reusable answers from the desktop. Native confirmation and the exact backend phrase guard every save. Evidence identifiers must resolve to locked, verified claims owned by the answer profile. Each correction carries the revision the operator reviewed; stale revisions return conflict instead of overwriting newer work.
+
+Migration `20260812_0018` adds a current revision counter and immutable encrypted history. Existing ciphertext is backfilled without decryption. Current answer data, the new revision, and the retrieval chunk commit in one transaction; unapproved or unlocked answers are removed from retrieval in that same transaction. Tests prove encrypted current/history rows, ordered history, stale-write refusal, and latest-only retrieval. ADR-0035 records the policy and limits.
+
+Source validation used the project Python 3.12 environment because the workstation-global Python 3.13 environment does not contain the repository's Ruff, mypy, or pytest development dependencies. All 110 backend tests passed at 83.15% coverage, all 16 desktop tests passed, TypeScript and Python type checks passed, frontend/backend lint and formatting checks passed, the migration round-trip passed, and the production desktop bundle built. Exact packaged artifact hashes and signature state are recorded after the runtime source commit is fixed.
+
+Runtime source commit `99ccd90` produced the unsigned installer `Job-Apply-Pro-0.26.0-alpha.1-x64.exe`, 169,661,833 bytes, SHA-256 `60691381A8D37E53F17B2CA231D4540C8DFA462A3ADD26EEC0ECD9D98422AAEC`. The bundled backend executable is 18,451,571 bytes with SHA-256 `A647B9C80C0A6C1CFEE134964F643F6805CC3D6ECB7CC78D9861BE6387D2303E`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `97D2060C4B06C73887D00F84884644F1DF993A0D6079FFF1F27F0A397DA7263C`. All three report `NotSigned`, as expected without owner-provided release credentials. The packaged-backend smoke test passed. This evidence-only update does not change the packaged runtime.
+
 Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
 
 ## External launch evidence still required

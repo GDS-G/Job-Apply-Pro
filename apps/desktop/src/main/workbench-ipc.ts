@@ -4,6 +4,7 @@ import { arch, platform, release } from "node:os";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import type {
+  AnswerLibraryInput,
   CandidateDocumentImportInput,
   CandidateProfileCreate,
   ChallengeAnswerCommand,
@@ -50,6 +51,7 @@ const supervisedPortals = new Set<PortalKind>([
   "TALEO",
   "GREENHOUSE",
 ]);
+const permittedUses = new Set(["PROFILE_ONLY", "APPLICATIONS", "ANY"]);
 
 function requiredText(value: unknown, name: string, maxLength: number): string {
   if (
@@ -113,6 +115,47 @@ function mockWorkflowInput(value: unknown): MockWorkflowCreate {
     ),
     employer: requiredText(Reflect.get(value, "employer"), "Employer", 200),
     title: requiredText(Reflect.get(value, "title"), "Title", 200),
+  };
+}
+
+function answerLibraryInput(value: unknown): AnswerLibraryInput {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Answer-library input is invalid.");
+  }
+  const evidence = Reflect.get(value, "evidence_claim_ids");
+  if (
+    !Array.isArray(evidence) ||
+    evidence.length > 50 ||
+    !evidence.every((item) => typeof item === "string" && item.length <= 100)
+  ) {
+    throw new TypeError("Answer evidence must contain at most 50 claim ids.");
+  }
+  const confidence = Reflect.get(value, "confidence");
+  if (typeof confidence !== "number" || confidence < 0 || confidence > 1) {
+    throw new TypeError("Answer confidence must be between 0 and 1.");
+  }
+  const reusePermission = requiredText(
+    Reflect.get(value, "reuse_permission"),
+    "Reuse permission",
+    30,
+  );
+  if (!permittedUses.has(reusePermission)) {
+    throw new TypeError("Answer reuse permission is invalid.");
+  }
+  return {
+    question: requiredText(Reflect.get(value, "question"), "Question", 2_000),
+    canonical_field: requiredText(
+      Reflect.get(value, "canonical_field"),
+      "Canonical field",
+      160,
+    ),
+    answer: requiredText(Reflect.get(value, "answer"), "Answer", 20_000),
+    evidence_claim_ids: evidence,
+    confidence,
+    approved: Reflect.get(value, "approved") === true,
+    locked: Reflect.get(value, "locked") === true,
+    reuse_permission: reusePermission as AnswerLibraryInput["reuse_permission"],
+    provenance: {},
   };
 }
 
@@ -485,6 +528,73 @@ export function registerWorkbenchIpc(
       }
       return supervisor.client.reviewCandidateClaim(claimId, approvedValue);
     },
+  );
+  ipcMain.handle(
+    "knowledge:create-answer",
+    async (event, profileIdValue: unknown, inputValue: unknown) => {
+      const profileId = requiredText(profileIdValue, "Profile id", 100);
+      const input = answerLibraryInput(inputValue);
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Save this reviewed answer?",
+        message: "This answer may be reused in future applications.",
+        detail:
+          "Only locked, verified evidence is accepted. You can correct the answer later without changing the underlying profile facts.",
+        buttons: ["Cancel", "Save reviewed answer"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.createAnswer(profileId, input);
+    },
+  );
+  ipcMain.handle(
+    "knowledge:update-answer",
+    async (
+      event,
+      answerIdValue: unknown,
+      revisionValue: unknown,
+      inputValue: unknown,
+    ) => {
+      const answerId = requiredText(answerIdValue, "Answer id", 100);
+      if (
+        typeof revisionValue !== "number" ||
+        !Number.isInteger(revisionValue) ||
+        revisionValue < 1
+      ) {
+        throw new TypeError("Expected answer revision is invalid.");
+      }
+      const input = answerLibraryInput(inputValue);
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Save this reviewed correction?",
+        message: `Revision ${revisionValue + 1} will become the reusable answer.`,
+        detail:
+          "The prior revision remains in encrypted history. A stale edit is refused if another revision was saved first.",
+        buttons: ["Cancel", "Save reviewed correction"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.updateAnswer(answerId, revisionValue, input);
+    },
+  );
+  ipcMain.handle(
+    "knowledge:list-answer-revisions",
+    (_event, answerIdValue: unknown) =>
+      supervisor.client.listAnswerRevisions(
+        requiredText(answerIdValue, "Answer id", 100),
+      ),
   );
   ipcMain.handle("knowledge:preview-tailored", (_event, value: unknown) =>
     supervisor.client.previewTailoredDocument(tailoredDocumentInput(value)),

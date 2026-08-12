@@ -14,6 +14,8 @@ from job_apply_pro.domain.applications import (
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryCreate,
     AnswerLibraryEntry,
+    AnswerLibraryRevision,
+    AnswerLibraryUpdate,
     CandidateClaim,
     CandidateDocument,
     CandidateDocumentVersion,
@@ -279,6 +281,7 @@ def add_answer_library_entry(
         return service.add_answer(profile_id, command)
     except (
         LookupError,
+        CandidateKnowledgeError,
         CandidateKnowledgeConflictError,
         KeyConfigurationError,
         DecryptionError,
@@ -292,6 +295,34 @@ def list_answer_library(
 ) -> list[AnswerLibraryEntry]:
     try:
         return service.list_answers(profile_id)
+    except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.put("/answers/{answer_id}", response_model=AnswerLibraryEntry)
+def update_answer_library_entry(
+    answer_id: str,
+    command: AnswerLibraryUpdate,
+    service: KnowledgeServiceDependency,
+) -> AnswerLibraryEntry:
+    try:
+        return service.update_answer(answer_id, command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get("/answers/{answer_id}/revisions", response_model=list[AnswerLibraryRevision])
+def list_answer_library_revisions(
+    answer_id: str, service: KnowledgeServiceDependency
+) -> list[AnswerLibraryRevision]:
+    try:
+        return service.list_answer_revisions(answer_id)
     except (LookupError, KeyConfigurationError, DecryptionError) as error:
         raise _http_error(error) from error
 

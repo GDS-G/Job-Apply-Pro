@@ -5,6 +5,9 @@ import type {
   BackupManifest,
   BackupSchedule,
   BackupVerification,
+  AnswerLibraryEntry,
+  AnswerLibraryInput,
+  AnswerLibraryRevision,
   BrowserSessionSnapshot,
   CandidateClaim,
   CandidateDocumentImportInput,
@@ -84,6 +87,43 @@ export class BackendClient {
   ): Promise<CandidateKnowledgeSnapshot> {
     return this.request(
       `/knowledge/profiles/${encodeURIComponent(profileId)}/snapshot`,
+    );
+  }
+
+  createAnswer(
+    profileId: string,
+    input: AnswerLibraryInput,
+  ): Promise<AnswerLibraryEntry> {
+    return this.request(
+      `/knowledge/profiles/${encodeURIComponent(profileId)}/answers`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...input,
+          confirmation_phrase: "SAVE REVIEWED ANSWER",
+        }),
+      },
+    );
+  }
+
+  updateAnswer(
+    answerId: string,
+    expectedRevision: number,
+    input: AnswerLibraryInput,
+  ): Promise<AnswerLibraryEntry> {
+    return this.request(`/knowledge/answers/${encodeURIComponent(answerId)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        ...input,
+        expected_revision: expectedRevision,
+        confirmation_phrase: "SAVE REVIEWED ANSWER",
+      }),
+    });
+  }
+
+  listAnswerRevisions(answerId: string): Promise<AnswerLibraryRevision[]> {
+    return this.request(
+      `/knowledge/answers/${encodeURIComponent(answerId)}/revisions`,
     );
   }
 

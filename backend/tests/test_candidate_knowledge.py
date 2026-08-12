@@ -23,6 +23,7 @@ from job_apply_pro.domain.candidate import CandidateProfileCreate, ContactDetail
 from job_apply_pro.domain.jobs import JobCreate
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryCreate,
+    AnswerLibraryUpdate,
     ClaimPermittedUse,
     ClaimReview,
     ClaimVerificationStatus,
@@ -46,6 +47,7 @@ from job_apply_pro.services.knowledge import (
 )
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.models import (
+    AnswerLibraryRevisionRow,
     AnswerLibraryRow,
     DocumentGenerationAuditRow,
     DocumentVersionRow,
@@ -168,8 +170,10 @@ def test_import_review_lock_experience_and_private_retrieval(
             answer="Five years of verified BGP experience.",
             evidence_claim_ids=[verified_skill.id, *[claim.id for claim in experience_claims]],
             provenance={"reviewed_by": "user"},
+            confirmation_phrase="SAVE REVIEWED ANSWER",
         ),
     )
+    assert answer.revision == 1
     assert answer.locked and answer.approved
     results = service.retrieve(
         profile_id,
@@ -199,6 +203,67 @@ def test_import_review_lock_experience_and_private_retrieval(
     )
     assert any("BGP" in decrypted for decrypted in decrypted_chunks)
     assert any("Five years" in decrypted for decrypted in decrypted_chunks)
+
+    corrected = service.update_answer(
+        answer.id,
+        AnswerLibraryUpdate(
+            question="How many years of BGP experience do you have?",
+            canonical_field="experience.bgp_years",
+            answer="I have five years of verified BGP experience.",
+            evidence_claim_ids=answer.evidence_claim_ids,
+            provenance={"reviewed_by": "user", "reason": "clarity"},
+            expected_revision=answer.revision,
+            confirmation_phrase="SAVE REVIEWED ANSWER",
+        ),
+    )
+    assert corrected.revision == 2
+    assert corrected.answer.startswith("I have")
+    revisions = service.list_answer_revisions(answer.id)
+    assert [revision.revision for revision in revisions] == [2, 1]
+    assert revisions[1].answer == "Five years of verified BGP experience."
+    revision_rows = session.scalars(select(AnswerLibraryRevisionRow)).all()
+    assert len(revision_rows) == 2
+    assert all("Five years" not in row.encrypted_answer for row in revision_rows)
+    with pytest.raises(CandidateKnowledgeConflictError, match="refresh"):
+        service.update_answer(
+            answer.id,
+            AnswerLibraryUpdate(
+                question=answer.question,
+                canonical_field=answer.canonical_field,
+                answer="A stale correction must not win.",
+                evidence_claim_ids=answer.evidence_claim_ids,
+                expected_revision=1,
+                confirmation_phrase="SAVE REVIEWED ANSWER",
+            ),
+        )
+    refreshed_results = service.retrieve(
+        profile_id,
+        RetrievalQuery(query="BGP experience", permitted_use=ClaimPermittedUse.APPLICATIONS),
+    )
+    answer_result = next(result for result in refreshed_results if result.source_type == "ANSWER")
+    assert "I have five years" in answer_result.content
+    assert "\nFive years" not in answer_result.content
+
+    disabled = service.update_answer(
+        answer.id,
+        AnswerLibraryUpdate(
+            question=corrected.question,
+            canonical_field=corrected.canonical_field,
+            answer=corrected.answer,
+            evidence_claim_ids=corrected.evidence_claim_ids,
+            approved=False,
+            locked=False,
+            expected_revision=corrected.revision,
+            confirmation_phrase="SAVE REVIEWED ANSWER",
+        ),
+    )
+    assert disabled.revision == 3
+    assert not disabled.approved and not disabled.locked
+    disabled_results = service.retrieve(
+        profile_id,
+        RetrievalQuery(query="BGP experience", permitted_use=ClaimPermittedUse.APPLICATIONS),
+    )
+    assert all(result.source_type != "ANSWER" for result in disabled_results)
 
     duplicate = service.import_document(
         profile_id,
@@ -510,9 +575,42 @@ def test_candidate_knowledge_multipart_api(session: Session, tmp_path: Path) -> 
         assert payload["document"]["is_primary"] is True
         assert payload["version"]["media_type"] == "text/plain"
         assert payload["proposed_claims"]
+        claim_id = payload["proposed_claims"][0]["id"]
+        service.review_claim(
+            claim_id,
+            ClaimReview(approved=True, permitted_use=ClaimPermittedUse.APPLICATIONS),
+        )
+        created_answer = client.post(
+            f"/api/v1/knowledge/profiles/{profile_id}/answers",
+            json={
+                "question": "Which verified skill should be reused?",
+                "canonical_field": "skills.primary",
+                "answer": "Use the verified skill from this profile.",
+                "evidence_claim_ids": [claim_id],
+                "confirmation_phrase": "SAVE REVIEWED ANSWER",
+            },
+        )
+        assert created_answer.status_code == 201
+        answer_payload = created_answer.json()
+        updated_answer = client.put(
+            f"/api/v1/knowledge/answers/{answer_payload['id']}",
+            json={
+                "question": answer_payload["question"],
+                "canonical_field": answer_payload["canonical_field"],
+                "answer": "Use only the verified skill from this profile.",
+                "evidence_claim_ids": [claim_id],
+                "expected_revision": 1,
+                "confirmation_phrase": "SAVE REVIEWED ANSWER",
+            },
+        )
+        assert updated_answer.status_code == 200
+        assert updated_answer.json()["revision"] == 2
+        history = client.get(f"/api/v1/knowledge/answers/{answer_payload['id']}/revisions")
+        assert history.status_code == 200
+        assert [item["revision"] for item in history.json()] == [2, 1]
         snapshot = client.get(f"/api/v1/knowledge/profiles/{profile_id}/snapshot").json()
         assert len(snapshot["documents"]) == 1
-        assert snapshot["answers"] == []
+        assert snapshot["answers"][0]["revision"] == 2
     finally:
         app.dependency_overrides.clear()
 

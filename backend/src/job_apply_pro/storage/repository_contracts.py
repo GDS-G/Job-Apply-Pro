@@ -33,6 +33,7 @@ from job_apply_pro.domain.communications import (
 from job_apply_pro.domain.jobs import Job, JobCreate, JobRequirement
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryRecord,
+    AnswerLibraryRevisionRecord,
     CandidateClaim,
     CandidateDocument,
     CandidateDocumentVersion,
@@ -149,7 +150,22 @@ class CandidateKnowledgeRepositoryProtocol(Protocol):
 
     def save_claim(self, claim: CandidateClaim) -> CandidateClaim: ...
 
-    def add_answer(self, answer: AnswerLibraryRecord) -> AnswerLibraryRecord: ...
+    def add_answer(
+        self,
+        answer: AnswerLibraryRecord,
+        retrieval_chunk: RetrievalChunkRecord | None,
+    ) -> AnswerLibraryRecord: ...
+
+    def get_answer(self, answer_id: str) -> AnswerLibraryRecord | None: ...
+
+    def update_answer(
+        self,
+        answer: AnswerLibraryRecord,
+        expected_revision: int,
+        retrieval_chunk: RetrievalChunkRecord | None,
+    ) -> AnswerLibraryRecord: ...
+
+    def list_answer_revisions(self, answer_id: str) -> list[AnswerLibraryRevisionRecord]: ...
 
     def list_answers(self, profile_id: str) -> list[AnswerLibraryRecord]: ...
 

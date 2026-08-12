@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Explainable Resume Selection v0.25.0-alpha.1"),
+      screen.getByText("Governed Answer Library v0.26.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

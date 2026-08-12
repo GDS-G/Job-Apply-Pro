@@ -254,6 +254,7 @@ class AnswerLibraryRow(Base):
     __table_args__ = (Index("ix_answer_library_profile_updated", "profile_id", "updated_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
     profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
     canonical_field: Mapped[str] = mapped_column(String(160), index=True)
     encrypted_question: Mapped[str] = mapped_column(Text)
@@ -266,6 +267,29 @@ class AnswerLibraryRow(Base):
     provenance_json: Mapped[dict[str, object]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AnswerLibraryRevisionRow(Base):
+    __tablename__ = "answer_library_revisions"
+    __table_args__ = (
+        UniqueConstraint("answer_id", "revision", name="uq_answer_library_revision"),
+        Index("ix_answer_library_revisions_answer_created", "answer_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    answer_id: Mapped[str] = mapped_column(ForeignKey("answer_library.id"), index=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    encrypted_question: Mapped[str] = mapped_column(Text)
+    canonical_field: Mapped[str] = mapped_column(String(160))
+    encrypted_answer: Mapped[str] = mapped_column(Text)
+    evidence_claim_ids_json: Mapped[list[str]] = mapped_column(JSON)
+    confidence: Mapped[float] = mapped_column(Float)
+    approved: Mapped[bool] = mapped_column(Boolean)
+    locked: Mapped[bool] = mapped_column(Boolean)
+    reuse_permission: Mapped[str] = mapped_column(String(30))
+    provenance_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class RetrievalChunkRow(Base):
