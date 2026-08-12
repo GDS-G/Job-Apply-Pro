@@ -230,6 +230,8 @@ class ApplicationFieldExecutionService:
             raise FieldExecutionPolicyError("Field has no deterministic semantic locator")
         if control.disabled:
             raise FieldExecutionPolicyError("Disabled fields cannot be executed")
+        if not control.visible:
+            raise FieldExecutionPolicyError("Hidden fields cannot be executed")
         if control.legal_attestation:
             raise FieldExecutionPolicyError("Legal attestations require visible user handling")
         if control.kind.value != binding.control_kind.value:

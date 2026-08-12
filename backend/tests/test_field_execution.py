@@ -240,6 +240,7 @@ def _fixture_service(
         field_name="email",
         label="Email",
         required=True,
+        visible=True,
         locator=SemanticLocator(strategy=LocatorStrategy.LABEL, value="Email"),
     )
     run = SupervisedPortalRunSnapshot(
@@ -327,6 +328,26 @@ def test_rejects_disabled_policy_and_stale_live_page() -> None:
     assert stale_browser.takeovers == 1
 
 
+def test_rejects_control_without_current_visibility_evidence() -> None:
+    service, browser, _ = _fixture_service()
+    assert browser.observation is not None
+    browser.observation = browser.observation.model_copy(
+        update={"controls": [browser.observation.controls[0].model_copy(update={"visible": False})]}
+    )
+
+    with pytest.raises(FieldExecutionPolicyError, match="Hidden fields"):
+        service.execute(
+            "run-1",
+            ApplicationFieldExecutionApproval(
+                binding_id="binding-1",
+                review_page_fingerprint="page-v1",
+                confirmation_phrase="EXECUTE APPROVED FIELD",
+            ),
+        )
+    assert browser.action is None
+    assert browser.takeovers == 1
+
+
 def test_radio_group_uses_exact_visible_option_locator() -> None:
     control = BrowserObservedControl(
         index=0,
@@ -336,6 +357,7 @@ def test_radio_group_uses_exact_visible_option_locator() -> None:
         input_type="radio",
         field_name="arrangement",
         group_label="Preferred work arrangement",
+        visible=True,
         options=[
             BrowserControlOption(
                 value="remote",
@@ -406,6 +428,7 @@ def test_select_uses_unique_exact_visible_label() -> None:
         tag="select",
         field_name="schedule",
         label="Preferred schedule",
+        visible=True,
         options=[
             BrowserControlOption(value="schedule-internal-1", label="Day shift"),
             BrowserControlOption(value="schedule-internal-2", label="Night shift"),
@@ -446,6 +469,7 @@ def test_sensitive_browser_action_is_redacted_before_persistence(session: Sessio
         tag="input",
         input_type="email",
         label="Email",
+        visible=True,
         locator=SemanticLocator(strategy=LocatorStrategy.LABEL, value="Email"),
     )
     locator = control.locator

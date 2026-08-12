@@ -2,6 +2,21 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.36.0-alpha.1] - Unreleased
+
+### Added
+
+- Added explicit `visible` evidence to the privacy-bounded observed-control contract and shared desktop types.
+- Added a real-browser conditional-form regression proving `display: none` and `visibility: hidden` required controls are excluded while a visible required control remains observable.
+
+### Changed
+
+- Browser capture filters invisible controls before the 100-control bound, radio-group construction, page fingerprint, supervised snapshots, binding selection, and required-field coverage.
+
+### Security
+
+- Approved field execution rejects controls without current positive visibility evidence. Existing serialized observations default to not visible and require a fresh capture instead of being trusted.
+
 ## [0.35.0-alpha.1] - Unreleased
 
 ### Added

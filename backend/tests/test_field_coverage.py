@@ -193,6 +193,7 @@ def _control(
         "input_type": input_type,
         "label": control_key.replace("-", " ").title(),
         "required": True,
+        "visible": True,
         "locator": SemanticLocator(
             strategy=LocatorStrategy.LABEL,
             value=control_key.replace("-", " ").title(),
@@ -293,3 +294,15 @@ def test_review_recognizes_native_constraint_validity_without_reading_value() ->
     assert review.ready_to_execute_count == 0
     assert review.items[0].status is ApplicationFieldCoverageStatus.SATISFIED_ON_PAGE
     assert "not-read-by-coverage-review" not in review.model_dump_json()
+
+
+def test_review_ignores_legacy_or_hidden_required_controls() -> None:
+    review = _service(
+        [
+            _control("visible-control"),
+            _control("hidden-control", visible=False),
+        ]
+    ).review("run-1", "application-1")
+
+    assert review.required_control_count == 1
+    assert [item.control_key for item in review.items] == ["visible-control"]

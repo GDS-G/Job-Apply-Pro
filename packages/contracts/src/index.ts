@@ -160,6 +160,7 @@ export interface BrowserObservedControl {
   checked: boolean;
   required: boolean;
   disabled: boolean;
+  visible: boolean;
   will_validate: boolean;
   constraint_satisfied: boolean;
   legal_attestation: boolean;

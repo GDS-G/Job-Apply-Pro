@@ -96,7 +96,7 @@ class ApplicationFieldCoverageService:
         items = [
             self._classify(control, run, bindings, executions)
             for control in run.observed_controls
-            if control.required
+            if control.required and control.visible
         ]
         items.sort(key=lambda item: (item.label.casefold(), item.control_key))
         counts = Counter(item.status for item in items)

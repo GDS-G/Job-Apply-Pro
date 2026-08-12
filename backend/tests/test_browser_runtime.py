@@ -96,6 +96,22 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </select>
                 </body>
             """,
+            "/conditional-fields": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Conditional questions</h1>
+                  <label>Visible question <input name="visible_question" required></label>
+                  <label id="conditional-question" style="display: none">
+                    Hidden question <input name="hidden_question" required>
+                  </label>
+                  <label style="visibility: hidden">
+                    Invisible question <input name="invisible_question" required>
+                  </label>
+                  <button type="button"
+                    onclick="document.getElementById('conditional-question').style.display='block'">
+                    Reveal question
+                  </button>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -384,6 +400,7 @@ def test_multi_page_fixture_is_verified_traced_and_restartable(
             assert full_name.kind is BrowserControlKind.TEXT
             assert full_name.label == "Full name"
             assert full_name.required
+            assert full_name.visible
             assert full_name.will_validate
             assert not full_name.constraint_satisfied
             assert len(full_name.control_key) == 32
@@ -431,6 +448,50 @@ def test_multi_page_fixture_is_verified_traced_and_restartable(
             assert Path(stopped.trace_path).is_file()
             assert stopped.action_count == 7
             assert len(service.list_actions(started.id)) == 7
+    finally:
+        worker.close()
+
+
+def test_observation_excludes_css_hidden_controls(session: Session, tmp_path: Path) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/conditional-fields"),
+                    profile_name="visible-control-filter",
+                )
+            )
+            assert started.observation is not None
+            initial_fingerprint = started.observation.page_fingerprint
+            names = {
+                control.field_name for control in started.observation.controls if control.field_name
+            }
+            assert names == {"visible_question"}
+            assert all(control.visible for control in started.observation.controls)
+
+            revealed = service.execute_action(
+                started.id,
+                BrowserAction(
+                    kind=BrowserActionKind.CLICK,
+                    locator=_button("Reveal question"),
+                    intended_result="Reveal the conditional question",
+                    verification=BrowserVerification(
+                        kind=VerificationKind.LOCATOR_VISIBLE,
+                        locator=_label("Hidden question"),
+                    ),
+                ),
+            )
+            revealed_names = {
+                control.field_name
+                for control in revealed.observation.controls
+                if control.field_name
+            }
+            assert revealed_names == {"visible_question", "hidden_question"}
+            assert revealed.observation.page_fingerprint != initial_fingerprint
     finally:
         worker.close()
 
