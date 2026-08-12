@@ -110,6 +110,22 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ),
     listApplicationFieldBindings: (applicationId: string) =>
       ipcRenderer.invoke("knowledge:list-field-bindings", applicationId),
+    executeApplicationField: (
+      runId: string,
+      bindingId: string,
+      reviewPageFingerprint: string,
+    ) =>
+      ipcRenderer.invoke(
+        "portals:execute-application-field",
+        runId,
+        bindingId,
+        reviewPageFingerprint,
+      ),
+    listApplicationFieldExecutions: (applicationId: string) =>
+      ipcRenderer.invoke(
+        "portals:list-application-field-executions",
+        applicationId,
+      ),
     previewTailoredDocument: (input: TailoredDocumentRequest) =>
       ipcRenderer.invoke("knowledge:preview-tailored", input),
     generateTailoredDocument: (

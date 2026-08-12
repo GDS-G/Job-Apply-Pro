@@ -324,6 +324,35 @@ class ApplicationFieldBindingRecord(BaseModel):
     updated_at: datetime
 
 
+class ApplicationFieldExecutionApproval(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    binding_id: str = Field(min_length=1, max_length=100)
+    review_page_fingerprint: str = Field(min_length=1, max_length=200)
+    confirmation_phrase: str = Field(min_length=1, max_length=100)
+
+
+class ApplicationFieldExecution(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    binding_id: str
+    application_id: str
+    application_answer_id: str
+    answer_revision: int = Field(ge=1)
+    supervised_run_id: str
+    browser_session_id: str
+    portal: str
+    page_fingerprint_before: str
+    page_fingerprint_after: str
+    control_key: str
+    action_kind: str
+    verified: bool
+    action_fingerprint: str = Field(min_length=64, max_length=64)
+    error: str | None = None
+    created_at: datetime
+
+
 class SubmittedDocumentCapture(BaseModel):
     model_config = ConfigDict(frozen=True)
 

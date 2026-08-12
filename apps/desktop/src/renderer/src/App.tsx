@@ -31,6 +31,7 @@ import type {
   ApplicationAnswerDraftInput,
   ApplicationAnswerReviewInput,
   ApplicationFieldBinding,
+  ApplicationFieldExecution,
   ApplicationFieldBindingPreview,
   ApplicationFieldBindingPreviewInput,
   AnswerLibraryInput,
@@ -172,6 +173,9 @@ export function App() {
   const [fieldBindings, setFieldBindings] = useState<ApplicationFieldBinding[]>(
     [],
   );
+  const [fieldExecutions, setFieldExecutions] = useState<
+    ApplicationFieldExecution[]
+  >([]);
   const [fieldBindingPreview, setFieldBindingPreview] = useState<{
     input: ApplicationFieldBindingPreviewInput;
     preview: ApplicationFieldBindingPreview;
@@ -884,6 +888,11 @@ export function App() {
           applicationId,
         ),
       );
+      setFieldExecutions(
+        await window.jobApplyPro.workbench.listApplicationFieldExecutions(
+          applicationId,
+        ),
+      );
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -1091,6 +1100,30 @@ export function App() {
           ),
         );
         setFieldBindingPreview(null);
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function executeApplicationField(binding: ApplicationFieldBinding) {
+    if (!latestSupervisedRun) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const execution =
+        await window.jobApplyPro.workbench.executeApplicationField(
+          latestSupervisedRun.id,
+          binding.id,
+          latestSupervisedRun.page_fingerprint,
+        );
+      if (execution) {
+        setFieldExecutions((current) => [execution, ...current]);
+        const refreshed =
+          await window.jobApplyPro.workbench.listSupervisedPortalRuns();
+        setSupervisedPortalRuns(refreshed);
       }
     } catch (caught) {
       setError(readableError(caught));
@@ -2599,6 +2632,40 @@ export function App() {
                       {binding.portal} ·{" "}
                       {binding.automation_permission.replaceAll("_", " ")} ·
                       answer revision {binding.answer_revision}
+                    </small>
+                    {binding.automation_permission === "AUTOFILL_ALLOWED" &&
+                    latestSupervisedRun?.state === "AWAITING_USER" &&
+                    latestSupervisedRun.workflow_id === selected?.workflow_id &&
+                    latestSupervisedRun.page_fingerprint ===
+                      binding.page_fingerprint &&
+                    latestSupervisedRun.observed_controls.some(
+                      (control) => control.control_key === binding.control_key,
+                    ) ? (
+                      <button
+                        className="button button--primary"
+                        disabled={busy}
+                        onClick={() => void executeApplicationField(binding)}
+                        type="button"
+                      >
+                        <ShieldCheck size={14} /> Review & populate exact field
+                      </button>
+                    ) : null}
+                  </article>
+                ))}
+                {fieldExecutions.map((execution) => (
+                  <article className="answer-entry" key={execution.id}>
+                    <strong>
+                      {execution.verified
+                        ? "Verified field execution"
+                        : "Unverified field execution"}
+                    </strong>
+                    <span>
+                      {execution.portal} · {execution.action_kind} · answer
+                      revision {execution.answer_revision}
+                    </span>
+                    <small>
+                      Audit {execution.action_fingerprint.slice(0, 16)}… · no
+                      answer text retained
                     </small>
                   </article>
                 ))}

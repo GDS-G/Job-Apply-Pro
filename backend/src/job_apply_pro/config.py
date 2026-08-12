@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     automation_enabled: bool = False
     supervised_portal_enabled: bool = False
+    supervised_field_execution_enabled: bool = False
     supervised_portal_submission_enabled: bool = False
     supervised_portal_allowlist: str = ""
     api_token: SecretStr | None = None

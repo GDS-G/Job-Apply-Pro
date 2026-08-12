@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Observed Form Control Capture build
+## Verified Approved Field Execution build
 
-The active milestone is **Observed Form Control Capture `v0.30.0-alpha.1`**. The isolated browser worker now emits typed, privacy-bounded controls with deterministic keys, semantic kinds and locators, visible options and limits, and no password controls or current values. The binding UI can select the exact current supervised control instead of retyping its metadata. This release records observations and reviewed mappings only; it does not fill or submit portal forms.
+The active milestone is **Verified Approved Field Execution `v0.31.0-alpha.1`**. With its separate default-off policy enabled, the app can populate one exact current native field after a reviewed binding, fresh observation, complete fingerprint/revision check, and native owner confirmation. Plaintext answers are redacted from action history and excluded from execution evidence. Radio groups, custom widgets, uploads, signatures, disclosures, legal attestations, and final submission remain outside this path.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

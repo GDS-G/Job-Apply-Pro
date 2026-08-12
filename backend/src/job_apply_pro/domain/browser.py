@@ -133,6 +133,7 @@ class BrowserAction(BaseModel):
     retry: BrowserRetryPolicy = Field(default_factory=BrowserRetryPolicy)
     permission: BrowserPermission = BrowserPermission.STANDARD
     confirmation: ConfirmationState = ConfirmationState.NOT_REQUIRED
+    sensitive_value: bool = False
 
 
 class BrowserTab(BaseModel):

@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session
 from job_apply_pro.api.routes.browser import get_browser_service
 from job_apply_pro.browser.client import BrowserWorkerError, BrowserWorkerUnavailableError
 from job_apply_pro.config import get_settings
+from job_apply_pro.domain.applications import (
+    ApplicationFieldExecution,
+    ApplicationFieldExecutionApproval,
+)
 from job_apply_pro.domain.browser import BrowserEngine
 from job_apply_pro.domain.portals import (
     PortalAdapterDefinition,
@@ -27,6 +31,13 @@ from job_apply_pro.portals.catalog import PortalCatalog, PortalCatalogError
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.browser_runtime import BrowserPolicyError, BrowserSessionStateError
 from job_apply_pro.services.core import CoreService
+from job_apply_pro.services.field_bindings import ApplicationFieldBindingService
+from job_apply_pro.services.field_execution import (
+    ApplicationFieldExecutionService,
+    FieldExecutionConflictError,
+    FieldExecutionError,
+    FieldExecutionPolicyError,
+)
 from job_apply_pro.services.portals import (
     PortalApprovalError,
     PortalEligibilityError,
@@ -40,6 +51,10 @@ from job_apply_pro.services.supervised_portals import (
     parse_portal_allowlist,
 )
 from job_apply_pro.storage.database import get_session
+from job_apply_pro.storage.field_binding_repository import (
+    ApplicationFieldBindingRepository,
+    ApplicationFieldExecutionRepository,
+)
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.repositories import (
     ApplicationRepository,
@@ -111,6 +126,31 @@ SupervisedPortalServiceDependency = Annotated[
 ]
 
 
+def get_field_execution_service(
+    session: SessionDependency,
+    cipher: CipherDependency,
+) -> ApplicationFieldExecutionService:
+    settings = get_settings()
+    knowledge = CandidateKnowledgeRepository(session)
+    bindings = ApplicationFieldBindingRepository(session)
+    return ApplicationFieldExecutionService(
+        bindings=bindings,
+        binding_service=ApplicationFieldBindingService(knowledge, bindings, cipher),
+        answers=knowledge,
+        applications=ApplicationRepository(session),
+        executions=ApplicationFieldExecutionRepository(session),
+        supervised=SupervisedPortalRepository(session),
+        browser=get_browser_service(session, cipher),
+        cipher=cipher,
+        enabled=settings.supervised_field_execution_enabled,
+    )
+
+
+FieldExecutionServiceDependency = Annotated[
+    ApplicationFieldExecutionService, Depends(get_field_execution_service)
+]
+
+
 def _http_error(error: Exception) -> HTTPException:
     if isinstance(error, LookupError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
@@ -120,9 +160,13 @@ def _http_error(error: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
     if isinstance(error, SupervisedPortalPolicyError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
+    if isinstance(error, FieldExecutionPolicyError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
     if isinstance(error, BrowserPolicyError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
     if isinstance(error, SupervisedPortalStateError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    if isinstance(error, FieldExecutionConflictError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
     if isinstance(error, BrowserSessionStateError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
@@ -134,6 +178,8 @@ def _http_error(error: Exception) -> HTTPException:
     if isinstance(error, BrowserWorkerError):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     if isinstance(error, (PortalExecutionError, ValueError)):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
+    if isinstance(error, FieldExecutionError):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     if isinstance(error, IntegrityError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Portal record conflict")
@@ -231,6 +277,39 @@ def capture_supervised_portal_step(
         SupervisedPortalStateError,
     ) as error:
         raise _http_error(error) from error
+
+
+@router.post(
+    "/supervised/runs/{run_id}/field-executions",
+    response_model=ApplicationFieldExecution,
+    status_code=status.HTTP_201_CREATED,
+)
+def execute_approved_application_field(
+    run_id: str,
+    approval: ApplicationFieldExecutionApproval,
+    service: FieldExecutionServiceDependency,
+) -> ApplicationFieldExecution:
+    try:
+        return service.execute(run_id, approval)
+    except (
+        LookupError,
+        BrowserPolicyError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        FieldExecutionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/supervised/applications/{application_id}/field-executions",
+    response_model=list[ApplicationFieldExecution],
+)
+def list_application_field_executions(
+    application_id: str,
+    service: FieldExecutionServiceDependency,
+) -> list[ApplicationFieldExecution]:
+    return service.list_for_application(application_id)
 
 
 @router.post("/supervised/runs/{run_id}/submit", response_model=SupervisedPortalRunSnapshot)

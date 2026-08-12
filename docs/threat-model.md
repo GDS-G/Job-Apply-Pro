@@ -6,16 +6,16 @@ Candidate identity and history, resumes, answers, browser sessions, mail/calenda
 
 ## Trust boundaries
 
-| Boundary | Threats | Required controls |
-| --- | --- | --- |
-| Sandboxed renderer to Electron main | IPC forgery, Node escape, secret disclosure | Context isolation, sandbox, no Node integration, narrow typed IPC, validation, no tokens/keys in renderer |
-| Electron main to loopback API | Local process impersonation, request tampering | Loopback bind, random per-launch token, authenticated privileged routes, explicit timeouts |
-| API to SQLite/files | plaintext disclosure, traversal, corruption, locked DB | AES-256-GCM envelopes, resolved-root checks, Alembic, atomic writes, consistent backup, offline restore |
-| Browser worker to portals | prompt injection, hostile DOM, cross-origin escape, false confirmation | isolated process, origin allowlist, bounded actions, fingerprints, human gates, identifier-backed confirmation |
-| AI gateway to providers | data exfiltration, tool injection, unbounded cost | consent/privacy routing, redaction, schema validation, bounded tools, budgets, encrypted cache, no direct service calls |
-| Mail/calendar adapters | token theft, duplicate or unintended writes | OS credential references, encrypted content, review fingerprint, idempotency key, immutable provider confirmation |
-| Package/update channel | dependency tampering, unsigned installer, downgrade | frozen lockfiles, dependency/secret scans, inventory artifacts, code signing, signature verification, fail-closed release, no downgrade |
-| Diagnostics/support | secret or candidate-data leakage | aggregate-only schema, value stripping, basename-only traces, explicit local export, user review |
+| Boundary                            | Threats                                                                | Required controls                                                                                                                       |
+| ----------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Sandboxed renderer to Electron main | IPC forgery, Node escape, secret disclosure                            | Context isolation, sandbox, no Node integration, narrow typed IPC, validation, no tokens/keys in renderer                               |
+| Electron main to loopback API       | Local process impersonation, request tampering                         | Loopback bind, random per-launch token, authenticated privileged routes, explicit timeouts                                              |
+| API to SQLite/files                 | plaintext disclosure, traversal, corruption, locked DB                 | AES-256-GCM envelopes, resolved-root checks, Alembic, atomic writes, consistent backup, offline restore                                 |
+| Browser worker to portals           | prompt injection, hostile DOM, cross-origin escape, false confirmation | isolated process, origin allowlist, bounded actions, fingerprints, human gates, identifier-backed confirmation                          |
+| AI gateway to providers             | data exfiltration, tool injection, unbounded cost                      | consent/privacy routing, redaction, schema validation, bounded tools, budgets, encrypted cache, no direct service calls                 |
+| Mail/calendar adapters              | token theft, duplicate or unintended writes                            | OS credential references, encrypted content, review fingerprint, idempotency key, immutable provider confirmation                       |
+| Package/update channel              | dependency tampering, unsigned installer, downgrade                    | frozen lockfiles, dependency/secret scans, inventory artifacts, code signing, signature verification, fail-closed release, no downgrade |
+| Diagnostics/support                 | secret or candidate-data leakage                                       | aggregate-only schema, value stripping, basename-only traces, explicit local export, user review                                        |
 
 ## Abuse cases and response
 

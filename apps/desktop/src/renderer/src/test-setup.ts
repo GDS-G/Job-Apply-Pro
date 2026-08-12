@@ -41,6 +41,8 @@ const bridge: DesktopBridge = {
     },
     approveApplicationFieldBinding: async () => null,
     listApplicationFieldBindings: async () => [],
+    executeApplicationField: async () => null,
+    listApplicationFieldExecutions: async () => [],
     previewTailoredDocument: async () => {
       throw new Error("Not implemented in this test.");
     },
