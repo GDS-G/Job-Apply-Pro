@@ -184,6 +184,53 @@ function applicationAnswerDraftInput(
   if (!permittedUses.has(reusePermission)) {
     throw new TypeError("Application-answer reuse permission is invalid.");
   }
+  const answerKinds = new Set([
+    "EXACT",
+    "SHORT_TEXT",
+    "LONG_TEXT",
+    "NUMBER",
+    "DATE",
+    "YES_NO",
+    "MULTIPLE_CHOICE",
+    "SALARY",
+    "AVAILABILITY",
+    "TECHNOLOGY_EXPERIENCE",
+    "BEHAVIORAL",
+    "EMPLOYER_SPECIFIC",
+  ]);
+  const answerKind = requiredText(
+    Reflect.get(value, "answer_kind"),
+    "Answer kind",
+    40,
+  );
+  if (!answerKinds.has(answerKind)) {
+    throw new TypeError("Application-answer kind is invalid.");
+  }
+  const choicesValue = Reflect.get(value, "choices");
+  if (!Array.isArray(choicesValue) || choicesValue.length > 100) {
+    throw new TypeError("Application-answer choices are invalid.");
+  }
+  const choices = choicesValue.map((choice) =>
+    requiredText(choice, "Answer choice", 500),
+  );
+  const optionalNumber = (name: string): number | null => {
+    const candidate = Reflect.get(value, name);
+    if (candidate === undefined || candidate === null) return null;
+    if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+      throw new TypeError(`${name.replaceAll("_", " ")} is invalid.`);
+    }
+    return candidate;
+  };
+  const optionalDate = (name: string): string | null => {
+    const candidate = Reflect.get(value, name);
+    if (candidate === undefined || candidate === null || candidate === "")
+      return null;
+    const date = requiredText(candidate, name.replaceAll("_", " "), 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new TypeError(`${name.replaceAll("_", " ")} must use YYYY-MM-DD.`);
+    }
+    return date;
+  };
   return {
     application_id: requiredText(
       Reflect.get(value, "application_id"),
@@ -196,6 +243,12 @@ function applicationAnswerDraftInput(
       "Canonical field",
       160,
     ),
+    answer_kind: answerKind as ApplicationAnswerDraftInput["answer_kind"],
+    choices,
+    minimum_number: optionalNumber("minimum_number"),
+    maximum_number: optionalNumber("maximum_number"),
+    earliest_date: optionalDate("earliest_date"),
+    latest_date: optionalDate("latest_date"),
     character_limit: characterLimit,
     allow_ai: Reflect.get(value, "allow_ai") === true,
     external_ai_consent: Reflect.get(value, "external_ai_consent") === true,

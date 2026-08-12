@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Answer Provenance & Drafting",
-  version: "0.27.0-alpha.1",
+  name: "Typed Application Answers",
+  version: "0.28.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -986,10 +986,30 @@ export type ApplicationAnswerStatus =
 export type ApplicationAnswerSource =
   "UNANSWERED" | "LIBRARY_REUSE" | "GOVERNED_AI" | "USER_REVIEWED" | "LEGACY";
 
+export type ApplicationAnswerKind =
+  | "EXACT"
+  | "SHORT_TEXT"
+  | "LONG_TEXT"
+  | "NUMBER"
+  | "DATE"
+  | "YES_NO"
+  | "MULTIPLE_CHOICE"
+  | "SALARY"
+  | "AVAILABILITY"
+  | "TECHNOLOGY_EXPERIENCE"
+  | "BEHAVIORAL"
+  | "EMPLOYER_SPECIFIC";
+
 export interface ApplicationAnswerDraftInput {
   application_id: string;
   question: string;
   canonical_field: string;
+  answer_kind: ApplicationAnswerKind;
+  choices: string[];
+  minimum_number?: number | null;
+  maximum_number?: number | null;
+  earliest_date?: string | null;
+  latest_date?: string | null;
   character_limit: number;
   allow_ai: boolean;
   external_ai_consent: boolean;
@@ -1005,6 +1025,8 @@ export interface ApplicationAnswer {
   question: string;
   normalized_question: string;
   canonical_field: string;
+  answer_kind: ApplicationAnswerKind;
+  validation_rules: Record<string, unknown>;
   answer?: string | null;
   status: ApplicationAnswerStatus;
   source_type: ApplicationAnswerSource;

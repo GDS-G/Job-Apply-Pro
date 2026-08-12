@@ -25,6 +25,7 @@ from job_apply_pro.domain.ai import (
 )
 from job_apply_pro.domain.applications import (
     ApplicationAnswerDraftRequest,
+    ApplicationAnswerKind,
     ApplicationAnswerPromotion,
     ApplicationAnswerReview,
     ApplicationAnswerStatus,
@@ -56,6 +57,7 @@ from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.core import CoreService
 from job_apply_pro.services.knowledge import (
     CandidateKnowledgeConflictError,
+    CandidateKnowledgeError,
     CandidateKnowledgeService,
 )
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
@@ -975,6 +977,136 @@ def test_governed_ai_answer_draft_records_model_evidence_and_requires_review(
     assert drafted.model_id == "fixture-answer-model"
     assert drafted.prompt_version == "1.0.0"
     assert drafted.limitations == ["Model-generated draft requires user review."]
+
+
+@pytest.mark.parametrize(
+    ("kind", "draft_options", "reviewed_value", "expected_value"),
+    [
+        (ApplicationAnswerKind.YES_NO, {}, "yes", "Yes"),
+        (
+            ApplicationAnswerKind.NUMBER,
+            {"minimum_number": 2, "maximum_number": 10},
+            "4.0",
+            "4",
+        ),
+        (
+            ApplicationAnswerKind.SALARY,
+            {"minimum_number": 50_000, "maximum_number": 200_000},
+            "$125,000",
+            "125000",
+        ),
+        (
+            ApplicationAnswerKind.DATE,
+            {"earliest_date": "2026-08-01", "latest_date": "2026-12-31"},
+            "2026-09-15",
+            "2026-09-15",
+        ),
+        (
+            ApplicationAnswerKind.MULTIPLE_CHOICE,
+            {"choices": ["Remote", "Hybrid", "On-site"]},
+            "Hybrid",
+            "Hybrid",
+        ),
+    ],
+)
+def test_typed_application_answer_validation_and_canonicalization(
+    session: Session,
+    tmp_path: Path,
+    kind: ApplicationAnswerKind,
+    draft_options: dict[str, object],
+    reviewed_value: str,
+    expected_value: str,
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id=f"typed-{kind.value}",
+            employer="Typed Fixture",
+            title="Engineer",
+            description_hash=hashlib.sha256(kind.value.encode()).hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id=f"typed-{kind.value}",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    drafted = service.draft_application_answer(
+        ApplicationAnswerDraftRequest.model_validate(
+            {
+                "application_id": application.id,
+                "question": f"Typed question {kind.value}?",
+                "canonical_field": f"typed.{kind.value.casefold()}",
+                "answer_kind": kind,
+                **draft_options,
+            }
+        )
+    )
+    assert drafted.answer_kind is kind
+    assert all(drafted.validation_rules.get(key) == value for key, value in draft_options.items())
+    reviewed = service.review_application_answer(
+        drafted.id,
+        ApplicationAnswerReview(
+            expected_revision=1,
+            answer=reviewed_value,
+            confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
+        ),
+    )
+    assert reviewed.answer == expected_value
+
+
+def test_typed_application_answer_rejects_invalid_constraints_and_values(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="typed-invalid",
+            employer="Typed Fixture",
+            title="Engineer",
+            description_hash=hashlib.sha256(b"typed-invalid").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="typed-invalid",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    with pytest.raises(CandidateKnowledgeError, match="choice"):
+        service.draft_application_answer(
+            ApplicationAnswerDraftRequest(
+                application_id=application.id,
+                question="Choose one.",
+                canonical_field="typed.choice",
+                answer_kind=ApplicationAnswerKind.MULTIPLE_CHOICE,
+            )
+        )
+    drafted = service.draft_application_answer(
+        ApplicationAnswerDraftRequest(
+            application_id=application.id,
+            question="Choose one.",
+            canonical_field="typed.choice",
+            answer_kind=ApplicationAnswerKind.MULTIPLE_CHOICE,
+            choices=["Remote", "Hybrid"],
+        )
+    )
+    with pytest.raises(CandidateKnowledgeConflictError, match="allowed choice"):
+        service.review_application_answer(
+            drafted.id,
+            ApplicationAnswerReview(
+                expected_revision=1,
+                answer="On-site",
+                confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
+            ),
+        )
 
 
 def test_tailored_document_requires_locked_evidence_and_exact_review(

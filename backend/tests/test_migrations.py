@@ -163,5 +163,7 @@ def test_answer_revision_migration_backfills_ciphertext_without_decryption(
         "user_edited",
         "reuse_permission",
         "updated_at",
+        "answer_kind",
+        "validation_rules_json",
     } <= application_answer_columns
     get_settings.cache_clear()

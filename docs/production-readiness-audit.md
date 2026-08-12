@@ -237,7 +237,7 @@ Source validation used the project Python 3.12 environment because the workstati
 
 Runtime source commit `99ccd90` produced the unsigned installer `Job-Apply-Pro-0.26.0-alpha.1-x64.exe`, 169,661,833 bytes, SHA-256 `60691381A8D37E53F17B2CA231D4540C8DFA462A3ADD26EEC0ECD9D98422AAEC`. The bundled backend executable is 18,451,571 bytes with SHA-256 `A647B9C80C0A6C1CFEE134964F643F6805CC3D6ECB7CC78D9861BE6387D2303E`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `97D2060C4B06C73887D00F84884644F1DF993A0D6079FFF1F27F0A397DA7263C`. All three report `NotSigned`, as expected without owner-provided release credentials. The packaged-backend smoke test passed. This evidence-only update does not change the packaged runtime.
 
-Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
+PR #52 merged the release to `main` as `f37fa31e8ef9f6dbfe66e69a6b13c3abb4c631be`. Pull-request CI run `31631826195` and Security run `31631826302` passed. Final-main CI run `31632415339` and Security run `31632415336` also passed on that exact merge commit, including frozen-backend packaging, smoke testing, unpacked Windows packaging, dependency auditing, secret scanning, and CodeQL.
 
 ### Answer Provenance & Drafting source validation
 
@@ -252,6 +252,12 @@ Runtime source commit `f7268d7` produced the unsigned installer `Job-Apply-Pro-0
 Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
 
 ## External launch evidence still required
+
+### Typed Application Answers source validation
+
+`Typed Application Answers v0.28.0-alpha.1` adds persisted answer kinds and deterministic constraints to the encrypted application-answer workflow. Multiple-choice options are bounded, non-empty, and unique; numeric/salary bounds and values must be finite; date/availability bounds and values must be real ISO calendar dates; yes/no, exact, and short-text values have explicit canonical forms and limits. Invalid reusable or model-drafted content does not become an accepted draft, and invalid operator review fails before promotion.
+
+Migration `20260812_0020` adds the kind, validation-rules JSON, and kind index while backfilling prior application answers as `SHORT_TEXT`. Desktop inputs, IPC validation, Python contracts, persistence, public API output, governed-AI context, promotion provenance, and tests move together. ADR-0037 records the decision. All 119 backend tests passed at 83.21% coverage, all 16 desktop tests passed, strict formatting/lint/type checks passed, the migration round-trip passed, and the production Electron build completed. Package hashes and protected GitHub evidence will be recorded after the runtime commit is fixed.
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
 2. A signed current-version installer whose Authenticode subject and SHA-256 checksum match the release record.

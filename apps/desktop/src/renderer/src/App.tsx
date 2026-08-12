@@ -881,6 +881,21 @@ export function App() {
       application_id: String(form.get("application_id")),
       question: String(form.get("question")),
       canonical_field: String(form.get("canonical_field")),
+      answer_kind: String(
+        form.get("answer_kind"),
+      ) as ApplicationAnswerDraftInput["answer_kind"],
+      choices: String(form.get("choices") ?? "")
+        .split("\n")
+        .map((choice) => choice.trim())
+        .filter(Boolean),
+      minimum_number: form.get("minimum_number")
+        ? Number(form.get("minimum_number"))
+        : null,
+      maximum_number: form.get("maximum_number")
+        ? Number(form.get("maximum_number"))
+        : null,
+      earliest_date: String(form.get("earliest_date") ?? "") || null,
+      latest_date: String(form.get("latest_date") ?? "") || null,
       character_limit: Number(form.get("character_limit")),
       allow_ai: form.get("allow_ai") === "on",
       external_ai_consent: form.get("external_ai_consent") === "on",
@@ -1348,7 +1363,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Answer Provenance &amp; Drafting v0.27.0-alpha.1</strong>
+              <strong>Typed Application Answers v0.28.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2084,6 +2099,45 @@ export function App() {
                   />
                 </label>
                 <label>
+                  Answer kind
+                  <select name="answer_kind" defaultValue="SHORT_TEXT">
+                    <option value="EXACT">Exact value</option>
+                    <option value="SHORT_TEXT">Short text</option>
+                    <option value="LONG_TEXT">Long text</option>
+                    <option value="NUMBER">Number</option>
+                    <option value="DATE">Date</option>
+                    <option value="YES_NO">Yes / No</option>
+                    <option value="MULTIPLE_CHOICE">Multiple choice</option>
+                    <option value="SALARY">Salary</option>
+                    <option value="AVAILABILITY">Availability date</option>
+                    <option value="TECHNOLOGY_EXPERIENCE">
+                      Technology experience
+                    </option>
+                    <option value="BEHAVIORAL">Behavioral response</option>
+                    <option value="EMPLOYER_SPECIFIC">Employer specific</option>
+                  </select>
+                </label>
+                <label>
+                  Allowed choices (one per line; multiple choice only)
+                  <textarea name="choices" maxLength={5000} />
+                </label>
+                <label>
+                  Minimum number (number / salary only)
+                  <input name="minimum_number" type="number" step="any" />
+                </label>
+                <label>
+                  Maximum number (number / salary only)
+                  <input name="maximum_number" type="number" step="any" />
+                </label>
+                <label>
+                  Earliest date (date / availability only)
+                  <input name="earliest_date" type="date" />
+                </label>
+                <label>
+                  Latest date (date / availability only)
+                  <input name="latest_date" type="date" />
+                </label>
+                <label>
                   Character limit
                   <input
                     name="character_limit"
@@ -2135,8 +2189,9 @@ export function App() {
                           {answer.revision}
                         </b>
                         <span>
-                          Confidence {Math.round(answer.confidence * 100)}% ·
-                          Limit {answer.character_limit}
+                          {answer.answer_kind.replaceAll("_", " ")} · Confidence{" "}
+                          {Math.round(answer.confidence * 100)}% · Limit{" "}
+                          {answer.character_limit}
                         </span>
                         {answer.model_id ? (
                           <small>

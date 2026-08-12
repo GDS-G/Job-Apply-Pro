@@ -24,6 +24,7 @@ from job_apply_pro.domain.ai import (
 from job_apply_pro.domain.applications import (
     ApplicationAnswer,
     ApplicationAnswerDraftRequest,
+    ApplicationAnswerKind,
     ApplicationAnswerPromotion,
     ApplicationAnswerRecord,
     ApplicationAnswerReview,
@@ -1006,6 +1007,105 @@ class CandidateKnowledgeService:
     def _normalized_question(question: str) -> str:
         return " ".join(match.group(0).casefold() for match in TOKEN_PATTERN.finditer(question))
 
+    @staticmethod
+    def _answer_validation_rules(command: ApplicationAnswerDraftRequest) -> dict[str, object]:
+        choices = [choice.strip() for choice in command.choices]
+        if any(not choice or len(choice) > 500 for choice in choices):
+            raise CandidateKnowledgeError("Answer choices must contain 1 to 500 characters")
+        if len({choice.casefold() for choice in choices}) != len(choices):
+            raise CandidateKnowledgeError("Answer choices must be unique")
+        if command.answer_kind is ApplicationAnswerKind.MULTIPLE_CHOICE and not choices:
+            raise CandidateKnowledgeError("Multiple-choice answers require at least one choice")
+        if command.answer_kind is not ApplicationAnswerKind.MULTIPLE_CHOICE and choices:
+            raise CandidateKnowledgeError("Choices are valid only for multiple-choice answers")
+        if (
+            command.minimum_number is not None
+            and command.maximum_number is not None
+            and command.minimum_number > command.maximum_number
+        ):
+            raise CandidateKnowledgeError("Minimum number cannot exceed maximum number")
+        if any(
+            bound is not None and not math.isfinite(bound)
+            for bound in (command.minimum_number, command.maximum_number)
+        ):
+            raise CandidateKnowledgeError("Numeric bounds must be finite")
+        if command.answer_kind not in {
+            ApplicationAnswerKind.NUMBER,
+            ApplicationAnswerKind.SALARY,
+        } and (command.minimum_number is not None or command.maximum_number is not None):
+            raise CandidateKnowledgeError("Numeric bounds require a numeric or salary answer")
+        try:
+            earliest_date = (
+                date.fromisoformat(command.earliest_date) if command.earliest_date else None
+            )
+            latest_date = date.fromisoformat(command.latest_date) if command.latest_date else None
+        except ValueError as error:
+            raise CandidateKnowledgeError("Date bounds must be valid calendar dates") from error
+        if earliest_date and latest_date and earliest_date > latest_date:
+            raise CandidateKnowledgeError("Earliest date cannot follow latest date")
+        if command.answer_kind not in {
+            ApplicationAnswerKind.DATE,
+            ApplicationAnswerKind.AVAILABILITY,
+        } and (command.earliest_date or command.latest_date):
+            raise CandidateKnowledgeError("Date bounds require a date or availability answer")
+        return {
+            "choices": choices,
+            "minimum_number": command.minimum_number,
+            "maximum_number": command.maximum_number,
+            "earliest_date": command.earliest_date,
+            "latest_date": command.latest_date,
+        }
+
+    @staticmethod
+    def _validate_typed_answer(
+        kind: ApplicationAnswerKind, answer: str, rules: dict[str, object]
+    ) -> str:
+        value = answer.strip()
+        if kind is ApplicationAnswerKind.EXACT and ("\n" in value or len(value) > 500):
+            raise CandidateKnowledgeConflictError(
+                "Exact answers must be a single value of at most 500 characters"
+            )
+        if kind is ApplicationAnswerKind.SHORT_TEXT and len(value) > 500:
+            raise CandidateKnowledgeConflictError("Short-text answers cannot exceed 500 characters")
+        if kind is ApplicationAnswerKind.YES_NO:
+            normalized = value.casefold()
+            if normalized not in {"yes", "no"}:
+                raise CandidateKnowledgeConflictError("Yes/no answers must be Yes or No")
+            return "Yes" if normalized == "yes" else "No"
+        if kind in {ApplicationAnswerKind.NUMBER, ApplicationAnswerKind.SALARY}:
+            try:
+                numeric = float(value.replace(",", "").replace("$", ""))
+            except ValueError as error:
+                raise CandidateKnowledgeConflictError(
+                    "Numeric answers must contain a number"
+                ) from error
+            if not math.isfinite(numeric):
+                raise CandidateKnowledgeConflictError("Numeric answers must be finite")
+            minimum = rules.get("minimum_number")
+            maximum = rules.get("maximum_number")
+            if isinstance(minimum, (int, float)) and numeric < minimum:
+                raise CandidateKnowledgeConflictError(f"Answer must be at least {minimum:g}")
+            if isinstance(maximum, (int, float)) and numeric > maximum:
+                raise CandidateKnowledgeConflictError(f"Answer must be at most {maximum:g}")
+            return format(numeric, ".15g")
+        if kind in {ApplicationAnswerKind.DATE, ApplicationAnswerKind.AVAILABILITY}:
+            try:
+                parsed = date.fromisoformat(value)
+            except ValueError as error:
+                raise CandidateKnowledgeConflictError("Date answers must use YYYY-MM-DD") from error
+            earliest = rules.get("earliest_date")
+            latest = rules.get("latest_date")
+            if isinstance(earliest, str) and parsed < date.fromisoformat(earliest):
+                raise CandidateKnowledgeConflictError(f"Date cannot be earlier than {earliest}")
+            if isinstance(latest, str) and parsed > date.fromisoformat(latest):
+                raise CandidateKnowledgeConflictError(f"Date cannot be later than {latest}")
+            return parsed.isoformat()
+        if kind is ApplicationAnswerKind.MULTIPLE_CHOICE:
+            choices = rules.get("choices", [])
+            if not isinstance(choices, list) or value not in choices:
+                raise CandidateKnowledgeConflictError("Answer must exactly match an allowed choice")
+        return value
+
     def draft_application_answer(self, command: ApplicationAnswerDraftRequest) -> ApplicationAnswer:
         application = self._applications.get(command.application_id)
         if application is None:
@@ -1015,6 +1115,7 @@ class CandidateKnowledgeService:
             raise LookupError(f"Job {application.job_id} was not found")
         self._profile(application.profile_id)
         normalized = self._normalized_question(command.question)
+        validation_rules = self._answer_validation_rules(command)
         retrieved = self.retrieve(
             application.profile_id,
             RetrievalQuery(
@@ -1042,6 +1143,14 @@ class CandidateKnowledgeService:
         generated_value: str | None = None
         if library is not None:
             answer_value = library.content.split("\n", 1)[-1][: command.character_limit]
+            try:
+                answer_value = self._validate_typed_answer(
+                    command.answer_kind, answer_value, validation_rules
+                )
+            except CandidateKnowledgeConflictError:
+                answer_value = None
+                library = None
+        if library is not None:
             source_type = ApplicationAnswerSource.LIBRARY_REUSE
             status = ApplicationAnswerStatus.DRAFTED
             source_answer_id = library.source_id
@@ -1061,6 +1170,8 @@ class CandidateKnowledgeService:
                             input_data={
                                 "question": command.question,
                                 "canonical_field": command.canonical_field,
+                                "answer_kind": command.answer_kind.value,
+                                "validation_rules": validation_rules,
                                 "employer": job.employer,
                                 "job_title": job.title,
                                 "character_limit": command.character_limit,
@@ -1104,7 +1215,11 @@ class CandidateKnowledgeService:
                         raise CandidateKnowledgeConflictError(
                             "AI answer did not cite only retrieved candidate evidence"
                         )
-                    generated_value = candidate[: command.character_limit]
+                    generated_value = self._validate_typed_answer(
+                        command.answer_kind,
+                        candidate[: command.character_limit],
+                        validation_rules,
+                    )
                     answer_value = generated_value
                     evidence_ids = requested_ids
                     source_type = ApplicationAnswerSource.GOVERNED_AI
@@ -1139,6 +1254,8 @@ class CandidateKnowledgeService:
                 normalized.encode(), context=f"application-answer:{answer_id}:normalized"
             ),
             canonical_field=command.canonical_field,
+            answer_kind=command.answer_kind,
+            validation_rules=validation_rules,
             encrypted_value=self._cipher.encrypt_bytes(
                 (answer_value or "").encode(), context=f"application-answer:{answer_id}:value"
             ),
@@ -1187,7 +1304,10 @@ class CandidateKnowledgeService:
                 "Application answer changed; refresh before reviewing"
             )
         self._validate_answer_evidence(record.profile_id, command.evidence_claim_ids)
-        if len(command.answer) > record.character_limit:
+        typed_answer = self._validate_typed_answer(
+            record.answer_kind, command.answer, record.validation_rules
+        )
+        if len(typed_answer) > record.character_limit:
             raise CandidateKnowledgeConflictError(
                 f"Reviewed answer exceeds the {record.character_limit}-character limit"
             )
@@ -1198,14 +1318,14 @@ class CandidateKnowledgeService:
             update={
                 "revision": record.revision + 1,
                 "encrypted_value": self._cipher.encrypt_bytes(
-                    command.answer.encode(), context=f"application-answer:{answer_id}:value"
+                    typed_answer.encode(), context=f"application-answer:{answer_id}:value"
                 ),
                 "status": ApplicationAnswerStatus.REVIEWED,
                 "source_type": ApplicationAnswerSource.USER_REVIEWED,
                 "evidence_claim_ids": command.evidence_claim_ids,
                 "confidence": command.confidence,
-                "character_limit_applied": len(command.answer) == record.character_limit,
-                "user_edited": command.answer != original,
+                "character_limit_applied": len(typed_answer) == record.character_limit,
+                "user_edited": typed_answer != original,
                 "reuse_permission": command.reuse_permission,
                 "limitations": [],
                 "updated_at": utc_now(),
@@ -1258,6 +1378,8 @@ class CandidateKnowledgeService:
             provenance={
                 "source": "REVIEWED_APPLICATION_PROMOTION",
                 "application_answer_id": record.id,
+                "answer_kind": record.answer_kind.value,
+                "validation_rules": record.validation_rules,
                 "policy_version": record.policy_version,
             },
             created_at=now,
@@ -1334,6 +1456,8 @@ class CandidateKnowledgeService:
             question=question,
             normalized_question=normalized,
             canonical_field=record.canonical_field,
+            answer_kind=record.answer_kind,
+            validation_rules=record.validation_rules,
             answer=answer,
             status=record.status,
             source_type=record.source_type,

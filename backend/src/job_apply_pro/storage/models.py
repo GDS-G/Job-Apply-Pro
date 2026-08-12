@@ -225,6 +225,8 @@ class ApplicationAnswerRow(Base):
     encrypted_question: Mapped[str | None] = mapped_column(Text)
     encrypted_normalized_question: Mapped[str | None] = mapped_column(Text)
     canonical_field: Mapped[str] = mapped_column(String(160))
+    answer_kind: Mapped[str] = mapped_column(String(40), default="SHORT_TEXT")
+    validation_rules_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     encrypted_value: Mapped[str] = mapped_column(Text)
     provenance: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(40), default="LEGACY_REVIEW_REQUIRED")
