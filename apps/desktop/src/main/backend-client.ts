@@ -27,6 +27,7 @@ import type {
   OAuthAuthorizationRequest,
   OAuthAuthorizationState,
   ProviderConfigurationStatus,
+  ProviderCalendarSyncResult,
   ProviderMessageSyncResult,
   PortalRunSnapshot,
   PortalAdapterDefinition,
@@ -35,6 +36,7 @@ import type {
   SupervisedPortalRunCreate,
   SupervisedPortalRunSnapshot,
   SupportDiagnostics,
+  SyncedCalendarEvent,
   TailoredDocumentPreview,
   TailoredDocumentRequest,
   TailoredDocumentResult,
@@ -422,6 +424,20 @@ export class BackendClient {
       { method: "POST" },
       120_000,
     );
+  }
+
+  syncProviderCalendar(
+    provider: IntegrationProvider,
+  ): Promise<ProviderCalendarSyncResult> {
+    return this.request(
+      `/communications/providers/${encodeURIComponent(provider)}/calendar/sync`,
+      { method: "POST" },
+      120_000,
+    );
+  }
+
+  listSyncedCalendarEvents(): Promise<SyncedCalendarEvent[]> {
+    return this.request("/communications/calendar/events");
   }
 
   listCommunicationRecords(): Promise<CommunicationRecord[]> {

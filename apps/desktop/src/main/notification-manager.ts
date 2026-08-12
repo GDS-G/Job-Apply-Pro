@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   BackupManifest,
   ChallengeSessionSnapshot,
@@ -7,6 +9,7 @@ import type {
   DesktopNotificationStatus,
   DesktopUpdateStatus,
   FollowUp,
+  SyncedCalendarEvent,
   WorkflowRunSnapshot,
   WorkflowState,
 } from "@job-apply-pro/contracts";
@@ -21,6 +24,7 @@ export interface NotificationSourceSnapshot {
   challenges: ChallengeSessionSnapshot[];
   communications: CommunicationRecord[];
   followUps: FollowUp[];
+  calendarEvents: SyncedCalendarEvent[];
   backups: BackupManifest[];
   updateStatus: DesktopUpdateStatus;
 }
@@ -143,6 +147,7 @@ function item(
 
 export function collectDesktopNotifications(
   snapshot: NotificationSourceSnapshot,
+  now = new Date(),
 ): DesktopNotificationItem[] {
   const notifications: DesktopNotificationItem[] = [];
   const actionableChallengeStatuses = new Set([
@@ -292,6 +297,39 @@ export function collectDesktopNotifications(
         "COMMUNICATIONS",
         "warning",
         followUp.due_at,
+      ),
+    );
+  }
+
+  const interviewSignal =
+    /\b(interview|phone screen|technical screen|recruiter (?:call|screen)|hiring manager)\b/i;
+  for (const calendarEvent of snapshot.calendarEvents) {
+    if (!interviewSignal.test(calendarEvent.event.title)) continue;
+    const millisecondsUntilStart =
+      Date.parse(calendarEvent.event.start_at) - now.getTime();
+    if (
+      millisecondsUntilStart <= 0 ||
+      millisecondsUntilStart > 24 * 60 * 60 * 1_000
+    ) {
+      continue;
+    }
+    const withinOneHour = millisecondsUntilStart <= 60 * 60 * 1_000;
+    const eventFingerprint = createHash("sha256")
+      .update(
+        `${calendarEvent.provider}\0${calendarEvent.event.provider_event_id}`,
+        "utf8",
+      )
+      .digest("hex");
+    notifications.push(
+      item(
+        `calendar:${eventFingerprint}:${withinOneHour ? "1h" : "24h"}`,
+        "INTERVIEW_REMINDER",
+        withinOneHour
+          ? "Interview starts within one hour"
+          : "Interview is coming up",
+        "COMMUNICATIONS",
+        withinOneHour ? "warning" : "info",
+        calendarEvent.synced_at,
       ),
     );
   }

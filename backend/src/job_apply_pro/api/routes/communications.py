@@ -29,12 +29,14 @@ from job_apply_pro.domain.communications import (
     OAuthAuthorizationState,
     OAuthCallbackResult,
     OutboundDraft,
+    ProviderCalendarSyncResult,
     ProviderConfigurationImport,
     ProviderConfigurationSource,
     ProviderConfigurationStatus,
     ProviderMessageSyncResult,
     SchedulingPlanRequest,
     SchedulingRecommendation,
+    SyncedCalendarEvent,
 )
 from job_apply_pro.integrations.communications import (
     CalendarProviderAdapter,
@@ -369,6 +371,33 @@ def sync_provider_messages(
         ) from error
     except ProviderMutationError as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+
+
+@router.post(
+    "/providers/{provider}/calendar/sync",
+    response_model=ProviderCalendarSyncResult,
+)
+def sync_provider_calendar(
+    provider: IntegrationProvider,
+    service: ServiceDependency,
+) -> ProviderCalendarSyncResult:
+    try:
+        return service.sync_provider_calendar(provider)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    except ProviderNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+    except ProviderMutationError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+
+
+@router.get("/calendar/events", response_model=list[SyncedCalendarEvent])
+def list_synced_calendar_events(service: ServiceDependency) -> list[SyncedCalendarEvent]:
+    return service.list_synced_calendar_events()
 
 
 @router.post("/drafts", response_model=OutboundDraft, status_code=201)

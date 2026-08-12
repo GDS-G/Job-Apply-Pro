@@ -1,7 +1,9 @@
+import hashlib
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.communications import (
@@ -19,6 +21,7 @@ from job_apply_pro.domain.communications import (
     OutboundDraft,
     OutboundPolicy,
     ProviderSyncState,
+    SyncedCalendarEvent,
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.storage.models import (
@@ -27,6 +30,7 @@ from job_apply_pro.storage.models import (
     CommunicationRecordRow,
     FollowUpRow,
     OutboundDraftRow,
+    ProviderCalendarEventRow,
     ProviderSyncStateRow,
 )
 
@@ -153,6 +157,96 @@ class CommunicationRepository:
             updated_at=now,
         )
 
+    def reconcile_calendar_events(
+        self,
+        provider: IntegrationProvider,
+        binding_fingerprint: str,
+        events: list[CalendarEventSnapshot],
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> tuple[list[SyncedCalendarEvent], int]:
+        now = datetime.now(UTC)
+        event_keys = {
+            hashlib.sha256(f"{provider.value}\0{event.provider_event_id}".encode()).hexdigest()
+            for event in events
+        }
+        existing_rows = self._session.scalars(
+            select(ProviderCalendarEventRow).where(
+                ProviderCalendarEventRow.provider == provider.value,
+            )
+        ).all()
+        existing_by_id = {row.event_fingerprint: row for row in existing_rows}
+        removed_count = sum(row.event_fingerprint not in event_keys for row in existing_rows)
+        if existing_rows:
+            stale_ids = [row.id for row in existing_rows if row.event_fingerprint not in event_keys]
+            if stale_ids:
+                self._session.execute(
+                    delete(ProviderCalendarEventRow).where(
+                        ProviderCalendarEventRow.id.in_(stale_ids)
+                    )
+                )
+        synchronized: list[SyncedCalendarEvent] = []
+        for event in events:
+            event_fingerprint = hashlib.sha256(
+                f"{provider.value}\0{event.provider_event_id}".encode()
+            ).hexdigest()
+            encrypted = self._cipher.encrypt_json(
+                event.model_dump(mode="json"),
+                context=f"calendar-event:{provider.value}:{event_fingerprint}:payload",
+            )
+            row = existing_by_id.get(event_fingerprint)
+            if row is None:
+                row = ProviderCalendarEventRow(
+                    id=str(uuid4()),
+                    provider=provider.value,
+                    event_fingerprint=event_fingerprint,
+                    binding_fingerprint=binding_fingerprint,
+                    starts_at=event.start_at,
+                    ends_at=event.end_at,
+                    encrypted_event=encrypted,
+                    synced_at=now,
+                )
+                self._session.add(row)
+            else:
+                row.starts_at = event.start_at
+                row.ends_at = event.end_at
+                row.binding_fingerprint = binding_fingerprint
+                row.encrypted_event = encrypted
+                row.synced_at = now
+            synchronized.append(SyncedCalendarEvent(provider=provider, event=event, synced_at=now))
+        self._session.commit()
+        return synchronized, removed_count
+
+    def list_calendar_events(
+        self,
+        binding_fingerprints: dict[IntegrationProvider, str],
+        *,
+        start_at: datetime,
+        end_at: datetime,
+    ) -> list[SyncedCalendarEvent]:
+        if not binding_fingerprints:
+            return []
+        rows = self._session.scalars(
+            select(ProviderCalendarEventRow)
+            .where(
+                ProviderCalendarEventRow.starts_at < end_at,
+                ProviderCalendarEventRow.ends_at > start_at,
+                or_(
+                    *(
+                        and_(
+                            ProviderCalendarEventRow.provider == provider.value,
+                            ProviderCalendarEventRow.binding_fingerprint == fingerprint,
+                        )
+                        for provider, fingerprint in binding_fingerprints.items()
+                    )
+                ),
+            )
+            .order_by(ProviderCalendarEventRow.starts_at)
+            .limit(1_000)
+        ).all()
+        return [self._calendar_event(row) for row in rows]
+
     def save_draft(self, draft: OutboundDraft) -> OutboundDraft:
         self._session.add(
             OutboundDraftRow(
@@ -179,6 +273,17 @@ class CommunicationRepository:
         )
         self._session.commit()
         return draft
+
+    def _calendar_event(self, row: ProviderCalendarEventRow) -> SyncedCalendarEvent:
+        payload = self._cipher.decrypt_json(
+            row.encrypted_event,
+            context=f"calendar-event:{row.provider}:{row.event_fingerprint}:payload",
+        )
+        return SyncedCalendarEvent(
+            provider=IntegrationProvider(row.provider),
+            event=CalendarEventSnapshot.model_validate(payload),
+            synced_at=_utc(row.synced_at),
+        )
 
     def get_draft(self, draft_id: str) -> OutboundDraft | None:
         row = self._session.get(OutboundDraftRow, draft_id)

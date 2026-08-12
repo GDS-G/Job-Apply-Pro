@@ -10,8 +10,8 @@ def test_health_reports_portal_vertical_slice_build() -> None:
     assert response.json() == {
         "status": "ok",
         "service": "job-apply-pro-backend",
-        "version": "0.20.0-alpha.1",
-        "build": "Incremental Provider Sync",
+        "version": "0.21.0-alpha.1",
+        "build": "Calendar Interview Awareness",
         "environment": "development",
     }
 

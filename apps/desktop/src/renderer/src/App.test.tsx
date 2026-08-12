@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Incremental Provider Sync v0.20.0-alpha.1"),
+      screen.getByText("Calendar Interview Awareness v0.21.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -105,6 +105,43 @@ describe("App", () => {
       await screen.findByText(
         /incremental sync fetched 2, imported 1, already present 1/i,
       ),
+    ).toBeInTheDocument();
+  });
+
+  it("syncs a connected calendar and reports reconciliation counts", async () => {
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "listIntegrationHealth",
+    ).mockResolvedValue([
+      {
+        provider: "GOOGLE_CALENDAR",
+        status: "CONNECTED",
+        message: "Provider adapter is connected",
+        read_enabled: true,
+        write_enabled: false,
+        granted_scopes: ["calendar.readonly"],
+      },
+    ]);
+    const sync = vi
+      .spyOn(window.jobApplyPro.workbench, "syncProviderCalendar")
+      .mockResolvedValue({
+        provider: "GOOGLE_CALENDAR",
+        fetched_count: 3,
+        stored_count: 3,
+        removed_count: 1,
+        window_start: "2026-08-10T00:00:00Z",
+        window_end: "2026-10-10T00:00:00Z",
+        synced_at: "2026-08-11T00:00:00Z",
+      });
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /sync calendar/i }),
+    );
+
+    expect(sync).toHaveBeenCalledWith("GOOGLE_CALENDAR");
+    expect(
+      await screen.findByText(/fetched 3, stored 3, removed 1 stale events/i),
     ).toBeInTheDocument();
   });
 

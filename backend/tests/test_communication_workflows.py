@@ -43,7 +43,11 @@ from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.communications import CommunicationService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
 from job_apply_pro.storage.database import get_session
-from job_apply_pro.storage.models import CommunicationRecordRow, ProviderSyncStateRow
+from job_apply_pro.storage.models import (
+    CommunicationRecordRow,
+    ProviderCalendarEventRow,
+    ProviderSyncStateRow,
+)
 
 
 def _service(
@@ -51,6 +55,7 @@ def _service(
     *,
     message_provider: FixtureMessageProvider | None = None,
     calendar_provider: FixtureCalendarProvider | None = None,
+    provider_configs: dict[IntegrationProvider, ProviderConnectionConfig] | None = None,
 ) -> CommunicationService:
     repository = CommunicationRepository(session, SensitiveDataCipher(StaticKeyProvider(b"c" * 32)))
     message_adapters: dict[IntegrationProvider, MessageProviderAdapter] | None = (
@@ -65,6 +70,7 @@ def _service(
         repository,
         message_adapters=message_adapters,
         calendar_adapters=calendar_adapters,
+        provider_configs=provider_configs,
     )
 
 
@@ -296,6 +302,128 @@ def test_provider_message_sync_api_returns_sanitized_counts(
             "cursor_updated_at": response.json()["cursor_updated_at"],
         }
         assert len(response.json()["record_ids"]) == 1
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_calendar_sync_reconciles_encrypted_local_snapshot(session: Session) -> None:
+    anchor = datetime(2026, 8, 11, 16, tzinfo=UTC)
+    first_event = CalendarEventSnapshot(
+        provider_event_id="calendar-1",
+        title="Technical interview with Private Employer",
+        start_at=anchor + timedelta(days=1),
+        end_at=anchor + timedelta(days=1, hours=1),
+        time_zone="UTC",
+        attendees=["candidate@example.test"],
+        conferencing_url="https://meet.example.test/private",
+    )
+    stale_event = CalendarEventSnapshot(
+        provider_event_id="calendar-stale",
+        title="Recruiter call",
+        start_at=anchor + timedelta(days=2),
+        end_at=anchor + timedelta(days=2, hours=1),
+        time_zone="UTC",
+    )
+    adapter = FixtureCalendarProvider(
+        IntegrationProvider.GOOGLE_CALENDAR,
+        [first_event, stale_event],
+    )
+    service = _service(session, calendar_provider=adapter)
+
+    initial = service.sync_provider_calendar(IntegrationProvider.GOOGLE_CALENDAR, now=anchor)
+    adapter.events = [first_event.model_copy(update={"title": "Updated technical interview"})]
+    reconciled = service.sync_provider_calendar(IntegrationProvider.GOOGLE_CALENDAR, now=anchor)
+    stored = service.list_synced_calendar_events(now=anchor)
+
+    assert initial.fetched_count == initial.stored_count == 2
+    assert initial.removed_count == 0
+    assert reconciled.fetched_count == reconciled.stored_count == 1
+    assert reconciled.removed_count == 1
+    assert [item.event.title for item in stored] == ["Updated technical interview"]
+    rows = session.scalars(select(ProviderCalendarEventRow)).all()
+    assert len(rows) == 1
+    assert "Updated technical interview" not in rows[0].encrypted_event
+
+
+def test_calendar_snapshot_is_hidden_after_account_binding_changes(session: Session) -> None:
+    anchor = datetime(2026, 8, 11, 16, tzinfo=UTC)
+    adapter = FixtureCalendarProvider(
+        IntegrationProvider.GOOGLE_CALENDAR,
+        [
+            CalendarEventSnapshot(
+                provider_event_id="calendar-account-bound",
+                title="Interview",
+                start_at=anchor + timedelta(days=1),
+                end_at=anchor + timedelta(days=1, hours=1),
+                time_zone="UTC",
+            )
+        ],
+    )
+    first = _service(
+        session,
+        calendar_provider=adapter,
+        provider_configs={
+            IntegrationProvider.GOOGLE_CALENDAR: ProviderConnectionConfig(
+                provider=IntegrationProvider.GOOGLE_CALENDAR,
+                credential_reference="oauth:google-calendar:first",
+                account_hint="first@example.test",
+            )
+        },
+    )
+    first.sync_provider_calendar(IntegrationProvider.GOOGLE_CALENDAR, now=anchor)
+    assert len(first.list_synced_calendar_events(now=anchor)) == 1
+
+    second = _service(
+        session,
+        calendar_provider=adapter,
+        provider_configs={
+            IntegrationProvider.GOOGLE_CALENDAR: ProviderConnectionConfig(
+                provider=IntegrationProvider.GOOGLE_CALENDAR,
+                credential_reference="oauth:google-calendar:second",
+                account_hint="second@example.test",
+            )
+        },
+    )
+    assert second.list_synced_calendar_events(now=anchor) == []
+
+
+def test_calendar_sync_api_returns_only_sanitized_counts(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    anchor = datetime.now(UTC).replace(microsecond=0)
+    adapter = FixtureCalendarProvider(
+        IntegrationProvider.GOOGLE_CALENDAR,
+        [
+            CalendarEventSnapshot(
+                provider_event_id="calendar-private-id",
+                title="Interview with Private Employer",
+                start_at=anchor + timedelta(days=1),
+                end_at=anchor + timedelta(days=1, hours=1),
+                time_zone="UTC",
+                attendees=["candidate@example.test"],
+            )
+        ],
+    )
+    service = _service(session, calendar_provider=adapter)
+    monkeypatch.setenv("JAP_API_TOKEN", "calendar-sync-token")
+    get_settings.cache_clear()
+    app = create_app()
+    app.dependency_overrides[get_communication_service] = lambda: service
+    app.dependency_overrides[get_session] = lambda: session
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/api/v1/communications/providers/GOOGLE_CALENDAR/calendar/sync",
+            headers={"X-Job-Apply-Pro-Token": "calendar-sync-token"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["provider"] == "GOOGLE_CALENDAR"
+        assert payload["fetched_count"] == payload["stored_count"] == 1
+        assert payload["removed_count"] == 0
+        assert "calendar-private-id" not in response.text
+        assert "Private Employer" not in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Incremental Provider Sync",
-  version: "0.20.0-alpha.1",
+  name: "Calendar Interview Awareness",
+  version: "0.21.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -574,6 +574,33 @@ export interface ProviderMessageSyncResult {
   cursor_updated_at: string;
 }
 
+export interface CalendarEventSnapshot {
+  provider_event_id: string;
+  title: string;
+  start_at: string;
+  end_at: string;
+  time_zone: string;
+  attendees: string[];
+  conferencing_url?: string | null;
+  location?: string | null;
+}
+
+export interface SyncedCalendarEvent {
+  provider: IntegrationProvider;
+  event: CalendarEventSnapshot;
+  synced_at: string;
+}
+
+export interface ProviderCalendarSyncResult {
+  provider: IntegrationProvider;
+  fetched_count: number;
+  stored_count: number;
+  removed_count: number;
+  window_start: string;
+  window_end: string;
+  synced_at: string;
+}
+
 export interface DailyCommunicationSummary {
   generated_at: string;
   analyzed_messages: number;
@@ -608,6 +635,7 @@ export type DesktopNotificationKind =
   | "SESSION_EXPIRED"
   | "RECRUITER_RESPONSE"
   | "INTERVIEW_REQUEST"
+  | "INTERVIEW_REMINDER"
   | "OFFER_RECEIVED"
   | "FOLLOW_UP_DUE"
   | "BACKUP_FAILED"
@@ -1185,6 +1213,10 @@ export interface DesktopBridge {
     syncProviderMessages(
       provider: IntegrationProvider,
     ): Promise<ProviderMessageSyncResult>;
+    syncProviderCalendar(
+      provider: IntegrationProvider,
+    ): Promise<ProviderCalendarSyncResult>;
+    listSyncedCalendarEvents(): Promise<SyncedCalendarEvent[]>;
     listCommunicationRecords(): Promise<CommunicationRecord[]>;
     getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
     getDesktopNotificationStatus(): Promise<DesktopNotificationStatus>;

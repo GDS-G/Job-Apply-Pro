@@ -562,6 +562,16 @@ export function registerWorkbenchIpc(
         integrationProvider(providerValue),
       ),
   );
+  ipcMain.handle(
+    "communications:calendar-sync",
+    (_event, providerValue: unknown) =>
+      supervisor.client.syncProviderCalendar(
+        integrationProvider(providerValue),
+      ),
+  );
+  ipcMain.handle("communications:calendar-events", () =>
+    supervisor.client.listSyncedCalendarEvents(),
+  );
   ipcMain.handle("communications:records", () =>
     supervisor.client.listCommunicationRecords(),
   );

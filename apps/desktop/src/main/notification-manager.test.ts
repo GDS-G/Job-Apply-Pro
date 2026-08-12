@@ -6,6 +6,7 @@ import type {
   CommunicationRecord,
   DesktopNotificationItem,
   FollowUp,
+  SyncedCalendarEvent,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
 
@@ -90,6 +91,7 @@ function sourceSnapshot(): NotificationSourceSnapshot {
         updated_at: "2026-08-11T14:00:00Z",
       } satisfies FollowUp,
     ],
+    calendarEvents: [],
     backups: [
       {
         id: "backup-1",
@@ -99,7 +101,7 @@ function sourceSnapshot(): NotificationSourceSnapshot {
     ],
     updateStatus: {
       state: "ERROR",
-      current_version: "0.20.0-alpha.1",
+      current_version: "0.21.0-alpha.1",
       message: "Private update diagnostic",
       checked_at: "2026-08-11T16:00:00Z",
     },
@@ -161,6 +163,40 @@ describe("desktop notification collection", () => {
         ({ title }) => title === "Assessment deadline is approaching",
       ),
     ).toBe(true);
+  });
+
+  it("creates privacy-safe reminders from locally synced interview events", () => {
+    const snapshot = sourceSnapshot();
+    snapshot.calendarEvents = [
+      {
+        provider: "GOOGLE_CALENDAR",
+        event: {
+          provider_event_id: "private-provider-event-id",
+          title: "Technical interview with Secret Employer",
+          start_at: "2026-08-11T16:45:00Z",
+          end_at: "2026-08-11T17:45:00Z",
+          time_zone: "UTC",
+          attendees: ["private@example.invalid"],
+          conferencing_url: "https://meet.example.invalid/private",
+          location: "Private room",
+        },
+        synced_at: "2026-08-11T16:00:00Z",
+      } satisfies SyncedCalendarEvent,
+    ];
+
+    const notifications = collectDesktopNotifications(
+      snapshot,
+      new Date("2026-08-11T16:15:00Z"),
+    );
+    const reminder = notifications.find(
+      ({ kind }) => kind === "INTERVIEW_REMINDER",
+    );
+    expect(reminder?.title).toBe("Interview starts within one hour");
+    const rendered = JSON.stringify(reminder);
+    expect(rendered).not.toContain("Secret Employer");
+    expect(rendered).not.toContain("private-provider-event-id");
+    expect(rendered).not.toContain("private@example.invalid");
+    expect(rendered).not.toContain("meet.example.invalid");
   });
 
   it("delivers each native notification once and persists the opt-in", async () => {

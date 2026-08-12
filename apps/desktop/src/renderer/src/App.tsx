@@ -316,6 +316,26 @@ export function App() {
     [refreshWorkflows],
   );
 
+  const syncProviderCalendar = useCallback(
+    async (provider: IntegrationProvider) => {
+      setBusy(true);
+      try {
+        const result =
+          await window.jobApplyPro.workbench.syncProviderCalendar(provider);
+        await refreshWorkflows();
+        await window.jobApplyPro.workbench.refreshDesktopNotifications();
+        setProviderSyncMessage(
+          `${provider.replaceAll("_", " ")}: fetched ${result.fetched_count}, stored ${result.stored_count}, removed ${result.removed_count} stale events through ${new Date(result.window_end).toLocaleDateString()}.`,
+        );
+      } catch (caught) {
+        setError(readableError(caught));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshWorkflows],
+  );
+
   const refreshKnowledge = useCallback(async (targetProfileId: string) => {
     try {
       const snapshot =
@@ -1045,7 +1065,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Incremental Provider Sync v0.20.0-alpha.1</strong>
+              <strong>Calendar Interview Awareness v0.21.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2335,6 +2355,19 @@ export function App() {
                           type="button"
                         >
                           Sync messages
+                        </button>
+                      ) : null}
+                      {integration.provider.includes("CALENDAR") &&
+                      integration.read_enabled ? (
+                        <button
+                          className="button button--primary"
+                          disabled={busy}
+                          onClick={() =>
+                            void syncProviderCalendar(integration.provider)
+                          }
+                          type="button"
+                        >
+                          Sync calendar
                         </button>
                       ) : null}
                       <button

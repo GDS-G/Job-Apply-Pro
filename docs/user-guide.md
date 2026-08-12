@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Incremental Provider Sync `v0.20.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization.
+This guide applies to Calendar Interview Awareness `v0.21.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.20.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.21.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -13,7 +13,7 @@ The packaged browser runtime uses Microsoft Edge. Keep Windows and Edge supporte
 
 ## Review and enable notifications
 
-The **Actionable notifications** panel always shows current local action alerts. It covers sign-in verification, CAPTCHA and other user intervention, approaching assessment deadlines, stopped or expired workflows, recruiter/interview/offer messages, due follow-ups, backup failures, and update failures. Select an in-app alert to move to the relevant workflow, challenge, communication, or operations section. Confirmed upcoming-interview reminders require a later calendar-state source and are not claimed by this build.
+The **Actionable notifications** panel always shows current local action alerts. It covers sign-in verification, CAPTCHA and other user intervention, approaching assessment deadlines, stopped or expired workflows, recruiter/interview/offer messages, due follow-ups, upcoming synced interviews, backup failures, and update failures. Select an in-app alert to move to the relevant workflow, challenge, communication, or operations section. Calendar reminders use generic 24-hour and one-hour wording and never expose the event title, participants, provider identifier, location, or meeting URL.
 
 Native Windows delivery is off by default. Select **Enable** in the notification panel to opt in. The preference and stable delivered-event identifiers are stored in a bounded local state file; message bodies and account details are not stored there. The app checks once per minute, retains at most 50 active alerts, and shows no more than five new native alerts during one refresh. Selecting a Windows notification focuses Job Apply Pro and opens a fixed workbench section.
 
@@ -22,6 +22,8 @@ Notification wording is intentionally generic. Windows can display notifications
 ## Connect email and calendars
 
 Job Apply Pro does not accept mailbox passwords. Each provider connection uses the system browser, OAuth Authorization Code with PKCE, a one-time loopback callback, and encrypted local token storage.
+
+After a Google Calendar or Outlook Calendar connection reports read access, select **Sync calendar**. The app reads events from one day before the current time through 60 days ahead, stores sensitive event details in the encrypted local database, removes events no longer returned within the refreshed snapshot, and reports only counts and the window end date. Calendar synchronization is manual in this build; there are no background provider webhooks or push subscriptions. The notification check reads the local snapshot once per minute and does not create additional provider traffic.
 
 Before **Review & connect** becomes available, the owner must register a public desktop application with the provider. Create a local JSON file containing its public client ID and reviewed scopes, then select **Import provider config**. Job Apply Pro validates a maximum 64 KiB file, shows only provider/scope/capability and automatic-category details in the native confirmation, and encrypts the accepted registration metadata in the local database. Import replaces the current local registration. The raw JSON and client IDs never enter the renderer. Passwords, access tokens, refresh tokens, and client secrets are invalid and must not be included.
 

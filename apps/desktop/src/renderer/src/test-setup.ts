@@ -108,6 +108,16 @@ const bridge: DesktopBridge = {
       sync_mode: "INITIAL",
       cursor_updated_at: new Date(0).toISOString(),
     }),
+    syncProviderCalendar: async (provider) => ({
+      provider,
+      fetched_count: 0,
+      stored_count: 0,
+      removed_count: 0,
+      window_start: new Date(0).toISOString(),
+      window_end: new Date(0).toISOString(),
+      synced_at: new Date(0).toISOString(),
+    }),
+    listSyncedCalendarEvents: async () => [],
     listCommunicationRecords: async () => [],
     getDailyCommunicationSummary: async () => ({
       generated_at: new Date(0).toISOString(),
@@ -204,19 +214,19 @@ const bridge: DesktopBridge = {
     exportSupportDiagnostics: async () => null,
     getUpdateStatus: async () => ({
       state: "DISABLED",
-      current_version: "0.20.0-alpha.1",
+      current_version: "0.21.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     checkForUpdates: async () => ({
       state: "DISABLED",
-      current_version: "0.20.0-alpha.1",
+      current_version: "0.21.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     downloadUpdate: async () => ({
       state: "DISABLED",
-      current_version: "0.20.0-alpha.1",
+      current_version: "0.21.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
@@ -224,7 +234,7 @@ const bridge: DesktopBridge = {
     onUpdateStatus: (listener) => {
       listener({
         state: "DISABLED",
-        current_version: "0.20.0-alpha.1",
+        current_version: "0.21.0-alpha.1",
         message: "Updates are disabled for development builds.",
         checked_at: new Date(0).toISOString(),
       });

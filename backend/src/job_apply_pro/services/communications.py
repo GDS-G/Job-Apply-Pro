@@ -36,10 +36,12 @@ from job_apply_pro.domain.communications import (
     NormalizedMessage,
     OutboundDraft,
     OutboundPolicy,
+    ProviderCalendarSyncResult,
     ProviderMessageSyncResult,
     ReplyDraft,
     SchedulingRecommendation,
     SchedulingRequest,
+    SyncedCalendarEvent,
 )
 from job_apply_pro.domain.workbench import WorkflowRunSnapshot
 from job_apply_pro.integrations.communications import (
@@ -81,6 +83,9 @@ _TRACKING_STAGES = {
 
 
 class CommunicationService:
+    CALENDAR_LOOKBACK = timedelta(days=1)
+    CALENDAR_LOOKAHEAD = timedelta(days=60)
+
     def __init__(
         self,
         repository: CommunicationRepositoryProtocol | None = None,
@@ -375,15 +380,7 @@ class CommunicationService:
             for record in repository.list_records()
             if record.analysis.message.provider is provider
         }
-        config = self._provider_configs.get(provider)
-        binding_value = "\0".join(
-            (
-                provider.value,
-                (config.credential_reference or "configured") if config is not None else "fixture",
-                config.account_hint or "" if config is not None else "",
-            )
-        )
-        binding_fingerprint = hashlib.sha256(binding_value.encode()).hexdigest()
+        binding_fingerprint = self._provider_binding_fingerprint(provider)
         prior_state = repository.get_sync_state(provider, binding_fingerprint)
         batch = self._message_adapters[provider].sync_messages(
             cursor=prior_state.cursor if prior_state is not None else None,
@@ -421,6 +418,76 @@ class CommunicationService:
 
     def list_records(self) -> list[CommunicationRecord]:
         return self._require_repository().list_records()
+
+    def sync_provider_calendar(
+        self,
+        provider: IntegrationProvider,
+        *,
+        now: datetime | None = None,
+    ) -> ProviderCalendarSyncResult:
+        if provider not in {
+            IntegrationProvider.GOOGLE_CALENDAR,
+            IntegrationProvider.OUTLOOK_CALENDAR,
+        }:
+            raise ValueError("Calendar synchronization requires a calendar provider")
+        anchor = now or datetime.now(UTC)
+        if anchor.tzinfo is None or anchor.utcoffset() is None:
+            raise ValueError("Calendar synchronization time must include a UTC offset")
+        window_start = anchor - self.CALENDAR_LOOKBACK
+        window_end = anchor + self.CALENDAR_LOOKAHEAD
+        events = self._calendar_adapters[provider].list_events(
+            start_at=window_start,
+            end_at=window_end,
+        )
+        event_ids = [event.provider_event_id for event in events]
+        if len(event_ids) != len(set(event_ids)):
+            raise ProviderMutationError("Provider returned duplicate calendar event identifiers")
+        stored, removed_count = self._require_repository().reconcile_calendar_events(
+            provider,
+            self._provider_binding_fingerprint(provider),
+            events,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        synced_at = max((item.synced_at for item in stored), default=datetime.now(UTC))
+        return ProviderCalendarSyncResult(
+            provider=provider,
+            fetched_count=len(events),
+            stored_count=len(stored),
+            removed_count=removed_count,
+            window_start=window_start,
+            window_end=window_end,
+            synced_at=synced_at,
+        )
+
+    def list_synced_calendar_events(
+        self, *, now: datetime | None = None
+    ) -> list[SyncedCalendarEvent]:
+        anchor = now or datetime.now(UTC)
+        if anchor.tzinfo is None or anchor.utcoffset() is None:
+            raise ValueError("Calendar event listing time must include a UTC offset")
+        return self._require_repository().list_calendar_events(
+            {
+                provider: self._provider_binding_fingerprint(provider)
+                for provider in (
+                    IntegrationProvider.GOOGLE_CALENDAR,
+                    IntegrationProvider.OUTLOOK_CALENDAR,
+                )
+            },
+            start_at=anchor,
+            end_at=anchor + self.CALENDAR_LOOKAHEAD,
+        )
+
+    def _provider_binding_fingerprint(self, provider: IntegrationProvider) -> str:
+        config = self._provider_configs.get(provider)
+        binding_value = "\0".join(
+            (
+                provider.value,
+                (config.credential_reference or "configured") if config is not None else "fixture",
+                config.account_hint or "" if config is not None else "",
+            )
+        )
+        return hashlib.sha256(binding_value.encode()).hexdigest()
 
     def search_records(
         self,
