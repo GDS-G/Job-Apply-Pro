@@ -160,6 +160,8 @@ export interface BrowserObservedControl {
   checked: boolean;
   required: boolean;
   disabled: boolean;
+  will_validate: boolean;
+  constraint_satisfied: boolean;
   legal_attestation: boolean;
   character_limit?: number | null;
   minimum_number?: number | null;
@@ -1203,6 +1205,7 @@ export interface ApplicationFieldExecution {
 }
 
 export type ApplicationFieldCoverageStatus =
+  | "SATISFIED_ON_PAGE"
   | "READY_TO_EXECUTE"
   | "ALREADY_VERIFIED"
   | "MANUAL_REQUIRED"
@@ -1226,6 +1229,7 @@ export interface ApplicationFieldCoverageReview {
   portal: string;
   page_fingerprint: string;
   required_control_count: number;
+  satisfied_on_page_count: number;
   ready_to_execute_count: number;
   already_verified_count: number;
   manual_required_count: number;

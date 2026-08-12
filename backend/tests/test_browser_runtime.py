@@ -384,11 +384,21 @@ def test_multi_page_fixture_is_verified_traced_and_restartable(
             assert full_name.kind is BrowserControlKind.TEXT
             assert full_name.label == "Full name"
             assert full_name.required
+            assert full_name.will_validate
+            assert not full_name.constraint_satisfied
             assert len(full_name.control_key) == 32
             assert full_name.locator == _label("Full name")
             assert all(control.input_type != "password" for control in started.observation.controls)
 
-            assert service.execute_action(started.id, _fill("Full name", "Browser User")).verified
+            name_result = service.execute_action(started.id, _fill("Full name", "Browser User"))
+            assert name_result.verified
+            populated_name = next(
+                control
+                for control in name_result.observation.controls
+                if control.field_name == "full_name"
+            )
+            assert populated_name.constraint_satisfied
+            assert "Browser User" not in populated_name.model_dump_json()
             assert service.execute_action(
                 started.id, _fill("Email", "browser@example.com")
             ).verified

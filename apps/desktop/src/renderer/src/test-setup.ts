@@ -49,6 +49,7 @@ const bridge: DesktopBridge = {
       portal: "REFERENCE_ATS",
       page_fingerprint: "fixture-page",
       required_control_count: 0,
+      satisfied_on_page_count: 0,
       ready_to_execute_count: 0,
       already_verified_count: 0,
       manual_required_count: 0,

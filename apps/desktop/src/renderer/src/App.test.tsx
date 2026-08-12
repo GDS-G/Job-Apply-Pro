@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Required Field Coverage Review v0.34.0-alpha.1"),
+      screen.getByText("Constraint-Aware Form Readiness v0.35.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

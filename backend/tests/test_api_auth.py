@@ -50,7 +50,7 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert response.status_code == 200
         assert response.json() == {
             "status": "ready",
-            "version": "0.34.0-alpha.1",
+            "version": "0.35.0-alpha.1",
             "automation_enabled": False,
             "browser_runtime_available": True,
             "candidate_knowledge_available": True,

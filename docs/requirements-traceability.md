@@ -52,7 +52,7 @@ These controls are source capability, not provider permission. `production_enabl
 
 ## Next source-controlled implementation order
 
-1. Use the v0.34 required-field coverage review to surface missing, stale, ambiguous, manual-only, and already-verified controls before submission; add only individually reviewed execution capabilities with exact postconditions.
+1. Use the v0.35 constraint-aware required-field review to surface page-valid, missing, stale, ambiguous, manual-only, and already-verified controls before submission; add only individually reviewed execution capabilities with exact postconditions.
 2. Expand sanitized real-world document/layout/template evaluations and add advanced visual parsing only through the governed AI boundary, while preserving evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval.
 3. Add portal-specific custom-widget mappings only after explicit widget-level locator contracts and authorized supervised evidence with terms, limits, ownership, and stop conditions.
 4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.

@@ -354,6 +354,7 @@ class ApplicationFieldExecution(BaseModel):
 
 
 class ApplicationFieldCoverageStatus(StrEnum):
+    SATISFIED_ON_PAGE = "SATISFIED_ON_PAGE"
     READY_TO_EXECUTE = "READY_TO_EXECUTE"
     ALREADY_VERIFIED = "ALREADY_VERIFIED"
     MANUAL_REQUIRED = "MANUAL_REQUIRED"
@@ -382,6 +383,7 @@ class ApplicationFieldCoverageReview(BaseModel):
     portal: str
     page_fingerprint: str = Field(min_length=1, max_length=200)
     required_control_count: int = Field(ge=0)
+    satisfied_on_page_count: int = Field(ge=0)
     ready_to_execute_count: int = Field(ge=0)
     already_verified_count: int = Field(ge=0)
     manual_required_count: int = Field(ge=0)

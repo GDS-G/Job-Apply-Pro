@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.35.0-alpha.1] - Unreleased
+
+### Added
+
+- Added privacy-bounded `will_validate` and `constraint_satisfied` control metadata from the browser's native constraint-validation state.
+- Added `SATISFIED_ON_PAGE` required-field coverage classification and count, desktop display, real-browser regression coverage, and metadata-only service tests.
+
+### Security
+
+- Current field values and validation messages remain excluded from observations; native validity is a boolean signal only.
+- Page validity does not claim semantic correctness, approved-answer equivalence, provider acceptance, or submission success, and it grants no browser-action authority.
+
 ## [0.34.0-alpha.1] - Unreleased
 
 ### Added

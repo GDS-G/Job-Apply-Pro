@@ -45,3 +45,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0041: Exact radio option locators](0041-exact-radio-option-locators.md)
 - [ADR-0042: Exact visible select option execution](0042-exact-visible-select-option-execution.md)
 - [ADR-0043: Read-only required-field coverage review](0043-read-only-required-field-coverage-review.md)
+- [ADR-0044: Privacy-bounded native constraint validity](0044-privacy-bounded-native-constraint-validity.md)

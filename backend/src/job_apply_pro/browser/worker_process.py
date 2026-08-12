@@ -418,7 +418,10 @@ class BrowserWorker:
                     })
                   : [],
                 required: el.hasAttribute('required'),
-                disabled: el.hasAttribute('disabled')
+                disabled: el.hasAttribute('disabled'),
+                willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,
+                constraintSatisfied: 'willValidate' in el && el.willValidate && el.validity
+                  ? Boolean(el.validity.valid) : false
               };
             }).filter((item, index, items) =>
               item.type !== 'radio' ||

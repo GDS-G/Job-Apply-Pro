@@ -155,6 +155,8 @@ The application cannot prevent the account owner from manually clicking controls
 
 After capturing an application page and choosing its local application record, select **Review required-field coverage**. The report includes required controls only and classifies each as ready, already verified, manual, unbound, stale, or ambiguous. Resolve unbound and stale mappings individually; handle manual controls directly in the visible provider page. The review does not decrypt answers, fill fields, or authorize submission.
 
+`VALID ON PAGE` means only that the browser's native HTML constraints currently pass for that control. Job Apply Pro does not read the current value. Review the visible value yourself because native validity does not establish truthfulness, semantic correctness, provider-side acceptance, or submission.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.
