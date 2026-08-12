@@ -4,7 +4,7 @@
 
 This audit maps the current repository to the authoritative **Job Apply Pro Documentation** Google Doc. It supplements the phase-oriented release notes; it does not narrow the long-term product scope. Explicit current user direction, accepted ADRs, and versioned contracts remain higher priority than older implementation notes when they conflict.
 
-The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Releases through `v0.27.0-alpha.1` established the secure local runtime, supervised portal boundary, evidence-governed documents and answers, provider synchronization, and release controls. Typed Application Answers `v0.28.0-alpha.1` added deterministic validation; Auditable Form Field Binding `v0.29.0-alpha.1` added reviewed bindings; Observed Form Control Capture `v0.30.0-alpha.1` supplied typed, fingerprint-current observations; Verified Approved Field Execution `v0.31.0-alpha.1` added exact native-field execution; Verified Radio Group Execution `v0.32.0-alpha.1` added exact visible-label radio locators; Verified Select Option Execution `v0.33.0-alpha.1` adds exact visible-label native select execution and postcondition evidence. The matrix below remains authoritative for unfinished scope.
+The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Releases through `v0.35.0-alpha.1` established the secure local runtime, supervised portal boundary, evidence-governed documents and answers, provider synchronization, reviewed typed field execution, and constraint-aware required-field coverage. Visible-Control Form Readiness `v0.36.0-alpha.1` adds positive point-in-time visibility evidence and removes hidden controls before downstream review. The matrix below remains authoritative for unfinished scope.
 
 ## Status meanings
 
@@ -52,7 +52,7 @@ These controls are source capability, not provider permission. `production_enabl
 
 ## Next source-controlled implementation order
 
-1. Use the v0.35 constraint-aware required-field review to surface page-valid, missing, stale, ambiguous, manual-only, and already-verified controls before submission; add only individually reviewed execution capabilities with exact postconditions.
+1. Use the v0.36 visibility- and constraint-aware required-field review to surface page-valid, missing, stale, ambiguous, manual-only, and already-verified visible controls before submission; add only individually reviewed execution capabilities with exact postconditions.
 2. Expand sanitized real-world document/layout/template evaluations and add advanced visual parsing only through the governed AI boundary, while preserving evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval.
 3. Add portal-specific custom-widget mappings only after explicit widget-level locator contracts and authorized supervised evidence with terms, limits, ownership, and stop conditions.
 4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.

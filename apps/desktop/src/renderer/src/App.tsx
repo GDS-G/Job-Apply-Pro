@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Constraint-Aware Form Readiness v0.35.0-alpha.1</strong>
+              <strong>Visible-Control Form Readiness v0.36.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2515,6 +2515,7 @@ export function App() {
                       .filter(
                         (control) =>
                           !["BUTTON", "LINK"].includes(control.kind) &&
+                          control.visible &&
                           !control.disabled,
                       )
                       .map((control) => (

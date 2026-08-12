@@ -357,7 +357,15 @@ class BrowserWorker:
         controls_raw: list[dict[str, object]] = page.locator(
             "input:not([type='hidden']):not([type='password']),select,textarea,button,a,[role]"
         ).evaluate_all(
-            """els => els.slice(0, 100).map((el, index) => {
+            """els => {
+              const isVisible = el => {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.visibility !== 'hidden' && style.display !== 'none' &&
+                  rect.width > 0 && rect.height > 0;
+              };
+              const visibleEls = els.filter(isVisible).slice(0, 100);
+              return visibleEls.map((el, index) => {
               const id = el.getAttribute('id') || '';
               const explicitLabel = id
                 ? document.querySelector(`label[for="${CSS.escape(id)}"]`)
@@ -396,7 +404,7 @@ class BrowserWorker:
                       label: option.textContent?.trim().slice(0, 300) || option.value
                     }))
                   : el.getAttribute('type') === 'radio' && el.getAttribute('name')
-                  ? els.filter(candidate =>
+                  ? visibleEls.filter(candidate =>
                       candidate.getAttribute('type') === 'radio' &&
                       candidate.getAttribute('name') === el.getAttribute('name')
                     ).slice(0, 100).map(candidate => {
@@ -419,6 +427,7 @@ class BrowserWorker:
                   : [],
                 required: el.hasAttribute('required'),
                 disabled: el.hasAttribute('disabled'),
+                visible: true,
                 willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,
                 constraintSatisfied: 'willValidate' in el && el.willValidate && el.validity
                   ? Boolean(el.validity.valid) : false
@@ -429,10 +438,20 @@ class BrowserWorker:
                 candidate.type === 'radio' &&
                 candidate.fieldName === item.fieldName
               ) === index
-            )"""
+            );
+            }"""
         )
         form_signatures = page.locator("form").evaluate_all(
-            "els => els.map(el => Array.from(el.elements).map(c => c.name || c.id || c.type))"
+            """els => els.map(el => Array.from(el.elements)
+              .filter(control => {
+                const type = control.getAttribute('type') || '';
+                const style = window.getComputedStyle(control);
+                const rect = control.getBoundingClientRect();
+                return type !== 'hidden' && type !== 'password' &&
+                  style.visibility !== 'hidden' && style.display !== 'none' &&
+                  rect.width > 0 && rect.height > 0;
+              })
+              .map(control => control.name || control.id || control.type))"""
         )
         fingerprint_source = json.dumps(
             {

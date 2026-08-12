@@ -177,6 +177,7 @@ class BrowserObservedControl(BaseModel):
     checked: bool = False
     required: bool = False
     disabled: bool = False
+    visible: bool = False
     will_validate: bool = False
     constraint_satisfied: bool = False
     legal_attestation: bool = False
@@ -324,6 +325,7 @@ class BrowserObservedControl(BaseModel):
             "checked": bool(item.get("checked")),
             "required": bool(item.get("required")),
             "disabled": bool(item.get("disabled")),
+            "visible": bool(item.get("visible")),
             "will_validate": bool(item.get("will_validate", item.get("willValidate"))),
             "constraint_satisfied": bool(
                 item.get("constraint_satisfied", item.get("constraintSatisfied"))

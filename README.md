@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Constraint-Aware Form Readiness build
+## Visible-Control Form Readiness build
 
-The active milestone is **Constraint-Aware Form Readiness `v0.35.0-alpha.1`**. Privacy-bounded observations now include only the browser's native constraint-validation booleans, never current field values. Required-field coverage can distinguish a native control already valid on the current page from one still ready for individual execution review, while explicitly avoiding claims about semantic correctness, provider acceptance, or submission. Custom widgets, uploads, signatures, disclosures, legal attestations, and final submission remain outside approved field execution.
+The active milestone is **Visible-Control Form Readiness `v0.36.0-alpha.1`**. Privacy-bounded observations now carry explicit current visibility evidence and omit controls hidden by layout or CSS before required-field coverage, binding selection, structural fingerprints, or approved execution can consume them. Existing observations without visibility evidence fail closed and must be recaptured. Native constraint-validity remains value-free and does not establish semantic correctness, provider acceptance, or submission. Custom widgets, uploads, signatures, disclosures, legal attestations, and final submission remain outside approved field execution.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
