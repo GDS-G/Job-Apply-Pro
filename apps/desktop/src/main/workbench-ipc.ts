@@ -215,6 +215,26 @@ function tailoredDocumentInput(value: unknown): TailoredDocumentRequest {
     throw new TypeError("Tailored document output format is invalid.");
   }
   const maxClaims = Reflect.get(value, "max_claims");
+  const template = requiredText(
+    Reflect.get(value, "template"),
+    "Document template",
+    30,
+  );
+  if (!new Set(["PROFESSIONAL", "COMPACT"]).has(template)) {
+    throw new TypeError("Tailored document template is invalid.");
+  }
+  const rankingMode = requiredText(
+    Reflect.get(value, "ranking_mode"),
+    "Ranking mode",
+    30,
+  );
+  if (!new Set(["DETERMINISTIC", "GOVERNED_AI"]).has(rankingMode)) {
+    throw new TypeError("Tailored document ranking mode is invalid.");
+  }
+  const externalAIConsent = Reflect.get(value, "external_ai_consent");
+  if (typeof externalAIConsent !== "boolean") {
+    throw new TypeError("External AI consent is invalid.");
+  }
   if (
     typeof maxClaims !== "number" ||
     !Number.isInteger(maxClaims) ||
@@ -237,6 +257,9 @@ function tailoredDocumentInput(value: unknown): TailoredDocumentRequest {
       120,
     ),
     max_claims: maxClaims,
+    template: template as TailoredDocumentRequest["template"],
+    ranking_mode: rankingMode as TailoredDocumentRequest["ranking_mode"],
+    external_ai_consent: externalAIConsent,
   };
 }
 

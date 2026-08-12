@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Layout-Aware Resume Ingestion",
-  version: "0.23.0-alpha.1",
+  name: "Evidence-Ranked Tailoring",
+  version: "0.24.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -984,6 +984,9 @@ export interface TailoredDocumentRequest {
   output_format: DocumentOutputFormat;
   variant_label: string;
   max_claims: number;
+  template: "PROFESSIONAL" | "COMPACT";
+  ranking_mode: "DETERMINISTIC" | "GOVERNED_AI";
+  external_ai_consent: boolean;
 }
 
 export interface TailoredDocumentSection {
@@ -1001,6 +1004,10 @@ export interface TailoredDocumentPreview {
   employer: string;
   title: string;
   variant_label: string;
+  template: "PROFESSIONAL" | "COMPACT";
+  ranking_mode: "DETERMINISTIC" | "GOVERNED_AI";
+  ranking_method: string;
+  ranking_notice?: string | null;
   sections: TailoredDocumentSection[];
   selected_claim_ids: string[];
   matched_requirement_ids: string[];
@@ -1016,6 +1023,9 @@ export interface DocumentGenerationAudit {
   document_version_id: string;
   kind: "RESUME" | "COVER_LETTER";
   output_format: DocumentOutputFormat;
+  template: "PROFESSIONAL" | "COMPACT";
+  ranking_mode: "DETERMINISTIC" | "GOVERNED_AI";
+  ranking_method: string;
   review_fingerprint: string;
   evidence_claim_ids: string[];
   requirement_ids: string[];

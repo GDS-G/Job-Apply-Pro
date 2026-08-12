@@ -6,11 +6,14 @@ import math
 import re
 from datetime import date
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 
+from job_apply_pro.ai.registry import AIRegistryError
 from job_apply_pro.documents.claims import propose_claims
 from job_apply_pro.documents.extractors import DocumentIngestionOptions, extract_document
 from job_apply_pro.documents.generator import render_tailored_document
+from job_apply_pro.domain.ai import AIRerankRequest, AIRerankResult, DataClassification
 from job_apply_pro.domain.applications import (
     SubmittedDocumentCapture,
     SubmittedDocumentEvidence,
@@ -43,9 +46,11 @@ from job_apply_pro.domain.knowledge import (
     TailoredDocumentRequest,
     TailoredDocumentResult,
     TailoredDocumentSection,
+    TailoringRankingMode,
 )
 from job_apply_pro.domain.workflow import utc_now
 from job_apply_pro.security.encryption import SensitiveDataCipher
+from job_apply_pro.services.ai import AIGatewayError
 from job_apply_pro.storage.repository_contracts import (
     ApplicationRepositoryProtocol,
     CandidateKnowledgeRepositoryProtocol,
@@ -80,6 +85,10 @@ class CandidateKnowledgeConflictError(CandidateKnowledgeError):
     pass
 
 
+class TailoringReranker(Protocol):
+    def rerank(self, request: AIRerankRequest) -> list[AIRerankResult]: ...
+
+
 def _public_version(record: CandidateDocumentVersionRecord) -> CandidateDocumentVersion:
     return CandidateDocumentVersion.model_validate(record.model_dump())
 
@@ -100,6 +109,7 @@ class CandidateKnowledgeService:
         document_data_dir: Path,
         document_max_bytes: int,
         document_ingestion_options: DocumentIngestionOptions | None = None,
+        ai_gateway: TailoringReranker | None = None,
     ) -> None:
         self._repository = repository
         self._candidates = candidates
@@ -109,6 +119,7 @@ class CandidateKnowledgeService:
         self._document_data_dir = document_data_dir.resolve()
         self._document_max_bytes = document_max_bytes
         self._document_ingestion_options = document_ingestion_options or DocumentIngestionOptions()
+        self._ai_gateway = ai_gateway
 
     def import_document(
         self,
@@ -238,7 +249,7 @@ class CandidateKnowledgeService:
         target_tokens = self._plain_tokens(
             " ".join([job.title, job.employer, *[item.text for item in requirements]])
         )
-        ranked = sorted(
+        deterministic_ranked = sorted(
             claims,
             key=lambda claim: (
                 -len(target_tokens & self._plain_tokens(claim.statement)),
@@ -246,8 +257,45 @@ class CandidateKnowledgeService:
                 claim.id,
             ),
         )
+        ranked = deterministic_ranked
+        ranking_method = "DETERMINISTIC_TOKEN_OVERLAP"
+        ranking_notice: str | None = None
+        if command.ranking_mode is TailoringRankingMode.GOVERNED_AI:
+            try:
+                if self._ai_gateway is None:
+                    raise CandidateKnowledgeError("AI Gateway is not configured")
+                results = self._ai_gateway.rerank(
+                    AIRerankRequest(
+                        query=" ".join(
+                            [job.title, job.employer, *[item.text for item in requirements]]
+                        ),
+                        documents=[claim.statement for claim in deterministic_ranked],
+                        limit=len(deterministic_ranked),
+                        profile_id=profile.profile_id,
+                        classification=DataClassification.EMPLOYMENT_SENSITIVE,
+                        external_consent=command.external_ai_consent,
+                    )
+                )
+                indexes = [item.index for item in results if item.score > 0]
+                if (
+                    not indexes
+                    or len(indexes) != len(set(indexes))
+                    or any(index < 0 or index >= len(deterministic_ranked) for index in indexes)
+                ):
+                    raise CandidateKnowledgeError("AI reranker returned an invalid ranking")
+                ranked = [deterministic_ranked[index] for index in indexes]
+                ranking_method = "GOVERNED_AI_RERANK"
+            except (AIGatewayError, AIRegistryError, CandidateKnowledgeError):
+                ranking_method = "DETERMINISTIC_FALLBACK"
+                ranking_notice = (
+                    "Governed AI ranking was unavailable or rejected; deterministic "
+                    "evidence ranking was used."
+                )
         selected = [
-            claim for claim in ranked if target_tokens & self._plain_tokens(claim.statement)
+            claim
+            for claim in ranked
+            if ranking_method == "GOVERNED_AI_RERANK"
+            or target_tokens & self._plain_tokens(claim.statement)
         ][: command.max_claims]
         if not selected:
             raise CandidateKnowledgeConflictError(
@@ -303,6 +351,10 @@ class CandidateKnowledgeService:
             "employer": job.employer,
             "title": job.title,
             "variant_label": command.variant_label,
+            "template": command.template.value,
+            "ranking_mode": command.ranking_mode.value,
+            "ranking_method": ranking_method,
+            "ranking_notice": ranking_notice,
             "sections": [section.model_dump(mode="json") for section in sections],
             "selected_claim_ids": [claim.id for claim in selected],
             "matched_requirement_ids": [item.id for item in matched_requirements],
@@ -392,6 +444,9 @@ class CandidateKnowledgeService:
             document_version_id=version_id,
             kind=preview.kind,
             output_format=preview.output_format,
+            template=preview.template,
+            ranking_mode=preview.ranking_mode,
+            ranking_method=preview.ranking_method,
             review_fingerprint=preview.review_fingerprint,
             evidence_claim_ids=preview.selected_claim_ids,
             requirement_ids=preview.matched_requirement_ids,

@@ -1021,6 +1021,18 @@ h1 {
   font-weight: 700;
 }
 
+.workbench-form .checkbox-row {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 0.55rem;
+}
+
+.workbench-form .checkbox-row input {
+  margin: 0;
+  width: auto;
+}
+
 .workbench-form input,
 .workbench-form select,
 .workbench-form textarea {

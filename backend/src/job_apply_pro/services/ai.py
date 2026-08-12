@@ -8,6 +8,7 @@ from typing import TypeVar, cast
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, ValidationError
+from pydantic import ValidationError as PydanticValidationError
 
 from job_apply_pro.ai.prompts import (
     AGENT_SCHEMAS,
@@ -285,8 +286,11 @@ class AIGatewayService:
         )
         if not isinstance(response.content, dict):
             raise AIGatewayValidationError("Reranker returned non-object content")
-        items = cast(list[object], response.content["results"])
-        results = [AIRerankResult.model_validate(item) for item in items]
+        try:
+            items = cast(list[object], response.content["results"])
+            results = [AIRerankResult.model_validate(item) for item in items]
+        except (KeyError, TypeError, PydanticValidationError) as error:
+            raise AIGatewayValidationError("Reranker returned invalid results") from error
         return sorted(results, key=lambda item: (-item.score, item.index))[: request.limit]
 
     def _prompt(self, request: AIGatewayRequest) -> PromptTemplate:

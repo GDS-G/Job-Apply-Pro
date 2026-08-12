@@ -20,7 +20,8 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     command.downgrade(config, "base")
     command.upgrade(config, "head")
 
-    tables = set(inspect(create_engine(database_url)).get_table_names())
+    inspector = inspect(create_engine(database_url))
+    tables = set(inspector.get_table_names())
     assert {
         "candidate_profiles",
         "jobs",
@@ -48,4 +49,8 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "provider_sync_states",
         "provider_calendar_events",
     } <= tables
+    audit_columns = {
+        column["name"] for column in inspector.get_columns("document_generation_audits")
+    }
+    assert {"template", "ranking_mode", "ranking_method"} <= audit_columns
     get_settings.cache_clear()

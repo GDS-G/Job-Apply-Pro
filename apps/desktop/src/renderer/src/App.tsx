@@ -701,6 +701,13 @@ export function App() {
       ) as TailoredDocumentRequest["output_format"],
       variant_label: String(form.get("variant_label")),
       max_claims: 12,
+      template: String(
+        form.get("template"),
+      ) as TailoredDocumentRequest["template"],
+      ranking_mode: String(
+        form.get("ranking_mode"),
+      ) as TailoredDocumentRequest["ranking_mode"],
+      external_ai_consent: form.get("external_ai_consent") === "on",
     };
     setBusy(true);
     setError(null);
@@ -1065,7 +1072,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Layout-Aware Resume Ingestion v0.23.0-alpha.1</strong>
+              <strong>Evidence-Ranked Tailoring v0.24.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1532,6 +1539,26 @@ export function App() {
                     required
                   />
                 </label>
+                <label>
+                  Template
+                  <select name="template" defaultValue="PROFESSIONAL">
+                    <option value="PROFESSIONAL">Professional</option>
+                    <option value="COMPACT">Compact</option>
+                  </select>
+                </label>
+                <label>
+                  Evidence ranking
+                  <select name="ranking_mode" defaultValue="DETERMINISTIC">
+                    <option value="DETERMINISTIC">Deterministic local</option>
+                    <option value="GOVERNED_AI">
+                      Governed AI with safe fallback
+                    </option>
+                  </select>
+                </label>
+                <label className="checkbox-row">
+                  <input name="external_ai_consent" type="checkbox" />
+                  Allow external AI processing for this preview
+                </label>
                 <button
                   className="button button--secondary form-submit"
                   disabled={
@@ -1567,6 +1594,13 @@ export function App() {
                       {tailoredDocument.preview.matched_requirement_ids.length}{" "}
                       matched requirements
                     </p>
+                    <small>
+                      Template: {tailoredDocument.preview.template} · Ranking:{" "}
+                      {tailoredDocument.preview.ranking_method}
+                    </small>
+                    {tailoredDocument.preview.ranking_notice ? (
+                      <small>{tailoredDocument.preview.ranking_notice}</small>
+                    ) : null}
                     {tailoredDocument.preview.missing_required_requirements
                       .length ? (
                       <small>

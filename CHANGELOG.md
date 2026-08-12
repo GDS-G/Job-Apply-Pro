@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.24.0-alpha.1] - Unreleased
+
+### Added
+
+- Added professional and compact DOCX/PDF templates with deterministic local rendering.
+- Added opt-in governed AI evidence reranking classified as employment-sensitive, plus explicit external-provider consent and visible deterministic fallback.
+- Added persisted generation-audit fields for template, requested ranking mode, and actual ranking method through migration `20260812_0016`.
+
+### Changed
+
+- Tailored preview fingerprints now bind template, requested ranking mode, actual ranking method, fallback notice, selected evidence IDs, requirement matches, and exact content.
+- The desktop review flow exposes template/ranking controls and displays the ranking method before native generation approval.
+
+### Security
+
+- Only locked, verified, application-approved claim statements cross the governed reranking boundary. External routes still require explicit consent; highly sensitive and restricted data remain blocked by the AI Gateway.
+- Missing, unavailable, policy-rejected, or invalid reranking output falls back visibly to deterministic token overlap. Evidence IDs, no-fabrication behavior, generation fingerprints, encryption, and explicit approval remain authoritative.
+
 ## [0.23.0-alpha.1] - Unreleased
 
 ### Added

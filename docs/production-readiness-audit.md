@@ -201,6 +201,18 @@ Exact source head `76f6d980ad5774f2f7cc0a03a56a90a8c7571b58` produced the unsign
 
 This remains an alpha: advanced graphics, floating text boxes, spanning content, nested tables, a broad sanitized real-world résumé corpus, richer output templates, semantic ranking, and owner-installed helper validation remain incomplete or externally gated. The local installer is validation evidence only and must not be published as a production update.
 
+### Evidence-Ranked Tailoring source validation
+
+`Evidence-Ranked Tailoring v0.24.0-alpha.1` adds PROFESSIONAL and COMPACT deterministic DOCX/PDF templates plus optional GOVERNED_AI evidence ranking. Only locked, verified claims approved for applications are eligible. Governed ranking passes job requirements and eligible claim statements to the existing `AIGatewayService.rerank` boundary with `EMPLOYMENT_SENSITIVE` classification. External routes require explicit consent; local routes do not. Gateway routing, privacy redaction, structured-output validation, retries, cost limits, caching, and invocation audits remain authoritative.
+
+Any missing route, policy rejection, unavailable provider, invalid response, duplicate/out-of-range index, or empty positive result produces a visible `DETERMINISTIC_FALLBACK`. The template, requested mode, actual method, fallback notice, exact sections, selected claim IDs, matched requirement IDs, and missing requirements are all bound into the review fingerprint. Generation recomputes that preview before accepting native approval. Migration `20260812_0016` persists template/ranking provenance with every generation audit; encrypted document retention and submitted-version evidence are unchanged. ADR-0033 records the design.
+
+Local source validation used Node 24.14.0, pnpm 11.16.0, and Python 3.12.13. All 104 backend tests passed at 82.80% total coverage, all 16 desktop tests passed, migration upgrade/downgrade/re-upgrade passed, strict Ruff, mypy and TypeScript validation passed, and the production Electron build completed. `pnpm audit --audit-level high` and `pip-audit --skip-editable` reported no known dependency vulnerabilities; pip-audit skipped only the unpublished editable backend package. The final reranker regression test proves that an invalid typed result is rejected by the governed gateway and cannot bypass the deterministic fallback boundary.
+
+Exact source head `3e3bb23df99967974be2d75c12de9283c1aade5c` produced the unsigned installer `Job-Apply-Pro-0.24.0-alpha.1-x64.exe`, 169,636,118 bytes, SHA-256 `BE91B621273057B670EA8685D01956FC405FB28484FEF27EBAE2AADDB378DE7D`. The bundled backend executable is 18,440,401 bytes with SHA-256 `B3CBAFA41012693A2454E03732D5CEA279C57DAB4E118C9F765EE1D69F2C2CC4`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `4F2A1F660F39839698A35CDC56AC1AD3BA0254BC06F8BCDBB4C3C59A591C6AD8`. All three report `NotSigned`, as expected without release credentials. The packaged-backend smoke, unpacked Windows package, NSIS installer, PDFium DLL, and pypdfium2 license tree passed/persisted.
+
+Live external reranking remains gated on owner configuration, current provider terms/privacy/retention review, explicit per-preview consent, model availability, and authorized traffic. No test account, pasted credential, or private resume is used in source or CI. The local installer is validation evidence only and must not be published as a production update.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
