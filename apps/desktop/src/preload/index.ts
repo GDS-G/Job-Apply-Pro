@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import type {
+  AnswerLibraryInput,
   BackendRuntimeStatus,
   CandidateDocumentImportInput,
   DesktopNotificationDestination,
@@ -51,6 +52,21 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ),
     reviewCandidateClaim: (claimId: string, approved: boolean) =>
       ipcRenderer.invoke("knowledge:review-claim", claimId, approved),
+    createAnswer: (profileId: string, input: AnswerLibraryInput) =>
+      ipcRenderer.invoke("knowledge:create-answer", profileId, input),
+    updateAnswer: (
+      answerId: string,
+      expectedRevision: number,
+      input: AnswerLibraryInput,
+    ) =>
+      ipcRenderer.invoke(
+        "knowledge:update-answer",
+        answerId,
+        expectedRevision,
+        input,
+      ),
+    listAnswerRevisions: (answerId: string) =>
+      ipcRenderer.invoke("knowledge:list-answer-revisions", answerId),
     previewTailoredDocument: (input: TailoredDocumentRequest) =>
       ipcRenderer.invoke("knowledge:preview-tailored", input),
     generateTailoredDocument: (

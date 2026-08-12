@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.26.0-alpha.1] - Unreleased
+
+### Added
+
+- Added desktop creation, correction, evidence linking, permission controls, and encrypted revision-history inspection for reusable application answers.
+- Added optimistic revision checks and immutable answer history through migration `20260812_0018`.
+- Added authenticated API routes to update a reviewed answer and list its revision history.
+
+### Changed
+
+- Reviewed answer creation and correction now require an explicit backend confirmation phrase plus native desktop review.
+- Current answer state, immutable revision history, and its retrieval index now commit atomically. Removing approval or lock removes the answer from future retrieval without altering candidate facts.
+
+### Security
+
+- Evidence links accept only locked, verified claims from the same candidate profile; question and answer text remain encrypted at rest in both current and historical rows.
+- Stale corrections fail closed with a conflict response. This release uses no portal password, browser profile, provider credential, external model, or live-site write.
+
 ## [0.25.0-alpha.1] - Unreleased
 
 ### Added

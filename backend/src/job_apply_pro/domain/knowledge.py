@@ -339,12 +339,20 @@ class AnswerLibraryCreate(BaseModel):
     locked: bool = True
     reuse_permission: ClaimPermittedUse = ClaimPermittedUse.APPLICATIONS
     provenance: dict[str, object] = Field(default_factory=dict)
+    confirmation_phrase: str = Field(min_length=1, max_length=100)
+
+
+class AnswerLibraryUpdate(AnswerLibraryCreate):
+    model_config = ConfigDict(frozen=True)
+
+    expected_revision: int = Field(ge=1)
 
 
 class AnswerLibraryEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: str
+    revision: int = Field(ge=1)
     profile_id: str
     question: str
     canonical_field: str
@@ -359,10 +367,30 @@ class AnswerLibraryEntry(BaseModel):
     updated_at: datetime
 
 
+class AnswerLibraryRevision(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    answer_id: str
+    profile_id: str
+    revision: int = Field(ge=1)
+    question: str
+    canonical_field: str
+    answer: str
+    evidence_claim_ids: list[str]
+    confidence: float = Field(ge=0, le=1)
+    approved: bool
+    locked: bool
+    reuse_permission: ClaimPermittedUse
+    provenance: dict[str, object]
+    created_at: datetime
+
+
 class AnswerLibraryRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: str
+    revision: int = Field(ge=1)
     profile_id: str
     canonical_field: str
     encrypted_question: str
@@ -375,6 +403,25 @@ class AnswerLibraryRecord(BaseModel):
     provenance: dict[str, object]
     created_at: datetime
     updated_at: datetime
+
+
+class AnswerLibraryRevisionRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    answer_id: str
+    profile_id: str
+    revision: int = Field(ge=1)
+    encrypted_question: str
+    canonical_field: str
+    encrypted_answer: str
+    evidence_claim_ids: list[str]
+    confidence: float = Field(ge=0, le=1)
+    approved: bool
+    locked: bool
+    reuse_permission: ClaimPermittedUse
+    provenance: dict[str, object]
+    created_at: datetime
 
 
 class RetrievalChunkRecord(BaseModel):

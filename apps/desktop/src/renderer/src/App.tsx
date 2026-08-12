@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 
 import type {
+  AnswerLibraryInput,
+  AnswerLibraryRevision,
   BackendRuntimeStatus,
   BackupManifest,
   BackupSchedule,
@@ -152,6 +154,9 @@ export function App() {
   const [knowledge, setKnowledge] = useState<CandidateKnowledgeSnapshot | null>(
     null,
   );
+  const [answerHistory, setAnswerHistory] = useState<
+    Record<string, AnswerLibraryRevision[]>
+  >({});
   const [tailoredDocument, setTailoredDocument] = useState<{
     input: TailoredDocumentRequest;
     preview: TailoredDocumentPreview;
@@ -759,6 +764,92 @@ export function App() {
     }
   }
 
+  function reviewedAnswerInput(form: FormData): AnswerLibraryInput {
+    return {
+      question: String(form.get("question")),
+      canonical_field: String(form.get("canonical_field")),
+      answer: String(form.get("answer")),
+      evidence_claim_ids: form
+        .getAll("evidence_claim_ids")
+        .map((value) => String(value)),
+      confidence: Number(form.get("confidence")),
+      approved: form.get("approved") === "on",
+      locked: form.get("locked") === "on",
+      reuse_permission: String(
+        form.get("reuse_permission"),
+      ) as AnswerLibraryInput["reuse_permission"],
+      provenance: {},
+    };
+  }
+
+  async function createAnswer(form: FormData) {
+    if (!profileId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await window.jobApplyPro.workbench.createAnswer(
+        profileId,
+        reviewedAnswerInput(form),
+      );
+      if (saved) await refreshKnowledge(profileId);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateAnswer(
+    answerId: string,
+    expectedRevision: number,
+    form: FormData,
+  ) {
+    if (!profileId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await window.jobApplyPro.workbench.updateAnswer(
+        answerId,
+        expectedRevision,
+        reviewedAnswerInput(form),
+      );
+      if (saved) {
+        await refreshKnowledge(profileId);
+        setAnswerHistory((current) => {
+          const next = { ...current };
+          delete next[answerId];
+          return next;
+        });
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleAnswerHistory(answerId: string) {
+    if (answerHistory[answerId]) {
+      setAnswerHistory((current) => {
+        const next = { ...current };
+        delete next[answerId];
+        return next;
+      });
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const revisions =
+        await window.jobApplyPro.workbench.listAnswerRevisions(answerId);
+      setAnswerHistory((current) => ({ ...current, [answerId]: revisions }));
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function previewTailoredDocument(form: FormData) {
     const input: TailoredDocumentRequest = {
       application_id: String(form.get("application_id")),
@@ -1139,7 +1230,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Explainable Resume Selection v0.25.0-alpha.1</strong>
+              <strong>Governed Answer Library v0.26.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1583,6 +1674,243 @@ export function App() {
                 ) : (
                   <div className="empty-state empty-state--compact">
                     No proposed facts are waiting for review.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="panel__header panel__header--subsection">
+              <div>
+                <h3>Governed answer library</h3>
+                <p>
+                  Review reusable application answers, link verified evidence,
+                  and retain every correction as encrypted revision history
+                </p>
+              </div>
+              <ShieldCheck size={18} />
+            </div>
+            <div className="answer-library">
+              <form
+                action={(form) => void createAnswer(form)}
+                className="workbench-form answer-library__form"
+              >
+                <label>
+                  Application question
+                  <textarea name="question" maxLength={2000} required />
+                </label>
+                <label>
+                  Canonical field
+                  <input
+                    name="canonical_field"
+                    placeholder="work.authorization"
+                    maxLength={160}
+                    required
+                  />
+                </label>
+                <label>
+                  Reviewed answer
+                  <textarea name="answer" maxLength={20000} required />
+                </label>
+                <div className="answer-library__evidence">
+                  <strong>Verified evidence (optional)</strong>
+                  {knowledge?.claims.filter(
+                    (claim) =>
+                      claim.verification_status === "VERIFIED" && claim.locked,
+                  ).length ? (
+                    knowledge.claims
+                      .filter(
+                        (claim) =>
+                          claim.verification_status === "VERIFIED" &&
+                          claim.locked,
+                      )
+                      .slice(0, 12)
+                      .map((claim) => (
+                        <label className="checkbox-row" key={claim.id}>
+                          <input
+                            name="evidence_claim_ids"
+                            type="checkbox"
+                            value={claim.id}
+                          />
+                          {claim.canonical_key}
+                        </label>
+                      ))
+                  ) : (
+                    <small>No locked verified claims are available yet.</small>
+                  )}
+                </div>
+                <label>
+                  Confidence
+                  <input
+                    name="confidence"
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    defaultValue="1"
+                    required
+                  />
+                </label>
+                <label>
+                  Reuse permission
+                  <select name="reuse_permission" defaultValue="APPLICATIONS">
+                    <option value="APPLICATIONS">Applications</option>
+                    <option value="PROFILE_ONLY">Profile only</option>
+                    <option value="ANY">Any approved use</option>
+                  </select>
+                </label>
+                <label className="checkbox-row">
+                  <input name="approved" type="checkbox" defaultChecked />
+                  Approved for reuse
+                </label>
+                <label className="checkbox-row">
+                  <input name="locked" type="checkbox" defaultChecked />
+                  Lock this reviewed answer
+                </label>
+                <button
+                  className="button button--primary form-submit"
+                  disabled={busy || !profileId}
+                  type="submit"
+                >
+                  <Check size={15} /> Review & save answer
+                </button>
+              </form>
+              <div className="answer-library__entries">
+                {knowledge?.answers.length ? (
+                  knowledge.answers.map((answer) => (
+                    <details className="answer-entry" key={answer.id}>
+                      <summary>
+                        <span>
+                          <b>{answer.canonical_field}</b>
+                          <small>{answer.question}</small>
+                        </span>
+                        <em>Revision {answer.revision}</em>
+                      </summary>
+                      <form
+                        action={(form) =>
+                          void updateAnswer(answer.id, answer.revision, form)
+                        }
+                        className="workbench-form answer-library__form"
+                      >
+                        <label>
+                          Application question
+                          <textarea
+                            name="question"
+                            defaultValue={answer.question}
+                            maxLength={2000}
+                            required
+                          />
+                        </label>
+                        <label>
+                          Canonical field
+                          <input
+                            name="canonical_field"
+                            defaultValue={answer.canonical_field}
+                            maxLength={160}
+                            required
+                          />
+                        </label>
+                        <label>
+                          Reviewed answer
+                          <textarea
+                            name="answer"
+                            defaultValue={answer.answer}
+                            maxLength={20000}
+                            required
+                          />
+                        </label>
+                        <div className="answer-library__evidence">
+                          <strong>Verified evidence</strong>
+                          {knowledge.claims
+                            .filter(
+                              (claim) =>
+                                claim.verification_status === "VERIFIED" &&
+                                claim.locked,
+                            )
+                            .slice(0, 12)
+                            .map((claim) => (
+                              <label className="checkbox-row" key={claim.id}>
+                                <input
+                                  name="evidence_claim_ids"
+                                  type="checkbox"
+                                  value={claim.id}
+                                  defaultChecked={answer.evidence_claim_ids.includes(
+                                    claim.id,
+                                  )}
+                                />
+                                {claim.canonical_key}
+                              </label>
+                            ))}
+                        </div>
+                        <label>
+                          Confidence
+                          <input
+                            name="confidence"
+                            type="number"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            defaultValue={answer.confidence}
+                            required
+                          />
+                        </label>
+                        <label>
+                          Reuse permission
+                          <select
+                            name="reuse_permission"
+                            defaultValue={answer.reuse_permission}
+                          >
+                            <option value="APPLICATIONS">Applications</option>
+                            <option value="PROFILE_ONLY">Profile only</option>
+                            <option value="ANY">Any approved use</option>
+                          </select>
+                        </label>
+                        <label className="checkbox-row">
+                          <input
+                            name="approved"
+                            type="checkbox"
+                            defaultChecked={answer.approved}
+                          />
+                          Approved for reuse
+                        </label>
+                        <label className="checkbox-row">
+                          <input
+                            name="locked"
+                            type="checkbox"
+                            defaultChecked={answer.locked}
+                          />
+                          Locked
+                        </label>
+                        <button
+                          className="button button--primary form-submit"
+                          disabled={busy}
+                          type="submit"
+                        >
+                          Save reviewed correction
+                        </button>
+                      </form>
+                      <button
+                        className="button button--ghost"
+                        disabled={busy}
+                        onClick={() => void toggleAnswerHistory(answer.id)}
+                        type="button"
+                      >
+                        {answerHistory[answer.id]
+                          ? "Hide revision history"
+                          : "View revision history"}
+                      </button>
+                      {answerHistory[answer.id]?.map((revision) => (
+                        <div className="answer-revision" key={revision.id}>
+                          <b>Revision {revision.revision}</b>
+                          <span>{revision.answer}</span>
+                          <small>
+                            {new Date(revision.created_at).toLocaleString()}
+                          </small>
+                        </div>
+                      ))}
+                    </details>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    No reviewed reusable answers have been saved.
                   </div>
                 )}
               </div>

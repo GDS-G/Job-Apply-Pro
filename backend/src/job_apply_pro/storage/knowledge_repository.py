@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.applications import (
@@ -11,6 +13,7 @@ from job_apply_pro.domain.applications import (
 )
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryRecord,
+    AnswerLibraryRevisionRecord,
     CandidateClaim,
     CandidateDocument,
     CandidateDocumentVersion,
@@ -29,6 +32,7 @@ from job_apply_pro.domain.knowledge import (
     TailoringRankingMode,
 )
 from job_apply_pro.storage.models import (
+    AnswerLibraryRevisionRow,
     AnswerLibraryRow,
     ApplicationRow,
     CandidateClaimRow,
@@ -104,6 +108,7 @@ def _claim(row: CandidateClaimRow) -> CandidateClaim:
 def _answer(row: AnswerLibraryRow) -> AnswerLibraryRecord:
     return AnswerLibraryRecord(
         id=row.id,
+        revision=row.revision,
         profile_id=row.profile_id,
         canonical_field=row.canonical_field,
         encrypted_question=row.encrypted_question,
@@ -116,6 +121,25 @@ def _answer(row: AnswerLibraryRow) -> AnswerLibraryRecord:
         provenance=row.provenance_json,
         created_at=_utc(row.created_at),
         updated_at=_utc(row.updated_at),
+    )
+
+
+def _answer_revision(row: AnswerLibraryRevisionRow) -> AnswerLibraryRevisionRecord:
+    return AnswerLibraryRevisionRecord(
+        id=row.id,
+        answer_id=row.answer_id,
+        profile_id=row.profile_id,
+        revision=row.revision,
+        encrypted_question=row.encrypted_question,
+        canonical_field=row.canonical_field,
+        encrypted_answer=row.encrypted_answer,
+        evidence_claim_ids=row.evidence_claim_ids_json,
+        confidence=row.confidence,
+        approved=row.approved,
+        locked=row.locked,
+        reuse_permission=ClaimPermittedUse(row.reuse_permission),
+        provenance=row.provenance_json,
+        created_at=_utc(row.created_at),
     )
 
 
@@ -359,26 +383,110 @@ class CandidateKnowledgeRepository:
         self._session.commit()
         return _claim(row)
 
-    def add_answer(self, answer: AnswerLibraryRecord) -> AnswerLibraryRecord:
-        self._session.add(
-            AnswerLibraryRow(
-                id=answer.id,
-                profile_id=answer.profile_id,
-                canonical_field=answer.canonical_field,
-                encrypted_question=answer.encrypted_question,
-                encrypted_answer=answer.encrypted_answer,
-                evidence_claim_ids_json=answer.evidence_claim_ids,
-                confidence=answer.confidence,
-                approved=answer.approved,
-                locked=answer.locked,
-                reuse_permission=answer.reuse_permission.value,
-                provenance_json=answer.provenance,
-                created_at=answer.created_at,
-                updated_at=answer.updated_at,
+    def add_answer(
+        self,
+        answer: AnswerLibraryRecord,
+        retrieval_chunk: RetrievalChunkRecord | None,
+    ) -> AnswerLibraryRecord:
+        try:
+            self._session.add(
+                AnswerLibraryRow(
+                    id=answer.id,
+                    revision=answer.revision,
+                    profile_id=answer.profile_id,
+                    canonical_field=answer.canonical_field,
+                    encrypted_question=answer.encrypted_question,
+                    encrypted_answer=answer.encrypted_answer,
+                    evidence_claim_ids_json=answer.evidence_claim_ids,
+                    confidence=answer.confidence,
+                    approved=answer.approved,
+                    locked=answer.locked,
+                    reuse_permission=answer.reuse_permission.value,
+                    provenance_json=answer.provenance,
+                    created_at=answer.created_at,
+                    updated_at=answer.updated_at,
+                )
             )
-        )
-        self._session.commit()
+            self._session.add(self._answer_revision_row(answer))
+            self._replace_answer_chunk(answer.id, retrieval_chunk)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
         return answer
+
+    def get_answer(self, answer_id: str) -> AnswerLibraryRecord | None:
+        row = self._session.get(AnswerLibraryRow, answer_id)
+        return _answer(row) if row is not None else None
+
+    def update_answer(
+        self,
+        answer: AnswerLibraryRecord,
+        expected_revision: int,
+        retrieval_chunk: RetrievalChunkRecord | None,
+    ) -> AnswerLibraryRecord:
+        row = self._session.get(AnswerLibraryRow, answer.id)
+        if row is None:
+            raise LookupError(f"Answer library entry {answer.id} was not found")
+        if row.revision != expected_revision or answer.revision != expected_revision + 1:
+            raise ValueError("Answer library revision is stale")
+        try:
+            result: CursorResult[object] = self._session.connection().execute(
+                update(AnswerLibraryRow)
+                .where(
+                    AnswerLibraryRow.id == answer.id,
+                    AnswerLibraryRow.revision == expected_revision,
+                )
+                .values(
+                    revision=answer.revision,
+                    canonical_field=answer.canonical_field,
+                    encrypted_question=answer.encrypted_question,
+                    encrypted_answer=answer.encrypted_answer,
+                    evidence_claim_ids_json=answer.evidence_claim_ids,
+                    confidence=answer.confidence,
+                    approved=answer.approved,
+                    locked=answer.locked,
+                    reuse_permission=answer.reuse_permission.value,
+                    provenance_json=answer.provenance,
+                    updated_at=answer.updated_at,
+                )
+            )
+            if result.rowcount != 1:
+                raise ValueError("Answer library revision is stale")
+            self._session.add(self._answer_revision_row(answer))
+            self._replace_answer_chunk(answer.id, retrieval_chunk)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return answer
+
+    def list_answer_revisions(self, answer_id: str) -> list[AnswerLibraryRevisionRecord]:
+        statement = (
+            select(AnswerLibraryRevisionRow)
+            .where(AnswerLibraryRevisionRow.answer_id == answer_id)
+            .order_by(AnswerLibraryRevisionRow.revision.desc())
+        )
+        return [_answer_revision(row) for row in self._session.scalars(statement).all()]
+
+    @staticmethod
+    def _answer_revision_row(answer: AnswerLibraryRecord) -> AnswerLibraryRevisionRow:
+        return AnswerLibraryRevisionRow(
+            id=str(uuid4()),
+            answer_id=answer.id,
+            profile_id=answer.profile_id,
+            revision=answer.revision,
+            encrypted_question=answer.encrypted_question,
+            canonical_field=answer.canonical_field,
+            encrypted_answer=answer.encrypted_answer,
+            evidence_claim_ids_json=answer.evidence_claim_ids,
+            confidence=answer.confidence,
+            approved=answer.approved,
+            locked=answer.locked,
+            reuse_permission=answer.reuse_permission.value,
+            provenance_json=answer.provenance,
+            created_at=answer.updated_at,
+        )
 
     def list_answers(self, profile_id: str) -> list[AnswerLibraryRecord]:
         statement = (
@@ -389,6 +497,11 @@ class CandidateKnowledgeRepository:
         return [_answer(row) for row in self._session.scalars(statement).all()]
 
     def upsert_chunk(self, chunk: RetrievalChunkRecord) -> RetrievalChunkRecord:
+        row = self._upsert_chunk_row(chunk)
+        self._session.commit()
+        return _chunk(row)
+
+    def _upsert_chunk_row(self, chunk: RetrievalChunkRecord) -> RetrievalChunkRow:
         statement = select(RetrievalChunkRow).where(
             RetrievalChunkRow.source_type == chunk.source_type,
             RetrievalChunkRow.source_id == chunk.source_id,
@@ -420,8 +533,21 @@ class CandidateKnowledgeRepository:
             row.evidence_claim_ids_json = chunk.evidence_claim_ids
             row.provenance_json = chunk.provenance
             row.updated_at = chunk.updated_at
-        self._session.commit()
-        return _chunk(row)
+        return row
+
+    def _replace_answer_chunk(
+        self, answer_id: str, retrieval_chunk: RetrievalChunkRecord | None
+    ) -> None:
+        statement = select(RetrievalChunkRow).where(
+            RetrievalChunkRow.source_type == "ANSWER",
+            RetrievalChunkRow.source_id == answer_id,
+        )
+        existing = self._session.scalar(statement)
+        if retrieval_chunk is None:
+            if existing is not None:
+                self._session.delete(existing)
+            return
+        self._upsert_chunk_row(retrieval_chunk)
 
     def delete_chunk(self, source_type: str, source_id: str) -> None:
         statement = select(RetrievalChunkRow).where(
