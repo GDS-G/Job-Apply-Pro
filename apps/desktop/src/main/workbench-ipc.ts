@@ -4,6 +4,8 @@ import { arch, platform, release } from "node:os";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import type {
+  ApplicationAnswerDraftInput,
+  ApplicationAnswerReviewInput,
   AnswerLibraryInput,
   CandidateDocumentImportInput,
   CandidateProfileCreate,
@@ -157,6 +159,74 @@ function answerLibraryInput(value: unknown): AnswerLibraryInput {
     reuse_permission: reusePermission as AnswerLibraryInput["reuse_permission"],
     provenance: {},
   };
+}
+
+function applicationAnswerDraftInput(
+  value: unknown,
+): ApplicationAnswerDraftInput {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Application-answer draft input is invalid.");
+  }
+  const characterLimit = Reflect.get(value, "character_limit");
+  if (
+    typeof characterLimit !== "number" ||
+    !Number.isInteger(characterLimit) ||
+    characterLimit < 1 ||
+    characterLimit > 20_000
+  ) {
+    throw new TypeError("Character limit must be an integer from 1 to 20000.");
+  }
+  const reusePermission = requiredText(
+    Reflect.get(value, "reuse_permission"),
+    "Reuse permission",
+    30,
+  );
+  if (!permittedUses.has(reusePermission)) {
+    throw new TypeError("Application-answer reuse permission is invalid.");
+  }
+  return {
+    application_id: requiredText(
+      Reflect.get(value, "application_id"),
+      "Application id",
+      100,
+    ),
+    question: requiredText(Reflect.get(value, "question"), "Question", 2_000),
+    canonical_field: requiredText(
+      Reflect.get(value, "canonical_field"),
+      "Canonical field",
+      160,
+    ),
+    character_limit: characterLimit,
+    allow_ai: Reflect.get(value, "allow_ai") === true,
+    external_ai_consent: Reflect.get(value, "external_ai_consent") === true,
+    reuse_permission:
+      reusePermission as ApplicationAnswerDraftInput["reuse_permission"],
+  };
+}
+
+function applicationAnswerReviewInput(
+  value: unknown,
+): ApplicationAnswerReviewInput {
+  const input = answerLibraryInput({
+    ...(typeof value === "object" && value !== null ? value : {}),
+    question: "review",
+    canonical_field: "review",
+    approved: true,
+    locked: true,
+  });
+  return {
+    answer: input.answer,
+    evidence_claim_ids: input.evidence_claim_ids,
+    confidence: input.confidence,
+    reuse_permission: input.reuse_permission,
+  };
+}
+
+function expectedRevision(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new TypeError("Expected answer revision is invalid.");
+  }
+  return value;
 }
 
 function referencePortalInput(value: unknown): ReferencePortalRunCreate {
@@ -595,6 +665,86 @@ export function registerWorkbenchIpc(
       supervisor.client.listAnswerRevisions(
         requiredText(answerIdValue, "Answer id", 100),
       ),
+  );
+  ipcMain.handle(
+    "knowledge:draft-application-answer",
+    (_event, value: unknown) =>
+      supervisor.client.draftApplicationAnswer(
+        applicationAnswerDraftInput(value),
+      ),
+  );
+  ipcMain.handle(
+    "knowledge:list-application-answers",
+    (_event, applicationIdValue: unknown) =>
+      supervisor.client.listApplicationAnswers(
+        requiredText(applicationIdValue, "Application id", 100),
+      ),
+  );
+  ipcMain.handle(
+    "knowledge:review-application-answer",
+    async (
+      event,
+      answerIdValue: unknown,
+      revisionValue: unknown,
+      inputValue: unknown,
+    ) => {
+      const answerId = requiredText(
+        answerIdValue,
+        "Application answer id",
+        100,
+      );
+      const revision = expectedRevision(revisionValue);
+      const input = applicationAnswerReviewInput(inputValue);
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Save this application answer?",
+        message: "The reviewed answer will be stored for this application.",
+        detail:
+          "This does not submit the answer or add it to the reusable library. Stale revisions are refused.",
+        buttons: ["Cancel", "Save reviewed application answer"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.reviewApplicationAnswer(
+        answerId,
+        revision,
+        input,
+      );
+    },
+  );
+  ipcMain.handle(
+    "knowledge:promote-application-answer",
+    async (event, answerIdValue: unknown, revisionValue: unknown) => {
+      const answerId = requiredText(
+        answerIdValue,
+        "Application answer id",
+        100,
+      );
+      const revision = expectedRevision(revisionValue);
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Promote this reviewed answer?",
+        message: "A new locked reusable answer will be created.",
+        detail:
+          "The application-specific record remains intact and links to the new encrypted library entry.",
+        buttons: ["Cancel", "Promote reviewed answer"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.promoteApplicationAnswer(answerId, revision);
+    },
   );
   ipcMain.handle("knowledge:preview-tailored", (_event, value: unknown) =>
     supervisor.client.previewTailoredDocument(tailoredDocumentInput(value)),

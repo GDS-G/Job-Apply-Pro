@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Governed Answer Library",
-  version: "0.26.0-alpha.1",
+  name: "Answer Provenance & Drafting",
+  version: "0.27.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -976,6 +976,63 @@ export interface AnswerLibraryRevision {
   created_at: string;
 }
 
+export type ApplicationAnswerStatus =
+  | "NEEDS_REVIEW"
+  | "DRAFTED"
+  | "REVIEWED"
+  | "PROMOTED"
+  | "LEGACY_REVIEW_REQUIRED";
+
+export type ApplicationAnswerSource =
+  "UNANSWERED" | "LIBRARY_REUSE" | "GOVERNED_AI" | "USER_REVIEWED" | "LEGACY";
+
+export interface ApplicationAnswerDraftInput {
+  application_id: string;
+  question: string;
+  canonical_field: string;
+  character_limit: number;
+  allow_ai: boolean;
+  external_ai_consent: boolean;
+  reuse_permission: ClaimPermittedUse;
+}
+
+export interface ApplicationAnswer {
+  id: string;
+  application_id: string;
+  profile_id: string;
+  job_id: string;
+  revision: number;
+  question: string;
+  normalized_question: string;
+  canonical_field: string;
+  answer?: string | null;
+  status: ApplicationAnswerStatus;
+  source_type: ApplicationAnswerSource;
+  source_answer_id?: string | null;
+  library_answer_id?: string | null;
+  evidence_claim_ids: string[];
+  retrieval_results: Record<string, unknown>[];
+  provider_id?: string | null;
+  model_id?: string | null;
+  prompt_version?: string | null;
+  policy_version: string;
+  confidence: number;
+  character_limit: number;
+  character_limit_applied: boolean;
+  limitations: string[];
+  user_edited: boolean;
+  reuse_permission: ClaimPermittedUse;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApplicationAnswerReviewInput {
+  answer: string;
+  evidence_claim_ids: string[];
+  confidence: number;
+  reuse_permission: ClaimPermittedUse;
+}
+
 export interface CandidateKnowledgeSnapshot {
   profile_id: string;
   documents: CandidateDocument[];
@@ -1256,6 +1313,19 @@ export interface DesktopBridge {
       input: AnswerLibraryInput,
     ): Promise<AnswerLibraryEntry | null>;
     listAnswerRevisions(answerId: string): Promise<AnswerLibraryRevision[]>;
+    draftApplicationAnswer(
+      input: ApplicationAnswerDraftInput,
+    ): Promise<ApplicationAnswer>;
+    listApplicationAnswers(applicationId: string): Promise<ApplicationAnswer[]>;
+    reviewApplicationAnswer(
+      answerId: string,
+      expectedRevision: number,
+      input: ApplicationAnswerReviewInput,
+    ): Promise<ApplicationAnswer | null>;
+    promoteApplicationAnswer(
+      answerId: string,
+      expectedRevision: number,
+    ): Promise<ApplicationAnswer | null>;
     previewTailoredDocument(
       input: TailoredDocumentRequest,
     ): Promise<TailoredDocumentPreview>;

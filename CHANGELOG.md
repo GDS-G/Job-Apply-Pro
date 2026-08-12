@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.27.0-alpha.1] - Unreleased
+
+### Added
+
+- Added encrypted application-scoped question records with revision, retrieval, evidence, confidence, model/prompt/policy, character-limit, correction, and reuse provenance.
+- Added library-first drafting, opt-in evidence-bounded governed-AI drafting, unresolved-question capture, desktop review, and separate reviewed-answer promotion.
+- Added migration `20260812_0019` plus authenticated draft, list, review, and promotion API/desktop contracts.
+
+### Changed
+
+- Reusable answers are now a promotion outcome rather than an automatic side effect of encountering or generating an application answer.
+- Promotion atomically updates the application record and creates the locked library entry, immutable first revision, and retrieval chunk; stale revisions fail closed.
+
+### Security
+
+- Model drafts must cite only retrieved locked candidate claims, remain review-required, and cannot silently become profile facts or reusable answers.
+- External AI requires explicit consent through the existing employment-sensitive gateway. This release uses no portal password, browser profile, test-account secret, or live-site write.
+
 ## [0.26.0-alpha.1] - Unreleased
 
 ### Added

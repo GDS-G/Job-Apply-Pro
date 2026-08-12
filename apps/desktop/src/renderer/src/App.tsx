@@ -27,6 +27,9 @@ import {
 } from "lucide-react";
 
 import type {
+  ApplicationAnswer,
+  ApplicationAnswerDraftInput,
+  ApplicationAnswerReviewInput,
   AnswerLibraryInput,
   AnswerLibraryRevision,
   BackendRuntimeStatus,
@@ -157,6 +160,12 @@ export function App() {
   const [answerHistory, setAnswerHistory] = useState<
     Record<string, AnswerLibraryRevision[]>
   >({});
+  const [applicationAnswers, setApplicationAnswers] = useState<
+    ApplicationAnswer[]
+  >([]);
+  const [answerApplicationId, setAnswerApplicationId] = useState<string | null>(
+    null,
+  );
   const [tailoredDocument, setTailoredDocument] = useState<{
     input: TailoredDocumentRequest;
     preview: TailoredDocumentPreview;
@@ -850,6 +859,115 @@ export function App() {
     }
   }
 
+  async function loadApplicationAnswers(applicationId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setAnswerApplicationId(applicationId);
+      setApplicationAnswers(
+        await window.jobApplyPro.workbench.listApplicationAnswers(
+          applicationId,
+        ),
+      );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function draftApplicationAnswer(form: FormData) {
+    const input: ApplicationAnswerDraftInput = {
+      application_id: String(form.get("application_id")),
+      question: String(form.get("question")),
+      canonical_field: String(form.get("canonical_field")),
+      character_limit: Number(form.get("character_limit")),
+      allow_ai: form.get("allow_ai") === "on",
+      external_ai_consent: form.get("external_ai_consent") === "on",
+      reuse_permission: String(
+        form.get("reuse_permission"),
+      ) as ApplicationAnswerDraftInput["reuse_permission"],
+    };
+    setBusy(true);
+    setError(null);
+    try {
+      await window.jobApplyPro.workbench.draftApplicationAnswer(input);
+      setAnswerApplicationId(input.application_id);
+      setApplicationAnswers(
+        await window.jobApplyPro.workbench.listApplicationAnswers(
+          input.application_id,
+        ),
+      );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewApplicationAnswer(
+    answerId: string,
+    revision: number,
+    form: FormData,
+  ) {
+    if (!answerApplicationId) return;
+    const input: ApplicationAnswerReviewInput = {
+      answer: String(form.get("answer")),
+      evidence_claim_ids: form
+        .getAll("evidence_claim_ids")
+        .map((value) => String(value)),
+      confidence: Number(form.get("confidence")),
+      reuse_permission: String(
+        form.get("reuse_permission"),
+      ) as ApplicationAnswerReviewInput["reuse_permission"],
+    };
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await window.jobApplyPro.workbench.reviewApplicationAnswer(
+        answerId,
+        revision,
+        input,
+      );
+      if (saved) {
+        setApplicationAnswers(
+          await window.jobApplyPro.workbench.listApplicationAnswers(
+            answerApplicationId,
+          ),
+        );
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function promoteApplicationAnswer(answerId: string, revision: number) {
+    if (!answerApplicationId || !profileId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const promoted =
+        await window.jobApplyPro.workbench.promoteApplicationAnswer(
+          answerId,
+          revision,
+        );
+      if (promoted) {
+        await refreshKnowledge(profileId);
+        setApplicationAnswers(
+          await window.jobApplyPro.workbench.listApplicationAnswers(
+            answerApplicationId,
+          ),
+        );
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function previewTailoredDocument(form: FormData) {
     const input: TailoredDocumentRequest = {
       application_id: String(form.get("application_id")),
@@ -1230,7 +1348,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Governed Answer Library v0.26.0-alpha.1</strong>
+              <strong>Answer Provenance &amp; Drafting v0.27.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1911,6 +2029,218 @@ export function App() {
                 ) : (
                   <div className="empty-state">
                     No reviewed reusable answers have been saved.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="panel__header panel__header--subsection">
+              <div>
+                <h3>Application answer review</h3>
+                <p>
+                  Log each question, prefer approved reuse, optionally request
+                  an evidence-bound AI draft, then review before promotion
+                </p>
+              </div>
+              <Bot size={18} />
+            </div>
+            <div className="answer-library">
+              <form
+                action={(form) => void draftApplicationAnswer(form)}
+                className="workbench-form answer-library__form"
+              >
+                <label>
+                  Target application
+                  <select
+                    name="application_id"
+                    onChange={(event) =>
+                      void loadApplicationAnswers(event.currentTarget.value)
+                    }
+                    required
+                  >
+                    <option value="">Choose application</option>
+                    {workflows
+                      .filter((workflow) => workflow.profile_id === profileId)
+                      .map((workflow) => (
+                        <option
+                          key={workflow.application_id}
+                          value={workflow.application_id}
+                        >
+                          {workflow.title} at {workflow.employer}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Portal question
+                  <textarea name="question" maxLength={2000} required />
+                </label>
+                <label>
+                  Canonical field
+                  <input
+                    name="canonical_field"
+                    placeholder="experience.platform"
+                    maxLength={160}
+                    required
+                  />
+                </label>
+                <label>
+                  Character limit
+                  <input
+                    name="character_limit"
+                    type="number"
+                    min="1"
+                    max="20000"
+                    defaultValue="2000"
+                    required
+                  />
+                </label>
+                <label>
+                  Reuse permission
+                  <select name="reuse_permission" defaultValue="APPLICATIONS">
+                    <option value="APPLICATIONS">Applications</option>
+                    <option value="PROFILE_ONLY">Profile only</option>
+                    <option value="ANY">Any approved use</option>
+                  </select>
+                </label>
+                <label className="checkbox-row">
+                  <input name="allow_ai" type="checkbox" />
+                  Request governed AI only if no library answer matches
+                </label>
+                <label className="checkbox-row">
+                  <input name="external_ai_consent" type="checkbox" />
+                  Permit configured external AI for this draft
+                </label>
+                <button
+                  className="button button--secondary form-submit"
+                  disabled={busy || !profileId}
+                  type="submit"
+                >
+                  <Sparkles size={15} /> Log & prepare draft
+                </button>
+              </form>
+              <div className="answer-library__entries">
+                {applicationAnswers.length ? (
+                  applicationAnswers.map((answer) => (
+                    <details className="answer-entry" key={answer.id} open>
+                      <summary>
+                        <span>
+                          <b>{answer.canonical_field}</b>
+                          <small>{answer.question}</small>
+                        </span>
+                        <em>{answer.status.replaceAll("_", " ")}</em>
+                      </summary>
+                      <div className="answer-revision">
+                        <b>
+                          {answer.source_type.replaceAll("_", " ")} · Revision{" "}
+                          {answer.revision}
+                        </b>
+                        <span>
+                          Confidence {Math.round(answer.confidence * 100)}% ·
+                          Limit {answer.character_limit}
+                        </span>
+                        {answer.model_id ? (
+                          <small>
+                            {answer.provider_id}/{answer.model_id} · Prompt{" "}
+                            {answer.prompt_version}
+                          </small>
+                        ) : null}
+                        {answer.limitations.map((limitation) => (
+                          <small key={limitation}>{limitation}</small>
+                        ))}
+                      </div>
+                      <form
+                        action={(form) =>
+                          void reviewApplicationAnswer(
+                            answer.id,
+                            answer.revision,
+                            form,
+                          )
+                        }
+                        className="workbench-form answer-library__form"
+                      >
+                        <label>
+                          Reviewed application answer
+                          <textarea
+                            name="answer"
+                            defaultValue={answer.answer ?? ""}
+                            maxLength={answer.character_limit}
+                            required
+                          />
+                        </label>
+                        <div className="answer-library__evidence">
+                          <strong>Verified evidence</strong>
+                          {knowledge?.claims
+                            .filter(
+                              (claim) =>
+                                claim.verification_status === "VERIFIED" &&
+                                claim.locked,
+                            )
+                            .slice(0, 12)
+                            .map((claim) => (
+                              <label className="checkbox-row" key={claim.id}>
+                                <input
+                                  name="evidence_claim_ids"
+                                  type="checkbox"
+                                  value={claim.id}
+                                  defaultChecked={answer.evidence_claim_ids.includes(
+                                    claim.id,
+                                  )}
+                                />
+                                {claim.canonical_key}
+                              </label>
+                            ))}
+                        </div>
+                        <label>
+                          Confidence
+                          <input
+                            name="confidence"
+                            type="number"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            defaultValue={answer.confidence || 1}
+                            required
+                          />
+                        </label>
+                        <label>
+                          Future reuse permission
+                          <select
+                            name="reuse_permission"
+                            defaultValue={answer.reuse_permission}
+                          >
+                            <option value="APPLICATIONS">Applications</option>
+                            <option value="PROFILE_ONLY">Profile only</option>
+                            <option value="ANY">Any approved use</option>
+                          </select>
+                        </label>
+                        <button
+                          className="button button--primary form-submit"
+                          disabled={busy || answer.status === "PROMOTED"}
+                          type="submit"
+                        >
+                          Save reviewed answer
+                        </button>
+                      </form>
+                      {answer.status === "REVIEWED" ? (
+                        <button
+                          className="button button--secondary"
+                          disabled={busy}
+                          onClick={() =>
+                            void promoteApplicationAnswer(
+                              answer.id,
+                              answer.revision,
+                            )
+                          }
+                          type="button"
+                        >
+                          Promote to reusable library
+                        </button>
+                      ) : null}
+                    </details>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    Choose an application to inspect its logged questions.
                   </div>
                 )}
               </div>

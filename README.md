@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Governed Answer Library build
+## Answer Provenance & Drafting build
 
-The active milestone is **Governed Answer Library `v0.26.0-alpha.1`**. Operators can create and correct reusable application answers, link locked verified evidence, control reuse permission, and inspect encrypted immutable revision history. Native review and an exact backend confirmation guard every save; stale edits fail closed, and the current answer, revision, and retrieval index commit atomically. The build retains explainable resume selection, evidence-ranked tailoring, layout-aware ingestion, provider synchronization, supervised portal execution, and every prior safety boundary.
+The active milestone is **Answer Provenance & Drafting `v0.27.0-alpha.1`**. Each application question now produces an encrypted provenance record. The workflow prefers reviewed library reuse, can request an evidence-bounded draft through the governed AI gateway, and otherwise records the question as needing review. Generated text never promotes itself: the operator must separately review it and explicitly promote an approved answer into the reusable library. Optimistic revisions reject stale edits, and promotion commits the application record, immutable library revision, and retrieval index atomically.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

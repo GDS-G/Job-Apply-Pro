@@ -6,6 +6,7 @@ from pydantic import SecretStr
 from job_apply_pro.domain.ai import AICacheRecord, AIInvocationRecord
 from job_apply_pro.domain.applications import (
     Application,
+    ApplicationAnswerRecord,
     ApplicationCreate,
     SubmittedDocumentEvidence,
 )
@@ -155,6 +156,26 @@ class CandidateKnowledgeRepositoryProtocol(Protocol):
         answer: AnswerLibraryRecord,
         retrieval_chunk: RetrievalChunkRecord | None,
     ) -> AnswerLibraryRecord: ...
+
+    def add_application_answer(
+        self, answer: ApplicationAnswerRecord
+    ) -> ApplicationAnswerRecord: ...
+
+    def get_application_answer(self, answer_id: str) -> ApplicationAnswerRecord | None: ...
+
+    def list_application_answers(self, application_id: str) -> list[ApplicationAnswerRecord]: ...
+
+    def update_application_answer(
+        self, answer: ApplicationAnswerRecord, expected_revision: int
+    ) -> ApplicationAnswerRecord: ...
+
+    def promote_application_answer(
+        self,
+        application_answer: ApplicationAnswerRecord,
+        expected_revision: int,
+        library_answer: AnswerLibraryRecord,
+        retrieval_chunk: RetrievalChunkRecord,
+    ) -> ApplicationAnswerRecord: ...
 
     def get_answer(self, answer_id: str) -> AnswerLibraryRecord | None: ...
 

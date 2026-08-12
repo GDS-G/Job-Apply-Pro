@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import type {
+  ApplicationAnswerDraftInput,
+  ApplicationAnswerReviewInput,
   AnswerLibraryInput,
   BackendRuntimeStatus,
   CandidateDocumentImportInput,
@@ -67,6 +69,27 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ),
     listAnswerRevisions: (answerId: string) =>
       ipcRenderer.invoke("knowledge:list-answer-revisions", answerId),
+    draftApplicationAnswer: (input: ApplicationAnswerDraftInput) =>
+      ipcRenderer.invoke("knowledge:draft-application-answer", input),
+    listApplicationAnswers: (applicationId: string) =>
+      ipcRenderer.invoke("knowledge:list-application-answers", applicationId),
+    reviewApplicationAnswer: (
+      answerId: string,
+      expectedRevision: number,
+      input: ApplicationAnswerReviewInput,
+    ) =>
+      ipcRenderer.invoke(
+        "knowledge:review-application-answer",
+        answerId,
+        expectedRevision,
+        input,
+      ),
+    promoteApplicationAnswer: (answerId: string, expectedRevision: number) =>
+      ipcRenderer.invoke(
+        "knowledge:promote-application-answer",
+        answerId,
+        expectedRevision,
+      ),
     previewTailoredDocument: (input: TailoredDocumentRequest) =>
       ipcRenderer.invoke("knowledge:preview-tailored", input),
     generateTailoredDocument: (

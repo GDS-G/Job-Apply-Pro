@@ -24,6 +24,22 @@ class ApplicationDocumentRole(StrEnum):
     SUPPORTING = "SUPPORTING"
 
 
+class ApplicationAnswerStatus(StrEnum):
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    DRAFTED = "DRAFTED"
+    REVIEWED = "REVIEWED"
+    PROMOTED = "PROMOTED"
+    LEGACY_REVIEW_REQUIRED = "LEGACY_REVIEW_REQUIRED"
+
+
+class ApplicationAnswerSource(StrEnum):
+    UNANSWERED = "UNANSWERED"
+    LIBRARY_REUSE = "LIBRARY_REUSE"
+    GOVERNED_AI = "GOVERNED_AI"
+    USER_REVIEWED = "USER_REVIEWED"
+    LEGACY = "LEGACY"
+
+
 class ApplicationCreate(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -46,17 +62,103 @@ class Application(BaseModel):
     updated_at: datetime
 
 
+class ApplicationAnswerDraftRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_id: str = Field(min_length=1, max_length=100)
+    question: str = Field(min_length=1, max_length=2_000)
+    canonical_field: str = Field(min_length=1, max_length=160)
+    character_limit: int = Field(default=20_000, ge=1, le=20_000)
+    allow_ai: bool = False
+    external_ai_consent: bool = False
+    reuse_permission: str = Field(
+        default="APPLICATIONS", pattern="^(PROFILE_ONLY|APPLICATIONS|ANY)$"
+    )
+
+
+class ApplicationAnswerReview(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    expected_revision: int = Field(ge=1)
+    answer: str = Field(min_length=1, max_length=20_000)
+    evidence_claim_ids: list[str] = Field(default_factory=list, max_length=50)
+    confidence: float = Field(default=1, ge=0, le=1)
+    reuse_permission: str = Field(
+        default="APPLICATIONS", pattern="^(PROFILE_ONLY|APPLICATIONS|ANY)$"
+    )
+    confirmation_phrase: str = Field(min_length=1, max_length=100)
+
+
+class ApplicationAnswerPromotion(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    expected_revision: int = Field(ge=1)
+    confirmation_phrase: str = Field(min_length=1, max_length=100)
+
+
 class ApplicationAnswer(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: str
     application_id: str
-    canonical_field: CanonicalField
-    value: dict[str, object]
-    provenance: str
+    profile_id: str
+    job_id: str
+    revision: int = Field(ge=1)
+    question: str
+    normalized_question: str
+    canonical_field: str
+    answer: str | None
+    status: ApplicationAnswerStatus
+    source_type: ApplicationAnswerSource
+    source_answer_id: str | None
+    library_answer_id: str | None
+    evidence_claim_ids: list[str]
+    retrieval_results: list[dict[str, object]]
+    provider_id: str | None
+    model_id: str | None
+    prompt_version: str | None
+    policy_version: str
     confidence: float = Field(ge=0, le=1)
-    approved: bool
+    character_limit: int = Field(ge=1, le=20_000)
+    character_limit_applied: bool
+    limitations: list[str]
+    user_edited: bool
+    reuse_permission: str
     created_at: datetime
+    updated_at: datetime
+
+
+class ApplicationAnswerRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    application_id: str
+    profile_id: str
+    job_id: str
+    revision: int = Field(ge=1)
+    encrypted_question: str | None
+    encrypted_normalized_question: str | None
+    canonical_field: str
+    encrypted_value: str
+    status: ApplicationAnswerStatus
+    source_type: ApplicationAnswerSource
+    source_answer_id: str | None
+    library_answer_id: str | None
+    evidence_claim_ids: list[str]
+    retrieval_results: list[dict[str, object]]
+    provider_id: str | None
+    model_id: str | None
+    prompt_version: str | None
+    policy_version: str
+    confidence: float = Field(ge=0, le=1)
+    encrypted_generated_value: str | None
+    character_limit: int = Field(ge=1, le=20_000)
+    character_limit_applied: bool
+    limitations: list[str]
+    user_edited: bool
+    reuse_permission: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class SubmittedDocumentCapture(BaseModel):

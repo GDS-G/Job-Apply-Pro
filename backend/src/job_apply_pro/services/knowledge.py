@@ -13,8 +13,22 @@ from job_apply_pro.ai.registry import AIRegistryError
 from job_apply_pro.documents.claims import propose_claims
 from job_apply_pro.documents.extractors import DocumentIngestionOptions, extract_document
 from job_apply_pro.documents.generator import render_tailored_document
-from job_apply_pro.domain.ai import AIRerankRequest, AIRerankResult, DataClassification
+from job_apply_pro.domain.ai import (
+    AIGatewayRequest,
+    AIGatewayResponse,
+    AIRerankRequest,
+    AIRerankResult,
+    AITaskType,
+    DataClassification,
+)
 from job_apply_pro.domain.applications import (
+    ApplicationAnswer,
+    ApplicationAnswerDraftRequest,
+    ApplicationAnswerPromotion,
+    ApplicationAnswerRecord,
+    ApplicationAnswerReview,
+    ApplicationAnswerSource,
+    ApplicationAnswerStatus,
     SubmittedDocumentCapture,
     SubmittedDocumentEvidence,
 )
@@ -94,6 +108,8 @@ class CandidateKnowledgeConflictError(CandidateKnowledgeError):
 
 class TailoringReranker(Protocol):
     def rerank(self, request: AIRerankRequest) -> list[AIRerankResult]: ...
+
+    def invoke(self, request: AIGatewayRequest) -> AIGatewayResponse: ...
 
 
 def _public_version(record: CandidateDocumentVersionRecord) -> CandidateDocumentVersion:
@@ -985,6 +1001,359 @@ class CandidateKnowledgeService:
             )
             for revision in self._repository.list_answer_revisions(answer_id)
         ]
+
+    @staticmethod
+    def _normalized_question(question: str) -> str:
+        return " ".join(match.group(0).casefold() for match in TOKEN_PATTERN.finditer(question))
+
+    def draft_application_answer(self, command: ApplicationAnswerDraftRequest) -> ApplicationAnswer:
+        application = self._applications.get(command.application_id)
+        if application is None:
+            raise LookupError(f"Application {command.application_id} was not found")
+        job = self._jobs.get(application.job_id)
+        if job is None:
+            raise LookupError(f"Job {application.job_id} was not found")
+        self._profile(application.profile_id)
+        normalized = self._normalized_question(command.question)
+        retrieved = self.retrieve(
+            application.profile_id,
+            RetrievalQuery(
+                query=f"{command.canonical_field} {command.question}",
+                permitted_use=ClaimPermittedUse(command.reuse_permission),
+                limit=8,
+            ),
+        )
+        library = next(
+            (
+                item
+                for item in retrieved
+                if item.source_type == "ANSWER" and item.canonical_key == command.canonical_field
+            ),
+            None,
+        )
+        source_type = ApplicationAnswerSource.UNANSWERED
+        status = ApplicationAnswerStatus.NEEDS_REVIEW
+        answer_value: str | None = None
+        source_answer_id: str | None = None
+        evidence_ids: list[str] = []
+        confidence = 0.0
+        provider_id = model_id = prompt_version = None
+        limitations = ["No approved reusable answer matched the question."]
+        generated_value: str | None = None
+        if library is not None:
+            answer_value = library.content.split("\n", 1)[-1][: command.character_limit]
+            source_type = ApplicationAnswerSource.LIBRARY_REUSE
+            status = ApplicationAnswerStatus.DRAFTED
+            source_answer_id = library.source_id
+            evidence_ids = library.evidence_claim_ids
+            confidence = library.score
+            limitations = []
+        elif command.allow_ai:
+            if self._ai_gateway is None:
+                limitations.append("AI drafting was requested but no AI Gateway is configured.")
+            else:
+                evidence = [item for item in retrieved if item.source_type == "CLAIM"]
+                try:
+                    response = self._ai_gateway.invoke(
+                        AIGatewayRequest(
+                            task_type=AITaskType.ANSWER,
+                            prompt_id="agent.answer",
+                            input_data={
+                                "question": command.question,
+                                "canonical_field": command.canonical_field,
+                                "employer": job.employer,
+                                "job_title": job.title,
+                                "character_limit": command.character_limit,
+                                "evidence": [
+                                    {"claim_id": item.source_id, "statement": item.content}
+                                    for item in evidence
+                                ],
+                            },
+                            output_schema={
+                                "type": "object",
+                                "required": ["answer", "evidence_claim_ids", "needs_user"],
+                                "properties": {
+                                    "answer": {
+                                        "type": "string",
+                                        "maxLength": command.character_limit,
+                                    },
+                                    "evidence_claim_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "needs_user": {"type": "boolean"},
+                                },
+                                "additionalProperties": False,
+                            },
+                            profile_id=application.profile_id,
+                            source_version=job.description_hash,
+                            classification=DataClassification.EMPLOYMENT_SENSITIVE,
+                            external_consent=command.external_ai_consent,
+                            cache_mode="BYPASS",
+                        )
+                    )
+                    if not isinstance(response.content, dict):
+                        raise CandidateKnowledgeError("AI answer output was not an object")
+                    candidate = str(response.content["answer"])
+                    raw_ids = response.content["evidence_claim_ids"]
+                    if not isinstance(raw_ids, list):
+                        raise CandidateKnowledgeError("AI answer evidence was not a list")
+                    requested_ids = [str(item) for item in raw_ids]
+                    allowed_ids = {item.source_id for item in evidence}
+                    if not requested_ids or not set(requested_ids) <= allowed_ids:
+                        raise CandidateKnowledgeConflictError(
+                            "AI answer did not cite only retrieved candidate evidence"
+                        )
+                    generated_value = candidate[: command.character_limit]
+                    answer_value = generated_value
+                    evidence_ids = requested_ids
+                    source_type = ApplicationAnswerSource.GOVERNED_AI
+                    status = ApplicationAnswerStatus.NEEDS_REVIEW
+                    confidence = min(
+                        (item.score for item in evidence if item.source_id in requested_ids),
+                        default=0,
+                    )
+                    provider_id = response.provider_id
+                    model_id = response.model_id
+                    prompt_version = response.prompt_version
+                    limitations = ["Model-generated draft requires user review."]
+                    if bool(response.content["needs_user"]):
+                        limitations.append("The model explicitly requested user input.")
+                except (AIGatewayError, AIRegistryError, CandidateKnowledgeError) as error:
+                    limitations.append(
+                        f"Governed AI drafting failed safely: {type(error).__name__}."
+                    )
+        now = utc_now()
+        answer_id = str(uuid4())
+        limit_applied = answer_value is not None and len(answer_value) >= command.character_limit
+        record = ApplicationAnswerRecord(
+            id=answer_id,
+            application_id=application.id,
+            profile_id=application.profile_id,
+            job_id=application.job_id,
+            revision=1,
+            encrypted_question=self._cipher.encrypt_bytes(
+                command.question.encode(), context=f"application-answer:{answer_id}:question"
+            ),
+            encrypted_normalized_question=self._cipher.encrypt_bytes(
+                normalized.encode(), context=f"application-answer:{answer_id}:normalized"
+            ),
+            canonical_field=command.canonical_field,
+            encrypted_value=self._cipher.encrypt_bytes(
+                (answer_value or "").encode(), context=f"application-answer:{answer_id}:value"
+            ),
+            status=status,
+            source_type=source_type,
+            source_answer_id=source_answer_id,
+            library_answer_id=None,
+            evidence_claim_ids=evidence_ids,
+            retrieval_results=[
+                {"source_type": item.source_type, "source_id": item.source_id, "score": item.score}
+                for item in retrieved
+            ],
+            provider_id=provider_id,
+            model_id=model_id,
+            prompt_version=prompt_version,
+            policy_version="answer-drafting/1.0",
+            confidence=confidence,
+            encrypted_generated_value=(
+                self._cipher.encrypt_bytes(
+                    generated_value.encode(),
+                    context=f"application-answer:{answer_id}:generated",
+                )
+                if generated_value is not None
+                else None
+            ),
+            character_limit=command.character_limit,
+            character_limit_applied=limit_applied,
+            limitations=limitations,
+            user_edited=False,
+            reuse_permission=command.reuse_permission,
+            created_at=now,
+            updated_at=now,
+        )
+        return self._public_application_answer(self._repository.add_application_answer(record))
+
+    def review_application_answer(
+        self, answer_id: str, command: ApplicationAnswerReview
+    ) -> ApplicationAnswer:
+        record = self._repository.get_application_answer(answer_id)
+        if record is None:
+            raise LookupError(f"Application answer {answer_id} was not found")
+        if command.confirmation_phrase != "SAVE REVIEWED APPLICATION ANSWER":
+            raise CandidateKnowledgeError("Application answer confirmation phrase is invalid")
+        if command.expected_revision != record.revision:
+            raise CandidateKnowledgeConflictError(
+                "Application answer changed; refresh before reviewing"
+            )
+        self._validate_answer_evidence(record.profile_id, command.evidence_claim_ids)
+        if len(command.answer) > record.character_limit:
+            raise CandidateKnowledgeConflictError(
+                f"Reviewed answer exceeds the {record.character_limit}-character limit"
+            )
+        original = self._cipher.decrypt_bytes(
+            record.encrypted_value, context=f"application-answer:{answer_id}:value"
+        ).decode()
+        reviewed = record.model_copy(
+            update={
+                "revision": record.revision + 1,
+                "encrypted_value": self._cipher.encrypt_bytes(
+                    command.answer.encode(), context=f"application-answer:{answer_id}:value"
+                ),
+                "status": ApplicationAnswerStatus.REVIEWED,
+                "source_type": ApplicationAnswerSource.USER_REVIEWED,
+                "evidence_claim_ids": command.evidence_claim_ids,
+                "confidence": command.confidence,
+                "character_limit_applied": len(command.answer) == record.character_limit,
+                "user_edited": command.answer != original,
+                "reuse_permission": command.reuse_permission,
+                "limitations": [],
+                "updated_at": utc_now(),
+            }
+        )
+        try:
+            saved = self._repository.update_application_answer(reviewed, command.expected_revision)
+        except ValueError as error:
+            raise CandidateKnowledgeConflictError(
+                "Application answer changed; refresh before reviewing"
+            ) from error
+        return self._public_application_answer(saved)
+
+    def promote_application_answer(
+        self, answer_id: str, command: ApplicationAnswerPromotion
+    ) -> ApplicationAnswer:
+        record = self._repository.get_application_answer(answer_id)
+        if record is None:
+            raise LookupError(f"Application answer {answer_id} was not found")
+        if command.confirmation_phrase != "PROMOTE REVIEWED ANSWER":
+            raise CandidateKnowledgeError("Answer promotion confirmation phrase is invalid")
+        if command.expected_revision != record.revision:
+            raise CandidateKnowledgeConflictError(
+                "Application answer changed; refresh before promoting"
+            )
+        if record.status is not ApplicationAnswerStatus.REVIEWED:
+            raise CandidateKnowledgeConflictError(
+                "Only a reviewed application answer can be promoted"
+            )
+        self._validate_answer_evidence(record.profile_id, record.evidence_claim_ids)
+        question, answer = self._application_answer_plaintext(record)
+        library_id = str(uuid4())
+        now = utc_now()
+        library = AnswerLibraryRecord(
+            id=library_id,
+            revision=1,
+            profile_id=record.profile_id,
+            canonical_field=record.canonical_field,
+            encrypted_question=self._cipher.encrypt_bytes(
+                question.encode(), context=f"answer:{library_id}:question"
+            ),
+            encrypted_answer=self._cipher.encrypt_bytes(
+                (answer or "").encode(), context=f"answer:{library_id}:value"
+            ),
+            evidence_claim_ids=record.evidence_claim_ids,
+            confidence=record.confidence,
+            approved=True,
+            locked=True,
+            reuse_permission=ClaimPermittedUse(record.reuse_permission),
+            provenance={
+                "source": "REVIEWED_APPLICATION_PROMOTION",
+                "application_answer_id": record.id,
+                "policy_version": record.policy_version,
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        chunk = self._chunk(
+            source_type="ANSWER",
+            source_id=library.id,
+            profile_id=library.profile_id,
+            canonical_key=library.canonical_field,
+            content=f"{question}\n{answer}",
+            permitted_use=library.reuse_permission,
+            evidence_claim_ids=library.evidence_claim_ids,
+            provenance=library.provenance,
+        )
+        promoted = record.model_copy(
+            update={
+                "revision": record.revision + 1,
+                "status": ApplicationAnswerStatus.PROMOTED,
+                "library_answer_id": library.id,
+                "updated_at": now,
+            }
+        )
+        try:
+            saved = self._repository.promote_application_answer(
+                promoted, command.expected_revision, library, chunk
+            )
+        except ValueError as error:
+            raise CandidateKnowledgeConflictError(
+                "Application answer changed; refresh before promoting"
+            ) from error
+        return self._public_application_answer(saved)
+
+    def list_application_answers(self, application_id: str) -> list[ApplicationAnswer]:
+        if self._applications.get(application_id) is None:
+            raise LookupError(f"Application {application_id} was not found")
+        return [
+            self._public_application_answer(item)
+            for item in self._repository.list_application_answers(application_id)
+        ]
+
+    def _application_answer_plaintext(
+        self, record: ApplicationAnswerRecord
+    ) -> tuple[str, str | None]:
+        question = (
+            self._cipher.decrypt_bytes(
+                record.encrypted_question,
+                context=f"application-answer:{record.id}:question",
+            ).decode()
+            if record.encrypted_question is not None
+            else "Legacy application question requires review"
+        )
+        answer = self._cipher.decrypt_bytes(
+            record.encrypted_value, context=f"application-answer:{record.id}:value"
+        ).decode()
+        return question, answer or None
+
+    def _public_application_answer(self, record: ApplicationAnswerRecord) -> ApplicationAnswer:
+        question, answer = self._application_answer_plaintext(record)
+        normalized = (
+            self._cipher.decrypt_bytes(
+                record.encrypted_normalized_question,
+                context=f"application-answer:{record.id}:normalized",
+            ).decode()
+            if record.encrypted_normalized_question is not None
+            else self._normalized_question(question)
+        )
+        return ApplicationAnswer(
+            id=record.id,
+            application_id=record.application_id,
+            profile_id=record.profile_id,
+            job_id=record.job_id,
+            revision=record.revision,
+            question=question,
+            normalized_question=normalized,
+            canonical_field=record.canonical_field,
+            answer=answer,
+            status=record.status,
+            source_type=record.source_type,
+            source_answer_id=record.source_answer_id,
+            library_answer_id=record.library_answer_id,
+            evidence_claim_ids=record.evidence_claim_ids,
+            retrieval_results=record.retrieval_results,
+            provider_id=record.provider_id,
+            model_id=record.model_id,
+            prompt_version=record.prompt_version,
+            policy_version=record.policy_version,
+            confidence=record.confidence,
+            character_limit=record.character_limit,
+            character_limit_applied=record.character_limit_applied,
+            limitations=record.limitations,
+            user_edited=record.user_edited,
+            reuse_permission=record.reuse_permission,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
 
     def list_answers(self, profile_id: str) -> list[AnswerLibraryEntry]:
         self._profile(profile_id)

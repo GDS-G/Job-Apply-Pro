@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -13,8 +14,20 @@ from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.knowledge import get_knowledge_service
 from job_apply_pro.documents.extractors import extract_document
-from job_apply_pro.domain.ai import AIRerankRequest, AIRerankResult, DataClassification
+from job_apply_pro.domain.ai import (
+    AIGatewayRequest,
+    AIGatewayResponse,
+    AIRerankRequest,
+    AIRerankResult,
+    AITaskType,
+    AIUsage,
+    DataClassification,
+)
 from job_apply_pro.domain.applications import (
+    ApplicationAnswerDraftRequest,
+    ApplicationAnswerPromotion,
+    ApplicationAnswerReview,
+    ApplicationAnswerStatus,
     ApplicationCreate,
     ApplicationDocumentRole,
     SubmittedDocumentCapture,
@@ -49,6 +62,7 @@ from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeReposit
 from job_apply_pro.storage.models import (
     AnswerLibraryRevisionRow,
     AnswerLibraryRow,
+    ApplicationAnswerRow,
     DocumentGenerationAuditRow,
     DocumentVersionRow,
     JobRequirementRow,
@@ -692,6 +706,277 @@ def test_document_selection_api_requires_fingerprint_approval(
         app.dependency_overrides.clear()
 
 
+def test_application_answer_api_requires_review_before_promotion(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="answer-api",
+            employer="API Systems",
+            title="Platform Engineer",
+            description_hash=hashlib.sha256(b"answer-api").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="answer-api-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    app.dependency_overrides[get_knowledge_service] = lambda: service
+    client = TestClient(app)
+    try:
+        drafted_response = client.post(
+            "/api/v1/knowledge/application-answers/draft",
+            json={
+                "application_id": application.id,
+                "question": "What is your preferred work arrangement?",
+                "canonical_field": "preferences.work_arrangement",
+                "character_limit": 120,
+                "allow_ai": False,
+                "external_ai_consent": False,
+                "reuse_permission": "APPLICATIONS",
+            },
+        )
+        assert drafted_response.status_code == 201
+        drafted = drafted_response.json()
+        assert drafted["status"] == "NEEDS_REVIEW"
+        assert drafted["answer"] is None
+
+        refused = client.post(
+            f"/api/v1/knowledge/application-answers/{drafted['id']}/promote",
+            json={
+                "expected_revision": drafted["revision"],
+                "confirmation_phrase": "PROMOTE REVIEWED ANSWER",
+            },
+        )
+        assert refused.status_code == 409
+
+        reviewed_response = client.put(
+            f"/api/v1/knowledge/application-answers/{drafted['id']}/review",
+            json={
+                "expected_revision": drafted["revision"],
+                "answer": "Hybrid",
+                "evidence_claim_ids": [],
+                "confidence": 1,
+                "reuse_permission": "APPLICATIONS",
+                "confirmation_phrase": "SAVE REVIEWED APPLICATION ANSWER",
+            },
+        )
+        assert reviewed_response.status_code == 200
+        reviewed = reviewed_response.json()
+        assert reviewed["status"] == "REVIEWED"
+        assert reviewed["revision"] == 2
+
+        promoted_response = client.post(
+            f"/api/v1/knowledge/application-answers/{drafted['id']}/promote",
+            json={
+                "expected_revision": reviewed["revision"],
+                "confirmation_phrase": "PROMOTE REVIEWED ANSWER",
+            },
+        )
+        assert promoted_response.status_code == 200
+        promoted = promoted_response.json()
+        assert promoted["status"] == "PROMOTED"
+        assert promoted["library_answer_id"]
+
+        listed = client.get(f"/api/v1/knowledge/applications/{application.id}/answers")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()] == [drafted["id"]]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_application_answer_logs_review_and_atomic_promotion(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    imported = service.import_document(
+        profile_id,
+        file_name="answer-evidence.txt",
+        data=b"Skills: Python, Kubernetes",
+        kind=DocumentKind.RESUME,
+        display_name="Answer evidence",
+        variant_label="General",
+        job_family_tags=["platform"],
+        is_primary=True,
+    )
+    claim = service.review_claim(
+        imported.proposed_claims[0].id,
+        ClaimReview(approved=True, permitted_use=ClaimPermittedUse.APPLICATIONS),
+    )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="answer-provenance",
+            employer="Fixture Systems",
+            title="Platform Engineer",
+            description_hash=hashlib.sha256(b"answer-provenance").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="answer-provenance-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    unanswered = service.draft_application_answer(
+        ApplicationAnswerDraftRequest(
+            application_id=application.id,
+            question="Describe your platform experience.",
+            canonical_field="experience.platform",
+            character_limit=120,
+        )
+    )
+    assert unanswered.status is ApplicationAnswerStatus.NEEDS_REVIEW
+    assert unanswered.answer is None
+    assert unanswered.limitations
+    row = session.get(ApplicationAnswerRow, unanswered.id)
+    assert row is not None
+    assert "Describe" not in (row.encrypted_question or "")
+
+    reviewed = service.review_application_answer(
+        unanswered.id,
+        ApplicationAnswerReview(
+            expected_revision=1,
+            answer="I use verified platform skills in production environments.",
+            evidence_claim_ids=[claim.id],
+            confidence=0.9,
+            confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
+        ),
+    )
+    assert reviewed.status is ApplicationAnswerStatus.REVIEWED
+    assert reviewed.user_edited
+    promoted = service.promote_application_answer(
+        reviewed.id,
+        ApplicationAnswerPromotion(
+            expected_revision=reviewed.revision,
+            confirmation_phrase="PROMOTE REVIEWED ANSWER",
+        ),
+    )
+    assert promoted.status is ApplicationAnswerStatus.PROMOTED
+    assert promoted.library_answer_id is not None
+    assert service.list_answers(profile_id)[0].id == promoted.library_answer_id
+    reused = service.draft_application_answer(
+        ApplicationAnswerDraftRequest(
+            application_id=application.id,
+            question="Describe your platform experience.",
+            canonical_field="experience.platform",
+            character_limit=120,
+        )
+    )
+    assert reused.answer == reviewed.answer
+    assert reused.source_answer_id == promoted.library_answer_id
+    with pytest.raises(CandidateKnowledgeConflictError, match="refresh"):
+        service.review_application_answer(
+            unanswered.id,
+            ApplicationAnswerReview(
+                expected_revision=1,
+                answer="Stale",
+                evidence_claim_ids=[claim.id],
+                confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
+            ),
+        )
+
+
+def test_governed_ai_answer_draft_records_model_evidence_and_requires_review(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    base = _service(session, tmp_path)
+    imported = base.import_document(
+        profile_id,
+        file_name="ai-answer-evidence.txt",
+        data=b"Skills: Python",
+        kind=DocumentKind.RESUME,
+        display_name="AI answer evidence",
+        variant_label="General",
+        job_family_tags=["software"],
+        is_primary=True,
+    )
+    claim = base.review_claim(
+        imported.proposed_claims[0].id,
+        ClaimReview(approved=True, permitted_use=ClaimPermittedUse.APPLICATIONS),
+    )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="ai-answer",
+            employer="AI Fixture",
+            title="Software Engineer",
+            description_hash=hashlib.sha256(b"ai-answer").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="ai-answer-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+
+    class AnswerGateway:
+        def rerank(self, request: AIRerankRequest) -> list[AIRerankResult]:
+            return []
+
+        def invoke(self, request: AIGatewayRequest) -> AIGatewayResponse:
+            assert request.classification is DataClassification.EMPLOYMENT_SENSITIVE
+            evidence = request.input_data["evidence"]
+            assert isinstance(evidence, list)
+            assert isinstance(evidence[0], dict)
+            assert evidence[0]["claim_id"] == claim.id
+            return AIGatewayResponse(
+                invocation_id="fixture-invocation",
+                task_type=AITaskType.ANSWER,
+                provider_id="local-fixture",
+                model_id="fixture-answer-model",
+                content={
+                    "answer": "I apply verified Python experience.",
+                    "evidence_claim_ids": [claim.id],
+                    "needs_user": False,
+                },
+                usage=AIUsage(),
+                attempts=1,
+                schema_valid=True,
+                prompt_version="1.0.0",
+                schema_version="1.0.0",
+                classification=DataClassification.EMPLOYMENT_SENSITIVE,
+                created_at=datetime.now(UTC),
+            )
+
+    service = CandidateKnowledgeService(
+        CandidateKnowledgeRepository(session),
+        CandidateRepository(session),
+        JobRepository(session),
+        ApplicationRepository(session),
+        SensitiveDataCipher(StaticKeyProvider(b"k" * 32)),
+        document_data_dir=tmp_path / "ai-answer-documents",
+        document_max_bytes=1_000_000,
+        ai_gateway=AnswerGateway(),
+    )
+    drafted = service.draft_application_answer(
+        ApplicationAnswerDraftRequest(
+            application_id=application.id,
+            question="How do you use Python?",
+            canonical_field="experience.python",
+            allow_ai=True,
+            character_limit=100,
+        )
+    )
+    assert drafted.status is ApplicationAnswerStatus.NEEDS_REVIEW
+    assert drafted.answer == "I apply verified Python experience."
+    assert drafted.evidence_claim_ids == [claim.id]
+    assert drafted.model_id == "fixture-answer-model"
+    assert drafted.prompt_version == "1.0.0"
+    assert drafted.limitations == ["Model-generated draft requires user review."]
+
+
 def test_tailored_document_requires_locked_evidence_and_exact_review(
     session: Session, tmp_path: Path
 ) -> None:
@@ -898,6 +1183,9 @@ def test_tailored_document_governed_ranking_and_fallback_are_fingerprinted(
             assert request.classification is DataClassification.EMPLOYMENT_SENSITIVE
             assert request.external_consent is False
             return [AIRerankResult(index=1, score=0.9), AIRerankResult(index=0, score=0.8)]
+
+        def invoke(self, request: AIGatewayRequest) -> AIGatewayResponse:
+            raise AssertionError("Answer drafting is not used by this test")
 
     ranked_service = CandidateKnowledgeService(
         CandidateKnowledgeRepository(session),
