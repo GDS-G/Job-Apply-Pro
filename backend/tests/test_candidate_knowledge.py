@@ -182,7 +182,21 @@ def test_import_review_lock_experience_and_private_retrieval(
     chunks = session.scalars(select(RetrievalChunkRow)).all()
     assert chunks
     assert all("bgp" not in " ".join(chunk.token_hashes_json).casefold() for chunk in chunks)
-    assert all("BGP" not in chunk.encrypted_content for chunk in chunks)
+    cipher = SensitiveDataCipher(StaticKeyProvider(b"k" * 32))
+    decrypted_chunks = [
+        cipher.decrypt_bytes(
+            chunk.encrypted_content,
+            context=f"retrieval:{chunk.id}",
+        ).decode()
+        for chunk in chunks
+    ]
+    assert all(chunk.encrypted_content.startswith("jap:v1:") for chunk in chunks)
+    assert all(
+        chunk.encrypted_content != decrypted
+        for chunk, decrypted in zip(chunks, decrypted_chunks, strict=True)
+    )
+    assert any("BGP" in decrypted for decrypted in decrypted_chunks)
+    assert any("Five years" in decrypted for decrypted in decrypted_chunks)
 
     duplicate = service.import_document(
         profile_id,
