@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Calendar Interview Awareness"
+    BUILD_NAME = "Native Gemini Fallback"
 
     def __init__(
         self,

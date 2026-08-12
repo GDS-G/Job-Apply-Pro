@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Calendar Interview Awareness",
-  version: "0.21.0-alpha.1",
+  name: "Native Gemini Fallback",
+  version: "0.22.0-alpha.1",
   channel: "alpha",
 } as const;
 

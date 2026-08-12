@@ -1065,7 +1065,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Calendar Interview Awareness v0.21.0-alpha.1</strong>
+              <strong>Native Gemini Fallback v0.22.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

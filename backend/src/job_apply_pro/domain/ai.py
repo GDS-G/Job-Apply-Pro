@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 class ProviderKind(StrEnum):
     OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE"
     SECONDARY_COMPATIBLE = "SECONDARY_COMPATIBLE"
+    GEMINI = "GEMINI"
     LLAMA_CPP = "LLAMA_CPP"
 
 

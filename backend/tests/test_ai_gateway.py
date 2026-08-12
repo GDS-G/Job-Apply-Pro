@@ -6,13 +6,16 @@ from typing import cast
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from job_apply_pro.ai.configuration import build_ai_registry
 from job_apply_pro.ai.prompts import AGENT_SCHEMAS
 from job_apply_pro.ai.providers import (
     AIProviderError,
     AIProviderRuntime,
+    GeminiProvider,
     OpenAICompatibleProvider,
 )
 from job_apply_pro.ai.registry import AIRegistry
@@ -333,6 +336,226 @@ def test_openai_compatible_adapter_supports_chat_and_embeddings() -> None:
     assert "json_schema" in requests[0].read().decode()
     assert "image_url" in requests[0].read().decode()
     assert "classify_page" in requests[0].read().decode()
+
+
+def test_gemini_adapter_supports_stateless_interactions_tools_and_embeddings() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith(":batchEmbedContents"):
+            return httpx.Response(
+                200,
+                json={
+                    "embeddings": [
+                        {"values": [0.25, 0.75]},
+                        {"values": [0.5, 0.5]},
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "status": "requires_action",
+                "steps": [
+                    {
+                        "type": "model_output",
+                        "content": [{"type": "text", "text": '{"valid":true}'}],
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "call-1",
+                        "name": "classify_page",
+                        "arguments": {"kind": "application"},
+                    },
+                ],
+                "usage": {"total_input_tokens": 6, "total_output_tokens": 3},
+            },
+        )
+
+    provider = GeminiProvider(
+        AIProviderRuntime.model_validate(
+            {
+                "definition": {
+                    "id": "gemini",
+                    "kind": ProviderKind.GEMINI,
+                    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                    "external": True,
+                    "retention_policy": "stateless",
+                },
+                "api_key": "test-secret",
+            }
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    result = provider.complete(
+        AIProviderRequest(
+            model="gemini-fixture",
+            system_instruction="Return JSON",
+            user_content="data",
+            input_parts=[AIInputPart(kind="text", value="more data")],
+            tools=[
+                AIToolDefinition(
+                    name="classify_page",
+                    description="Classify a minimized portal page observation",
+                    input_schema={"type": "object"},
+                )
+            ],
+            output_schema={"type": "object"},
+            timeout_seconds=5,
+        )
+    )
+    vectors = provider.embed("gemini-embedding-fixture", ["one", "two"], 5)
+
+    assert result.content == '{"valid":true}'
+    assert result.input_tokens == 6 and result.output_tokens == 3
+    assert result.tool_calls[0].arguments == {"kind": "application"}
+    assert vectors == [[0.25, 0.75], [0.5, 0.5]]
+    assert requests[0].headers["x-goog-api-key"] == "test-secret"
+    assert requests[0].headers["api-revision"] == "2026-05-20"
+    interaction = json.loads(requests[0].read())
+    assert interaction["store"] is False
+    assert interaction["response_format"]["mime_type"] == "application/json"
+    assert interaction["tools"][0]["type"] == "function"
+    embedding = json.loads(requests[1].read())
+    assert embedding["requests"][0]["model"] == "models/gemini-embedding-fixture"
+
+
+def test_gemini_adapter_rejects_key_exfiltration_and_untrusted_image_urls() -> None:
+    runtime = AIProviderRuntime.model_validate(
+        {
+            "definition": {
+                "id": "gemini",
+                "kind": ProviderKind.GEMINI,
+                "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                "external": True,
+            },
+            "api_key": "test-secret",
+        }
+    )
+    provider = GeminiProvider(runtime, transport=httpx.MockTransport(lambda _: httpx.Response(500)))
+    request = AIProviderRequest(
+        model="gemini-fixture",
+        system_instruction="Describe",
+        user_content="image",
+        input_parts=[AIInputPart(kind="image_url", value="https://example.test/private.png")],
+        timeout_seconds=5,
+    )
+    with pytest.raises(AIProviderError, match="separately uploaded"):
+        provider.complete(request)
+
+    for base_url in (
+        "https://example.test/v1beta",
+        "http://generativelanguage.googleapis.com/v1beta",
+        "https://generativelanguage.googleapis.com:444/v1beta",
+        "https://generativelanguage.googleapis.com/v1beta/extra",
+    ):
+        with pytest.raises(ValueError, match="Gemini base URL"):
+            GeminiProvider(
+                AIProviderRuntime.model_validate(
+                    {
+                        "definition": {
+                            "id": "bad-gemini",
+                            "kind": ProviderKind.GEMINI,
+                            "base_url": base_url,
+                            "external": True,
+                        },
+                        "api_key": "test-secret",
+                    }
+                )
+            )
+
+
+def test_gemini_adapter_bounds_and_validates_provider_responses() -> None:
+    runtime = AIProviderRuntime.model_validate(
+        {
+            "definition": {
+                "id": "gemini",
+                "kind": ProviderKind.GEMINI,
+                "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                "external": True,
+            },
+            "api_key": "test-secret",
+        }
+    )
+    request = AIProviderRequest(
+        model="gemini-fixture",
+        system_instruction="Return text",
+        user_content="data",
+        timeout_seconds=5,
+    )
+    invalid = GeminiProvider(
+        runtime,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"status": "completed", "steps": []})
+        ),
+    )
+    with pytest.raises(AIProviderError, match="no usable output"):
+        invalid.complete(request)
+
+    oversized = GeminiProvider(
+        runtime,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                content=b"{" + (b" " * (GeminiProvider._MAX_RESPONSE_BYTES + 1)),
+            )
+        ),
+    )
+    with pytest.raises(AIProviderError, match="size limit"):
+        oversized.complete(request)
+
+    non_finite = GeminiProvider(
+        runtime,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"embeddings": [{"values": ["NaN"]}]})
+        ),
+    )
+    with pytest.raises(AIProviderError, match="incomplete embeddings"):
+        non_finite.embed("gemini-embedding-fixture", ["one"], 5)
+
+
+def test_ai_registry_builds_native_gemini_provider() -> None:
+    registry = build_ai_registry(
+        SecretStr(
+            json.dumps(
+                {
+                    "providers": [
+                        {
+                            "definition": {
+                                "id": "gemini",
+                                "kind": "GEMINI",
+                                "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                                "external": True,
+                                "retention_policy": "stateless",
+                            },
+                            "api_key": "test-secret",
+                        }
+                    ],
+                    "models": [
+                        {
+                            "id": "gemini.answer",
+                            "provider_id": "gemini",
+                            "model": "gemini-fixture",
+                            "capabilities": ["TEXT"],
+                            "context_window": 8192,
+                        }
+                    ],
+                    "policies": [
+                        {
+                            "task_type": "ANSWER",
+                            "model_order": ["gemini.answer"],
+                            "required_capabilities": ["TEXT"],
+                            "allow_external": True,
+                        }
+                    ],
+                }
+            )
+        )
+    )
+
+    assert registry.provider_definitions()[0].kind is ProviderKind.GEMINI
+    assert isinstance(registry.routes(AITaskType.ANSWER)[0][0], GeminiProvider)
 
 
 def test_external_adapter_requires_https_and_local_requires_loopback() -> None:
