@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.28.0-alpha.1] - Unreleased
+
+### Added
+
+- Added typed application answers for exact, short/long text, number, date, yes/no, multiple choice, salary, availability, technology experience, behavioral, and employer-specific questions.
+- Added persisted enumerated choices, numeric bounds, date bounds, kind metadata, and migration `20260812_0020`.
+- Added desktop type/constraint controls and deterministic validator regression tests.
+
+### Changed
+
+- Library reuse, governed-AI drafts, and reviewed operator values now pass the same type-specific validator before use or promotion.
+- Yes/no, numeric/salary, and date/availability values are canonicalized for consistent reuse; invalid values fail closed.
+
+### Security
+
+- Structured validation is ordinary local code and does not expand provider, credential, browser, or submission access.
+- Invalid model output cannot bypass review or become a reusable answer; validation rules are provenance, not candidate facts.
+
 ## [0.27.0-alpha.1] - Unreleased
 
 ### Added

@@ -8,6 +8,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.applications import (
+    ApplicationAnswerKind,
     ApplicationAnswerRecord,
     ApplicationAnswerSource,
     ApplicationAnswerStatus,
@@ -175,6 +176,8 @@ def _application_answer(row: ApplicationAnswerRow) -> ApplicationAnswerRecord:
         encrypted_question=row.encrypted_question,
         encrypted_normalized_question=row.encrypted_normalized_question,
         canonical_field=row.canonical_field,
+        answer_kind=ApplicationAnswerKind(row.answer_kind),
+        validation_rules=row.validation_rules_json,
         encrypted_value=row.encrypted_value,
         status=ApplicationAnswerStatus(row.status),
         source_type=ApplicationAnswerSource(row.source_type),
@@ -635,6 +638,8 @@ class CandidateKnowledgeRepository:
             "encrypted_question": answer.encrypted_question,
             "encrypted_normalized_question": answer.encrypted_normalized_question,
             "canonical_field": answer.canonical_field,
+            "answer_kind": answer.answer_kind.value,
+            "validation_rules_json": answer.validation_rules,
             "encrypted_value": answer.encrypted_value,
             "provenance": answer.source_type.value,
             "status": answer.status.value,

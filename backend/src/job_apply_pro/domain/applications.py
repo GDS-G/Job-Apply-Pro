@@ -40,6 +40,21 @@ class ApplicationAnswerSource(StrEnum):
     LEGACY = "LEGACY"
 
 
+class ApplicationAnswerKind(StrEnum):
+    EXACT = "EXACT"
+    SHORT_TEXT = "SHORT_TEXT"
+    LONG_TEXT = "LONG_TEXT"
+    NUMBER = "NUMBER"
+    DATE = "DATE"
+    YES_NO = "YES_NO"
+    MULTIPLE_CHOICE = "MULTIPLE_CHOICE"
+    SALARY = "SALARY"
+    AVAILABILITY = "AVAILABILITY"
+    TECHNOLOGY_EXPERIENCE = "TECHNOLOGY_EXPERIENCE"
+    BEHAVIORAL = "BEHAVIORAL"
+    EMPLOYER_SPECIFIC = "EMPLOYER_SPECIFIC"
+
+
 class ApplicationCreate(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -68,6 +83,12 @@ class ApplicationAnswerDraftRequest(BaseModel):
     application_id: str = Field(min_length=1, max_length=100)
     question: str = Field(min_length=1, max_length=2_000)
     canonical_field: str = Field(min_length=1, max_length=160)
+    answer_kind: ApplicationAnswerKind = ApplicationAnswerKind.SHORT_TEXT
+    choices: list[str] = Field(default_factory=list, max_length=100)
+    minimum_number: float | None = None
+    maximum_number: float | None = None
+    earliest_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    latest_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     character_limit: int = Field(default=20_000, ge=1, le=20_000)
     allow_ai: bool = False
     external_ai_consent: bool = False
@@ -107,6 +128,8 @@ class ApplicationAnswer(BaseModel):
     question: str
     normalized_question: str
     canonical_field: str
+    answer_kind: ApplicationAnswerKind
+    validation_rules: dict[str, object]
     answer: str | None
     status: ApplicationAnswerStatus
     source_type: ApplicationAnswerSource
@@ -139,6 +162,8 @@ class ApplicationAnswerRecord(BaseModel):
     encrypted_question: str | None
     encrypted_normalized_question: str | None
     canonical_field: str
+    answer_kind: ApplicationAnswerKind
+    validation_rules: dict[str, object]
     encrypted_value: str
     status: ApplicationAnswerStatus
     source_type: ApplicationAnswerSource
