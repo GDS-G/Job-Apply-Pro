@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.29.0-alpha.1] - Unreleased
+
+### Added
+
+- Added reviewed portal-field binding previews with control kind, options, observed constraints, stable control key, page fingerprint, confidence, source, compatibility evidence, and automation permission.
+- Added encrypted binding persistence and migration `20260812_0021`, authenticated API routes, shared desktop contracts, guarded IPC, native approval, and operator review UI.
+- Added deterministic tests for reviewed-answer eligibility, typed option matching, stale fingerprints, encrypted observed metadata, and human-only legal/signature controls.
+
+### Changed
+
+- Typed application answers can now be evaluated against an exact observed portal control before any future browser fill.
+- Field approval recomputes the review fingerprint and pins the exact answer revision; duplicate or changed controls fail closed.
+
+### Security
+
+- File upload, signature, disclosure, custom-widget, and legal-attestation mappings cannot receive unattended autofill permission.
+- This release creates no browser action, uses no portal credential, and performs no live-site write. Observed labels/options are encrypted at rest.
+
 ## [0.28.0-alpha.1] - Unreleased
 
 ### Added

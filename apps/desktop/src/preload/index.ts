@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   ApplicationAnswerDraftInput,
   ApplicationAnswerReviewInput,
+  ApplicationFieldBindingPreviewInput,
+  FieldAutomationPermission,
   AnswerLibraryInput,
   BackendRuntimeStatus,
   CandidateDocumentImportInput,
@@ -90,6 +92,24 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
         answerId,
         expectedRevision,
       ),
+    previewApplicationFieldBinding: (
+      input: ApplicationFieldBindingPreviewInput,
+    ) => ipcRenderer.invoke("knowledge:preview-field-binding", input),
+    approveApplicationFieldBinding: (
+      input: ApplicationFieldBindingPreviewInput,
+      expectedAnswerRevision: number,
+      reviewFingerprint: string,
+      automationPermission: Exclude<FieldAutomationPermission, "PROHIBITED">,
+    ) =>
+      ipcRenderer.invoke(
+        "knowledge:approve-field-binding",
+        input,
+        expectedAnswerRevision,
+        reviewFingerprint,
+        automationPermission,
+      ),
+    listApplicationFieldBindings: (applicationId: string) =>
+      ipcRenderer.invoke("knowledge:list-field-bindings", applicationId),
     previewTailoredDocument: (input: TailoredDocumentRequest) =>
       ipcRenderer.invoke("knowledge:preview-tailored", input),
     generateTailoredDocument: (

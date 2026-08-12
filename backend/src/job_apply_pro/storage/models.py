@@ -251,6 +251,47 @@ class ApplicationAnswerRow(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ApplicationFieldBindingRow(Base):
+    __tablename__ = "application_field_bindings"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id",
+            "page_fingerprint",
+            "control_key",
+            name="uq_application_field_binding_control",
+        ),
+        Index(
+            "ix_application_field_bindings_application_created",
+            "application_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    application_answer_id: Mapped[str] = mapped_column(
+        ForeignKey("application_answers.id"), index=True
+    )
+    answer_revision: Mapped[int] = mapped_column(Integer)
+    portal: Mapped[str] = mapped_column(String(80))
+    page_fingerprint: Mapped[str] = mapped_column(String(200))
+    control_key: Mapped[str] = mapped_column(String(200))
+    control_kind: Mapped[str] = mapped_column(String(40))
+    encrypted_label: Mapped[str] = mapped_column(Text)
+    encrypted_options: Mapped[str] = mapped_column(Text)
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    canonical_field: Mapped[str] = mapped_column(String(160))
+    confidence: Mapped[float] = mapped_column(Float)
+    binding_source: Mapped[str] = mapped_column(String(40))
+    answer_source: Mapped[str] = mapped_column(String(40))
+    answer_kind: Mapped[str] = mapped_column(String(40))
+    validation_rules_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    automation_permission: Mapped[str] = mapped_column(String(40))
+    review_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SubmittedDocumentEvidenceRow(Base):
     __tablename__ = "submitted_document_evidence"
     __table_args__ = (

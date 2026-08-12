@@ -30,6 +30,9 @@ import type {
   ApplicationAnswer,
   ApplicationAnswerDraftInput,
   ApplicationAnswerReviewInput,
+  ApplicationFieldBinding,
+  ApplicationFieldBindingPreview,
+  ApplicationFieldBindingPreviewInput,
   AnswerLibraryInput,
   AnswerLibraryRevision,
   BackendRuntimeStatus,
@@ -166,6 +169,13 @@ export function App() {
   const [answerApplicationId, setAnswerApplicationId] = useState<string | null>(
     null,
   );
+  const [fieldBindings, setFieldBindings] = useState<ApplicationFieldBinding[]>(
+    [],
+  );
+  const [fieldBindingPreview, setFieldBindingPreview] = useState<{
+    input: ApplicationFieldBindingPreviewInput;
+    preview: ApplicationFieldBindingPreview;
+  } | null>(null);
   const [tailoredDocument, setTailoredDocument] = useState<{
     input: TailoredDocumentRequest;
     preview: TailoredDocumentPreview;
@@ -869,6 +879,11 @@ export function App() {
           applicationId,
         ),
       );
+      setFieldBindings(
+        await window.jobApplyPro.workbench.listApplicationFieldBindings(
+          applicationId,
+        ),
+      );
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -975,6 +990,80 @@ export function App() {
             answerApplicationId,
           ),
         );
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewApplicationFieldBinding(form: FormData) {
+    const input: ApplicationFieldBindingPreviewInput = {
+      application_answer_id: String(form.get("application_answer_id")),
+      observed_field: {
+        portal: String(form.get("portal")),
+        page_fingerprint: String(form.get("page_fingerprint")),
+        control_key: String(form.get("control_key")),
+        control_kind: String(
+          form.get("control_kind"),
+        ) as ApplicationFieldBindingPreviewInput["observed_field"]["control_kind"],
+        label: String(form.get("label")),
+        required: form.get("required") === "on",
+        options: String(form.get("options") ?? "")
+          .split("\n")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        character_limit: form.get("character_limit")
+          ? Number(form.get("character_limit"))
+          : null,
+        minimum_number: form.get("minimum_number")
+          ? Number(form.get("minimum_number"))
+          : null,
+        maximum_number: form.get("maximum_number")
+          ? Number(form.get("maximum_number"))
+          : null,
+        earliest_date: String(form.get("earliest_date") ?? "") || null,
+        latest_date: String(form.get("latest_date") ?? "") || null,
+        legal_attestation: form.get("legal_attestation") === "on",
+      },
+    };
+    setBusy(true);
+    setError(null);
+    try {
+      const preview =
+        await window.jobApplyPro.workbench.previewApplicationFieldBinding(
+          input,
+        );
+      setFieldBindingPreview({ input, preview });
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveApplicationFieldBinding() {
+    if (!fieldBindingPreview || !answerApplicationId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const saved =
+        await window.jobApplyPro.workbench.approveApplicationFieldBinding(
+          fieldBindingPreview.input,
+          fieldBindingPreview.preview.answer_revision,
+          fieldBindingPreview.preview.review_fingerprint,
+          fieldBindingPreview.preview.proposed_permission === "AUTOFILL_ALLOWED"
+            ? "AUTOFILL_ALLOWED"
+            : "REVIEW_REQUIRED",
+        );
+      if (saved) {
+        setFieldBindings(
+          await window.jobApplyPro.workbench.listApplicationFieldBindings(
+            answerApplicationId,
+          ),
+        );
+        setFieldBindingPreview(null);
       }
     } catch (caught) {
       setError(readableError(caught));
@@ -1363,7 +1452,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Typed Application Answers v0.28.0-alpha.1</strong>
+              <strong>Auditable Form Field Binding v0.29.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2298,6 +2387,170 @@ export function App() {
                     Choose an application to inspect its logged questions.
                   </div>
                 )}
+              </div>
+            </div>
+            <div className="panel__header panel__header--subsection">
+              <div>
+                <h3>Observed portal field binding</h3>
+                <p>
+                  Compare a reviewed answer with the exact control, options,
+                  limits, fingerprint, and automation permission before any fill
+                </p>
+              </div>
+              <ShieldCheck size={18} />
+            </div>
+            <div className="answer-library">
+              <form
+                action={(form) => void previewApplicationFieldBinding(form)}
+                className="workbench-form answer-library__form"
+              >
+                <label>
+                  Reviewed application answer
+                  <select name="application_answer_id" required>
+                    <option value="">Choose reviewed answer</option>
+                    {applicationAnswers
+                      .filter((answer) =>
+                        ["REVIEWED", "PROMOTED"].includes(answer.status),
+                      )
+                      .map((answer) => (
+                        <option key={answer.id} value={answer.id}>
+                          {answer.canonical_field} · revision {answer.revision}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Portal / ATS
+                  <input name="portal" maxLength={80} required />
+                </label>
+                <label>
+                  Page fingerprint
+                  <input name="page_fingerprint" maxLength={200} required />
+                </label>
+                <label>
+                  Stable control key
+                  <input name="control_key" maxLength={200} required />
+                </label>
+                <label>
+                  Control label
+                  <input name="label" maxLength={500} required />
+                </label>
+                <label>
+                  Control kind
+                  <select name="control_kind" defaultValue="TEXT">
+                    <option value="TEXT">Text</option>
+                    <option value="TEXT_AREA">Text area</option>
+                    <option value="EMAIL">Email</option>
+                    <option value="TELEPHONE">Telephone</option>
+                    <option value="NUMBER">Number</option>
+                    <option value="DATE">Date</option>
+                    <option value="SELECT">Select</option>
+                    <option value="RADIO_GROUP">Radio group</option>
+                    <option value="CHECKBOX">Checkbox</option>
+                    <option value="FILE_UPLOAD">File upload</option>
+                    <option value="SIGNATURE">Signature</option>
+                    <option value="DISCLOSURE">Disclosure</option>
+                    <option value="CUSTOM">Custom widget</option>
+                  </select>
+                </label>
+                <label>
+                  Observed options (one per line)
+                  <textarea name="options" maxLength={5000} />
+                </label>
+                <label>
+                  Character limit
+                  <input
+                    name="character_limit"
+                    type="number"
+                    min="1"
+                    max="20000"
+                  />
+                </label>
+                <label>
+                  Minimum number
+                  <input name="minimum_number" type="number" step="any" />
+                </label>
+                <label>
+                  Maximum number
+                  <input name="maximum_number" type="number" step="any" />
+                </label>
+                <label>
+                  Earliest date
+                  <input name="earliest_date" type="date" />
+                </label>
+                <label>
+                  Latest date
+                  <input name="latest_date" type="date" />
+                </label>
+                <label className="checkbox-row">
+                  <input name="required" type="checkbox" /> Required control
+                </label>
+                <label className="checkbox-row">
+                  <input name="legal_attestation" type="checkbox" /> Legal
+                  attestation or signature
+                </label>
+                <button
+                  className="button button--secondary form-submit"
+                  disabled={busy || !answerApplicationId}
+                  type="submit"
+                >
+                  Preview exact binding
+                </button>
+              </form>
+              <div className="answer-library__entries">
+                {fieldBindingPreview ? (
+                  <article className="answer-entry field-binding-preview">
+                    <strong>{fieldBindingPreview.preview.label}</strong>
+                    <span>
+                      {fieldBindingPreview.preview.control_kind.replaceAll(
+                        "_",
+                        " ",
+                      )}{" "}
+                      ·{" "}
+                      {Math.round(fieldBindingPreview.preview.confidence * 100)}
+                      % match ·{" "}
+                      {fieldBindingPreview.preview.proposed_permission.replaceAll(
+                        "_",
+                        " ",
+                      )}
+                    </span>
+                    {fieldBindingPreview.preview.validation_errors.map(
+                      (message) => (
+                        <small key={message}>{message}</small>
+                      ),
+                    )}
+                    <button
+                      className="button button--primary"
+                      disabled={busy || !fieldBindingPreview.preview.compatible}
+                      onClick={() => void approveApplicationFieldBinding()}
+                      type="button"
+                    >
+                      Approve reviewed binding
+                    </button>
+                  </article>
+                ) : null}
+                {fieldBindings.map((binding) => (
+                  <article
+                    className="answer-entry field-binding-preview"
+                    key={binding.id}
+                  >
+                    <strong>{binding.label}</strong>
+                    <span>
+                      {binding.canonical_field} ·{" "}
+                      {binding.control_kind.replaceAll("_", " ")}
+                    </span>
+                    <small>
+                      {binding.portal} ·{" "}
+                      {binding.automation_permission.replaceAll("_", " ")} ·
+                      answer revision {binding.answer_revision}
+                    </small>
+                  </article>
+                ))}
+                {!fieldBindingPreview && !fieldBindings.length ? (
+                  <div className="empty-state">
+                    No reviewed portal controls are bound for this application.
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="panel__header panel__header--subsection">

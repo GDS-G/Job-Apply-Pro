@@ -12,6 +12,10 @@ from job_apply_pro.domain.applications import (
     ApplicationAnswerDraftRequest,
     ApplicationAnswerPromotion,
     ApplicationAnswerReview,
+    ApplicationFieldBinding,
+    ApplicationFieldBindingApproval,
+    ApplicationFieldBindingPreview,
+    ApplicationFieldBindingPreviewRequest,
     SubmittedDocumentCapture,
     SubmittedDocumentEvidence,
 )
@@ -44,6 +48,11 @@ from job_apply_pro.domain.knowledge import (
 from job_apply_pro.security.encryption import DecryptionError, SensitiveDataCipher
 from job_apply_pro.security.keys import KeyConfigurationError
 from job_apply_pro.services.ai import AIGatewayService
+from job_apply_pro.services.field_bindings import (
+    ApplicationFieldBindingService,
+    FieldBindingConflictError,
+    FieldBindingError,
+)
 from job_apply_pro.services.knowledge import (
     CandidateKnowledgeConflictError,
     CandidateKnowledgeError,
@@ -51,6 +60,7 @@ from job_apply_pro.services.knowledge import (
 )
 from job_apply_pro.storage.ai_repository import AIGatewayRepository
 from job_apply_pro.storage.database import get_session
+from job_apply_pro.storage.field_binding_repository import ApplicationFieldBindingRepository
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.repositories import (
     ApplicationRepository,
@@ -95,12 +105,31 @@ def get_knowledge_service(
 KnowledgeServiceDependency = Annotated[CandidateKnowledgeService, Depends(get_knowledge_service)]
 
 
+def get_field_binding_service(
+    session: SessionDependency, cipher: CipherDependency
+) -> ApplicationFieldBindingService:
+    return ApplicationFieldBindingService(
+        CandidateKnowledgeRepository(session),
+        ApplicationFieldBindingRepository(session),
+        cipher,
+    )
+
+
+FieldBindingServiceDependency = Annotated[
+    ApplicationFieldBindingService, Depends(get_field_binding_service)
+]
+
+
 def _http_error(error: Exception) -> HTTPException:
     if isinstance(error, LookupError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
     if isinstance(error, CandidateKnowledgeConflictError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    if isinstance(error, FieldBindingConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
     if isinstance(error, (CandidateKnowledgeError, DocumentExtractionError)):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
+    if isinstance(error, FieldBindingError):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     if isinstance(error, (KeyConfigurationError, DecryptionError)):
         return HTTPException(
@@ -410,6 +439,49 @@ def list_application_answers(
     try:
         return service.list_application_answers(application_id)
     except (LookupError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/application-field-bindings/preview",
+    response_model=ApplicationFieldBindingPreview,
+)
+def preview_application_field_binding(
+    command: ApplicationFieldBindingPreviewRequest,
+    service: FieldBindingServiceDependency,
+) -> ApplicationFieldBindingPreview:
+    try:
+        return service.preview(command)
+    except (LookupError, FieldBindingError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/application-field-bindings",
+    response_model=ApplicationFieldBinding,
+    status_code=status.HTTP_201_CREATED,
+)
+def approve_application_field_binding(
+    command: ApplicationFieldBindingApproval,
+    service: FieldBindingServiceDependency,
+) -> ApplicationFieldBinding:
+    try:
+        return service.approve(command)
+    except (LookupError, FieldBindingError, KeyConfigurationError, DecryptionError) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/applications/{application_id}/field-bindings",
+    response_model=list[ApplicationFieldBinding],
+)
+def list_application_field_bindings(
+    application_id: str,
+    service: FieldBindingServiceDependency,
+) -> list[ApplicationFieldBinding]:
+    try:
+        return service.list_bindings(application_id)
+    except (KeyConfigurationError, DecryptionError) as error:
         raise _http_error(error) from error
 
 

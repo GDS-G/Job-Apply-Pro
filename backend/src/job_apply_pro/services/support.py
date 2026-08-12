@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Typed Application Answers"
+    BUILD_NAME = "Auditable Form Field Binding"
 
     def __init__(
         self,
