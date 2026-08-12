@@ -235,6 +235,8 @@ Migration `20260812_0018` adds a current revision counter and immutable encrypte
 
 Source validation used the project Python 3.12 environment because the workstation-global Python 3.13 environment does not contain the repository's Ruff, mypy, or pytest development dependencies. All 110 backend tests passed at 83.15% coverage, all 16 desktop tests passed, TypeScript and Python type checks passed, frontend/backend lint and formatting checks passed, the migration round-trip passed, and the production desktop bundle built. Exact packaged artifact hashes and signature state are recorded after the runtime source commit is fixed.
 
+Runtime source commit `99ccd90` produced the unsigned installer `Job-Apply-Pro-0.26.0-alpha.1-x64.exe`, 169,661,833 bytes, SHA-256 `60691381A8D37E53F17B2CA231D4540C8DFA462A3ADD26EEC0ECD9D98422AAEC`. The bundled backend executable is 18,451,571 bytes with SHA-256 `A647B9C80C0A6C1CFEE134964F643F6805CC3D6ECB7CC78D9861BE6387D2303E`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `97D2060C4B06C73887D00F84884644F1DF993A0D6079FFF1F27F0A397DA7263C`. All three report `NotSigned`, as expected without owner-provided release credentials. The packaged-backend smoke test passed. This evidence-only update does not change the packaged runtime.
+
 Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
 
 ## External launch evidence still required
