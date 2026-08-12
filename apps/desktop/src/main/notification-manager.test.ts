@@ -101,7 +101,7 @@ function sourceSnapshot(): NotificationSourceSnapshot {
     ],
     updateStatus: {
       state: "ERROR",
-      current_version: "0.24.0-alpha.1",
+      current_version: "0.25.0-alpha.1",
       message: "Private update diagnostic",
       checked_at: "2026-08-11T16:00:00Z",
     },

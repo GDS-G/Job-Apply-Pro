@@ -4,10 +4,12 @@ import { arch, platform, release } from "node:os";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import type {
+  CandidateDocumentImportInput,
   CandidateProfileCreate,
   ChallengeAnswerCommand,
   ChallengeSessionCreate,
   IntegrationProvider,
+  DocumentSelectionRequest,
   MockWorkflowCreate,
   PortalKind,
   ReferencePortalRunCreate,
@@ -263,6 +265,77 @@ function tailoredDocumentInput(value: unknown): TailoredDocumentRequest {
   };
 }
 
+function documentImportInput(value: unknown): CandidateDocumentImportInput {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Document import metadata is invalid.");
+  }
+  const tagsValue = Reflect.get(value, "job_family_tags");
+  if (!Array.isArray(tagsValue) || tagsValue.length > 30) {
+    throw new TypeError(
+      "Job-family tags must be an array of at most 30 values.",
+    );
+  }
+  const tags = [
+    ...new Set(
+      tagsValue.map((item) => requiredText(item, "Job-family tag", 80)),
+    ),
+  ];
+  const isPrimary = Reflect.get(value, "is_primary");
+  if (typeof isPrimary !== "boolean") {
+    throw new TypeError("Primary-document preference is invalid.");
+  }
+  return {
+    variant_label: requiredText(
+      Reflect.get(value, "variant_label"),
+      "Variant label",
+      120,
+    ),
+    job_family_tags: tags,
+    is_primary: isPrimary,
+  };
+}
+
+function documentSelectionInput(value: unknown): DocumentSelectionRequest {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Document selection input is invalid.");
+  }
+  const preferredValue = Reflect.get(value, "preferred_tags");
+  const excludedValue = Reflect.get(value, "excluded_document_ids");
+  const preferPrimary = Reflect.get(value, "prefer_primary");
+  if (!Array.isArray(preferredValue) || preferredValue.length > 30) {
+    throw new TypeError(
+      "Preferred tags must be an array of at most 30 values.",
+    );
+  }
+  if (!Array.isArray(excludedValue) || excludedValue.length > 100) {
+    throw new TypeError(
+      "Excluded documents must be an array of at most 100 ids.",
+    );
+  }
+  if (typeof preferPrimary !== "boolean") {
+    throw new TypeError("Primary-document preference is invalid.");
+  }
+  return {
+    application_id: requiredText(
+      Reflect.get(value, "application_id"),
+      "Application id",
+      100,
+    ),
+    kind: "RESUME",
+    preferred_tags: [
+      ...new Set(
+        preferredValue.map((item) => requiredText(item, "Preferred tag", 80)),
+      ),
+    ],
+    excluded_document_ids: [
+      ...new Set(
+        excludedValue.map((item) => requiredText(item, "Document id", 100)),
+      ),
+    ],
+    prefer_primary: preferPrimary,
+  };
+}
+
 function challengeInput(value: unknown): ChallengeSessionCreate {
   if (typeof value !== "object" || value === null) {
     throw new TypeError("Challenge session input is invalid.");
@@ -337,22 +410,72 @@ export function registerWorkbenchIpc(
       requiredText(value, "Profile id", 100),
     ),
   );
-  ipcMain.handle("knowledge:import-resume", async (_event, value: unknown) => {
-    const profileId = requiredText(value, "Profile id", 100);
-    const selection = await dialog.showOpenDialog({
-      title: "Import candidate resume",
-      properties: ["openFile"],
-      filters: [
-        {
-          name: "Candidate documents",
-          extensions: ["doc", "docx", "pdf", "rtf", "txt", "md"],
-        },
-      ],
-    });
-    const filePath = selection.filePaths[0];
-    if (selection.canceled || !filePath) return null;
-    return supervisor.client.importResume(profileId, filePath);
-  });
+  ipcMain.handle(
+    "knowledge:import-resume",
+    async (_event, value: unknown, metadataValue: unknown) => {
+      const profileId = requiredText(value, "Profile id", 100);
+      const metadata = documentImportInput(metadataValue);
+      const selection = await dialog.showOpenDialog({
+        title: "Import candidate resume",
+        properties: ["openFile"],
+        filters: [
+          {
+            name: "Candidate documents",
+            extensions: ["doc", "docx", "pdf", "rtf", "txt", "md"],
+          },
+        ],
+      });
+      const filePath = selection.filePaths[0];
+      if (selection.canceled || !filePath) return null;
+      return supervisor.client.importResume(profileId, filePath, metadata);
+    },
+  );
+  ipcMain.handle("knowledge:preview-selection", (_event, value: unknown) =>
+    supervisor.client.previewDocumentSelection(documentSelectionInput(value)),
+  );
+  ipcMain.handle(
+    "knowledge:approve-selection",
+    async (
+      event,
+      value: unknown,
+      versionValue: unknown,
+      fingerprintValue: unknown,
+    ) => {
+      const input = documentSelectionInput(value);
+      const documentVersionId = requiredText(
+        versionValue,
+        "Document version id",
+        100,
+      );
+      const fingerprint = requiredText(
+        fingerprintValue,
+        "Document recommendation fingerprint",
+        64,
+      );
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Select this reviewed resume?",
+        message:
+          "The selected immutable resume version will be attached to this application.",
+        detail:
+          "The backend will refuse if the application, job requirements, variant evidence, or recommendation fingerprint changed.",
+        buttons: ["Cancel", "Select reviewed resume"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveDocumentSelection(
+        input,
+        documentVersionId,
+        fingerprint,
+      );
+    },
+  );
   ipcMain.handle(
     "knowledge:review-claim",
     (_event, claimIdValue: unknown, approvedValue: unknown) => {

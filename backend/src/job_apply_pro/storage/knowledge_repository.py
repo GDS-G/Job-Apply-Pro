@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.applications import (
@@ -21,6 +21,7 @@ from job_apply_pro.domain.knowledge import (
     DocumentGenerationAudit,
     DocumentKind,
     DocumentOutputFormat,
+    DocumentSelectionAudit,
     DocumentTemplate,
     EvidenceSource,
     RetrievalChunkRecord,
@@ -29,9 +30,11 @@ from job_apply_pro.domain.knowledge import (
 )
 from job_apply_pro.storage.models import (
     AnswerLibraryRow,
+    ApplicationRow,
     CandidateClaimRow,
     DocumentGenerationAuditRow,
     DocumentRow,
+    DocumentSelectionAuditRow,
     DocumentVersionRow,
     EvidenceSourceRow,
     RetrievalChunkRow,
@@ -146,6 +149,16 @@ class CandidateKnowledgeRepository:
         claims: list[CandidateClaim],
     ) -> None:
         try:
+            if document.is_primary:
+                self._session.execute(
+                    update(DocumentRow)
+                    .where(
+                        DocumentRow.profile_id == document.profile_id,
+                        DocumentRow.kind == document.kind.value,
+                        DocumentRow.is_primary.is_(True),
+                    )
+                    .values(is_primary=False)
+                )
             self._session.add(
                 DocumentRow(
                     id=document.id,
@@ -469,6 +482,57 @@ class CandidateKnowledgeRepository:
                 evidence_claim_ids=row.evidence_claim_ids_json,
                 requirement_ids=row.requirement_ids_json,
                 missing_required_requirements=row.missing_required_requirements_json,
+                created_at=_utc(row.created_at),
+            )
+            for row in rows
+        ]
+
+    def approve_selection(self, audit: DocumentSelectionAudit) -> DocumentSelectionAudit:
+        application = self._session.get(ApplicationRow, audit.application_id)
+        if application is None:
+            raise LookupError(f"Application {audit.application_id} was not found")
+        try:
+            application.selected_document_version_id = audit.document_version_id
+            application.updated_at = audit.created_at
+            self._session.add(
+                DocumentSelectionAuditRow(
+                    id=audit.id,
+                    application_id=audit.application_id,
+                    profile_id=audit.profile_id,
+                    job_id=audit.job_id,
+                    document_id=audit.document_id,
+                    document_version_id=audit.document_version_id,
+                    score=audit.score,
+                    review_fingerprint=audit.review_fingerprint,
+                    criteria_json=audit.criteria,
+                    reasons_json=audit.reasons,
+                    created_at=audit.created_at,
+                )
+            )
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+        return audit
+
+    def list_selection_audits(self, application_id: str) -> list[DocumentSelectionAudit]:
+        rows = self._session.scalars(
+            select(DocumentSelectionAuditRow)
+            .where(DocumentSelectionAuditRow.application_id == application_id)
+            .order_by(DocumentSelectionAuditRow.created_at.desc())
+        ).all()
+        return [
+            DocumentSelectionAudit(
+                id=row.id,
+                application_id=row.application_id,
+                profile_id=row.profile_id,
+                job_id=row.job_id,
+                document_id=row.document_id,
+                document_version_id=row.document_version_id,
+                score=row.score,
+                review_fingerprint=row.review_fingerprint,
+                criteria=row.criteria_json,
+                reasons=row.reasons_json,
                 created_at=_utc(row.created_at),
             )
             for row in rows

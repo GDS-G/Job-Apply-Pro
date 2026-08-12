@@ -215,6 +215,20 @@ PR validation exposed two unrelated CI-reliability defects after the application
 
 Live external reranking remains gated on owner configuration, current provider terms/privacy/retention review, explicit per-preview consent, model availability, and authorized traffic. No test account, pasted credential, or private resume is used in source or CI. The local installer is validation evidence only and must not be published as a production update.
 
+### Explainable Resume Selection source validation
+
+`Explainable Resume Selection v0.25.0-alpha.1` adds local deterministic ranking of active resume variants against the current application job. The policy combines required-requirement coverage, all-requirement coverage, job-title overlap, job-family/operator-tag overlap, and an optional primary-resume preference. Every ranked candidate exposes its score, matched requirement IDs, matched tags, and plain-language reasons. Stable tie-breaking makes repeat previews reproducible.
+
+The top candidate is advisory. The desktop allows any reviewed candidate to be chosen only after a native confirmation. Approval recomputes the current ranking and rejects stale fingerprints. The selected immutable document-version ID and append-only audit are committed atomically; migration `20260812_0017` persists the score, criteria, reasons, and fingerprint. Desktop import now captures the operator's variant label, tags, and primary preference rather than applying hidden fixed metadata. ADR-0034 records the policy and boundaries.
+
+This release adds no live-provider or external-AI dependency. Ranking decrypts candidate evidence only inside the existing authenticated local backend and does not use credentials, browser state, protected traits, or unverified profile claims. Sanitized service and API tests cover recommendation order, exclusions, ties, stale review refusal, native-facing contracts, atomic selection, and audit retrieval.
+
+All 109 backend tests passed at 82.98% total coverage and all 16 desktop tests passed. Strict Ruff formatting/lint, mypy, TypeScript, oxlint, Prettier, production Electron build, migration upgrade/downgrade/re-upgrade, `pnpm audit --audit-level high`, and `pip-audit --skip-editable` passed; pip-audit skipped only the unpublished editable backend package.
+
+Exact runtime source head `2849d6ce7b380fe46a75c7df41408e71d29bac5e` produced the unsigned installer `Job-Apply-Pro-0.25.0-alpha.1-x64.exe`, 169,648,853 bytes, SHA-256 `7EEB7FA1FAF8CCF89D063D4A8E40A0A58BBDC1C91B90C6CB3462F29C838F6060`. The bundled backend executable is 18,446,954 bytes with SHA-256 `D929302B997774746886FD2EF24614B242D613B7AD98885B660905735F962F3A`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `90CC658C452425E0F808082C9D01629711EFD11AB1A294CF7CAB43B3D0F4B42C`. All three report `NotSigned`, as expected without release credentials. The packaged-backend smoke, NSIS installer, unpacked application, PDFium DLL, and pypdfium2 license tree passed/persisted. This documentation-only evidence update does not alter runtime output.
+
+Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

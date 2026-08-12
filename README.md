@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Evidence-Ranked Tailoring build
+## Explainable Resume Selection build
 
-The active milestone is **Evidence-Ranked Tailoring `v0.24.0-alpha.1`**. Tailored resumes and cover letters now offer professional and compact templates plus opt-in governed AI reranking with employment-sensitive classification, explicit external-provider consent, and visible deterministic fallback. Template, requested mode, actual ranking method, selected claim IDs, requirement matches, and preview content are bound into the exact review fingerprint; generation audits retain the template and ranking provenance. The build retains layout-aware ingestion, native Gemini fallback, encrypted provider synchronization, supervised portal execution, and every prior safety boundary.
+The active milestone is **Explainable Resume Selection `v0.25.0-alpha.1`**. Operators can label imported resume variants, attach job-family tags, mark a primary resume, and rank eligible immutable versions against a target job. Every score exposes its job-title, requirement, tag, and preference reasons. Selection requires native review and a current fingerprint, then atomically updates the application and writes a durable audit. The build retains evidence-ranked tailoring, layout-aware ingestion, native Gemini fallback, encrypted provider synchronization, supervised portal execution, and every prior safety boundary.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

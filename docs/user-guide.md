@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Evidence-Ranked Tailoring `v0.24.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Explainable Resume Selection `v0.25.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.24.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.25.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -69,6 +69,17 @@ The app follows at most ten provider pages and imports at most 1,000 messages pe
 ## Generate and retain application documents
 
 Import source resumes and supporting material in DOC, DOCX, PDF, RTF, TXT, or Markdown form. Review every proposed claim before approving it. Tailored generation ignores proposed, rejected, superseded, unlocked, or profile-only claims.
+
+Before choosing a resume file, enter a clear variant label such as `Platform engineering`, optional comma-separated job-family tags such as `platform, cloud, security`, and whether the file should receive the primary-resume preference. These fields are local ranking metadata; they are not sent to a job portal.
+
+To select a resume for an application:
+
+1. Open **Explainable resume selection**, choose the target application, and optionally enter preferred tags.
+2. Keep the primary preference enabled only if a primary resume should receive its documented 10% ranking factor.
+3. Select **Rank resume variants** and review every candidate's percentage and reasons. The top row is advisory; you may choose any reviewed variant.
+4. Select **Review & select**, then approve the native dialog. If the job, requirements, document versions, exclusions, or preferences changed, selection fails and you must rank again.
+
+The application stores the exact immutable document-version ID and a durable audit of the score, reasons, criteria, and review fingerprint. Ranking is deterministic and local; it does not infer missing experience or prove eligibility. Keep seniority and industry wording in the job title, requirements, or your variant tags when those distinctions matter.
 
 Legacy DOC and scanned-PDF support are opt-in because they invoke local document tools. Install LibreOffice and/or Tesseract from their official distributions, then configure exact absolute executable paths in the Windows user environment and restart Job Apply Pro. Do not enter command lines or portal credentials:
 

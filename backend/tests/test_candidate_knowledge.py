@@ -28,6 +28,8 @@ from job_apply_pro.domain.knowledge import (
     ClaimVerificationStatus,
     DocumentKind,
     DocumentOutputFormat,
+    DocumentSelectionApproval,
+    DocumentSelectionRequest,
     DocumentTemplate,
     RetrievalQuery,
     TailoredDocumentApproval,
@@ -219,6 +221,245 @@ def test_import_review_lock_experience_and_private_retrieval(
     }
 
 
+def test_explainable_document_selection_requires_review_and_persists_audit(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    platform = service.import_document(
+        profile_id,
+        file_name="platform.txt",
+        data=b"Platform Engineer\nKubernetes Python operations and distributed systems",
+        kind=DocumentKind.RESUME,
+        display_name="Platform resume",
+        variant_label="Platform engineering",
+        job_family_tags=["platform", "cloud"],
+        is_primary=False,
+    )
+    service.import_document(
+        profile_id,
+        file_name="general.txt",
+        data=b"Generalist\nCustomer support and office administration",
+        kind=DocumentKind.RESUME,
+        display_name="General resume",
+        variant_label="General",
+        job_family_tags=["general"],
+        is_primary=True,
+    )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="selection-1",
+            employer="Evidence Systems",
+            title="Senior Platform Engineer",
+            description_hash=hashlib.sha256(b"selection").hexdigest(),
+        )
+    )
+    session.add_all(
+        [
+            JobRequirementRow(
+                id="selection-kubernetes",
+                job_id=job.id,
+                category="skill",
+                text="Kubernetes operations",
+                required=True,
+                evidence_json={"source": "fixture"},
+            ),
+            JobRequirementRow(
+                id="selection-python",
+                job_id=job.id,
+                category="skill",
+                text="Python",
+                required=False,
+                evidence_json={"source": "fixture"},
+            ),
+        ]
+    )
+    session.commit()
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="selection-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    request = DocumentSelectionRequest(
+        application_id=application.id,
+        preferred_tags=["cloud", "platform", "cloud"],
+    )
+
+    preview = service.preview_document_selection(request)
+    assert preview.recommended_document_version_id == platform.version.id
+    assert preview.recommendations[0].document_id == platform.document.id
+    assert preview.recommendations[0].matched_job_family_tags == ["cloud", "platform"]
+    assert preview.recommendations[0].matched_requirement_ids == [
+        "selection-kubernetes",
+        "selection-python",
+    ]
+    assert any("2 of 2" in reason for reason in preview.recommendations[0].reasons)
+
+    with pytest.raises(CandidateKnowledgeConflictError, match="changed"):
+        service.approve_document_selection(
+            DocumentSelectionApproval(
+                **request.model_dump(),
+                document_version_id=platform.version.id,
+                review_fingerprint="0" * 64,
+                confirmation_phrase="SELECT REVIEWED DOCUMENT",
+            )
+        )
+    audit = service.approve_document_selection(
+        DocumentSelectionApproval(
+            **request.model_dump(),
+            document_version_id=platform.version.id,
+            review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="SELECT REVIEWED DOCUMENT",
+        )
+    )
+    assert audit.document_version_id == platform.version.id
+    assert audit.criteria["recommended_document_version_id"] == platform.version.id
+    assert service.list_document_selection_audits(application.id) == [audit]
+    selected = ApplicationRepository(session).get(application.id)
+    assert selected is not None
+    assert selected.selected_document_version_id == platform.version.id
+
+
+def test_document_selection_exclusion_and_stable_tie_breaking(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    first = service.import_document(
+        profile_id,
+        file_name="a.txt",
+        data=b"Platform Engineer Kubernetes",
+        kind=DocumentKind.RESUME,
+        display_name="A",
+        variant_label="Alpha",
+        job_family_tags=["platform"],
+        is_primary=False,
+    )
+    second = service.import_document(
+        profile_id,
+        file_name="b.txt",
+        data=b"Platform Engineer Kubernetes",
+        kind=DocumentKind.RESUME,
+        display_name="B",
+        variant_label="Beta",
+        job_family_tags=["platform"],
+        is_primary=False,
+    )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="selection-2",
+            employer="Stable Systems",
+            title="Platform Engineer",
+            description_hash=hashlib.sha256(b"stable-selection").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="stable-selection-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    preview = service.preview_document_selection(
+        DocumentSelectionRequest(application_id=application.id, prefer_primary=False)
+    )
+    assert [item.document_id for item in preview.recommendations] == [
+        first.document.id,
+        second.document.id,
+    ]
+    excluded = service.preview_document_selection(
+        DocumentSelectionRequest(
+            application_id=application.id,
+            excluded_document_ids=[first.document.id],
+            prefer_primary=False,
+        )
+    )
+    assert excluded.recommended_document_version_id == second.version.id
+
+
+def test_document_selection_does_not_count_partial_requirement_overlap(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    service.import_document(
+        profile_id,
+        file_name="partial.txt",
+        data=b"Kubernetes support",
+        kind=DocumentKind.RESUME,
+        display_name="Partial",
+        variant_label="Partial",
+        job_family_tags=[],
+        is_primary=False,
+    )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="selection-partial",
+            employer="Conservative Systems",
+            title="Platform Engineer",
+            description_hash=hashlib.sha256(b"selection-partial").hexdigest(),
+        )
+    )
+    session.add(
+        JobRequirementRow(
+            id="selection-kubernetes-operations",
+            job_id=job.id,
+            category="skill",
+            text="Kubernetes operations",
+            required=True,
+            evidence_json={"source": "fixture"},
+        )
+    )
+    session.commit()
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="selection-partial-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+
+    preview = service.preview_document_selection(
+        DocumentSelectionRequest(application_id=application.id)
+    )
+    assert preview.recommendations[0].matched_requirement_ids == []
+    assert any("0 of 1" in reason for reason in preview.recommendations[0].reasons)
+
+
+def test_importing_primary_resume_replaces_prior_primary(session: Session, tmp_path: Path) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    first = service.import_document(
+        profile_id,
+        file_name="first.txt",
+        data=b"First platform resume",
+        kind=DocumentKind.RESUME,
+        display_name="First",
+        variant_label="First",
+        job_family_tags=["platform"],
+        is_primary=True,
+    )
+    second = service.import_document(
+        profile_id,
+        file_name="second.txt",
+        data=b"Second platform resume",
+        kind=DocumentKind.RESUME,
+        display_name="Second",
+        variant_label="Second",
+        job_family_tags=["platform"],
+        is_primary=True,
+    )
+
+    documents = {item.id: item for item in service.list_documents(profile_id)}
+    assert documents[first.document.id].is_primary is False
+    assert documents[second.document.id].is_primary is True
+
+
 def test_pdf_docx_and_rtf_layout_extractors() -> None:
     pdf_buffer = BytesIO()
     canvas = Canvas(pdf_buffer)
@@ -272,6 +513,83 @@ def test_candidate_knowledge_multipart_api(session: Session, tmp_path: Path) -> 
         snapshot = client.get(f"/api/v1/knowledge/profiles/{profile_id}/snapshot").json()
         assert len(snapshot["documents"]) == 1
         assert snapshot["answers"] == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_document_selection_api_requires_fingerprint_approval(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    service = _service(session, tmp_path)
+    imported = service.import_document(
+        profile_id,
+        file_name="platform.txt",
+        data=b"Senior Platform Engineer with Kubernetes and Python experience",
+        kind=DocumentKind.RESUME,
+        display_name="Platform resume",
+        variant_label="Platform",
+        job_family_tags=["platform", "cloud"],
+        is_primary=True,
+    )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="selection-api",
+            employer="API Systems",
+            title="Platform Engineer",
+            description_hash=hashlib.sha256(b"selection-api").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="selection-api-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    app.dependency_overrides[get_knowledge_service] = lambda: service
+    client = TestClient(app)
+    request = {
+        "application_id": application.id,
+        "kind": "RESUME",
+        "preferred_tags": ["platform"],
+        "excluded_document_ids": [],
+        "prefer_primary": True,
+    }
+    try:
+        preview_response = client.post(
+            "/api/v1/knowledge/documents/selection/preview", json=request
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()
+        assert preview["recommended_document_version_id"] == imported.version.id
+
+        stale = client.post(
+            "/api/v1/knowledge/documents/selection/approve",
+            json={
+                **request,
+                "document_version_id": imported.version.id,
+                "review_fingerprint": "0" * 64,
+                "confirmation_phrase": "SELECT REVIEWED DOCUMENT",
+            },
+        )
+        assert stale.status_code == 409
+
+        approved = client.post(
+            "/api/v1/knowledge/documents/selection/approve",
+            json={
+                **request,
+                "document_version_id": imported.version.id,
+                "review_fingerprint": preview["review_fingerprint"],
+                "confirmation_phrase": "SELECT REVIEWED DOCUMENT",
+            },
+        )
+        assert approved.status_code == 200
+        assert approved.json()["document_version_id"] == imported.version.id
+        audits = client.get(f"/api/v1/knowledge/applications/{application.id}/document-selections")
+        assert audits.status_code == 200
+        assert [item["id"] for item in audits.json()] == [approved.json()["id"]]
     finally:
         app.dependency_overrides.clear()
 

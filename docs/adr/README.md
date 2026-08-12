@@ -35,3 +35,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0031: Native Gemini secondary provider](0031-native-gemini-secondary-provider.md)
 - [ADR-0032: Conservative layout-aware document ingestion](0032-conservative-layout-aware-document-ingestion.md)
 - [ADR-0033: Governed evidence-ranked tailoring](0033-governed-evidence-ranked-tailoring.md)
+- [ADR-0034: Explainable immutable resume selection](0034-explainable-immutable-resume-selection.md)

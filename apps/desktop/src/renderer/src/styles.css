@@ -1081,6 +1081,12 @@ h1 {
   margin-top: 14px;
 }
 
+.document-import-form {
+  grid-template-columns: minmax(130px, 0.7fr) minmax(180px, 1.3fr) auto auto;
+  align-items: end;
+  padding-top: 4px;
+}
+
 .knowledge-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
@@ -1148,6 +1154,41 @@ h1 {
   font-weight: 700;
   background: #e6f7f0;
   border-radius: 99px;
+}
+
+.selection-results {
+  gap: 10px;
+}
+
+.selection-result {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  background: #f8f9fc;
+  border: 1px solid #e5e8f0;
+  border-radius: 9px;
+}
+
+.selection-result > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.selection-result em {
+  color: #365fbc;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.selection-result ul {
+  margin: 0;
+  padding-left: 17px;
+  color: #657087;
+}
+
+.selection-result button {
+  justify-self: start;
 }
 
 .claim-row button {

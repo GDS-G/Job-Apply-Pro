@@ -2,9 +2,11 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   BackendRuntimeStatus,
+  CandidateDocumentImportInput,
   DesktopNotificationDestination,
   DesktopNotificationStatus,
   DesktopUpdateStatus,
+  DocumentSelectionRequest,
   CandidateProfileCreate,
   ChallengeAnswerCommand,
   ChallengeSessionCreate,
@@ -30,8 +32,23 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("workbench:list-browser-sessions", workflowId),
     getCandidateKnowledge: (profileId: string) =>
       ipcRenderer.invoke("knowledge:get", profileId),
-    selectAndImportResume: (profileId: string) =>
-      ipcRenderer.invoke("knowledge:import-resume", profileId),
+    selectAndImportResume: (
+      profileId: string,
+      input: CandidateDocumentImportInput,
+    ) => ipcRenderer.invoke("knowledge:import-resume", profileId, input),
+    previewDocumentSelection: (input: DocumentSelectionRequest) =>
+      ipcRenderer.invoke("knowledge:preview-selection", input),
+    approveDocumentSelection: (
+      input: DocumentSelectionRequest,
+      documentVersionId: string,
+      reviewFingerprint: string,
+    ) =>
+      ipcRenderer.invoke(
+        "knowledge:approve-selection",
+        input,
+        documentVersionId,
+        reviewFingerprint,
+      ),
     reviewCandidateClaim: (claimId: string, approved: boolean) =>
       ipcRenderer.invoke("knowledge:review-claim", claimId, approved),
     previewTailoredDocument: (input: TailoredDocumentRequest) =>

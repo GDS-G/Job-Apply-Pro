@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.25.0-alpha.1] - Unreleased
+
+### Added
+
+- Added deterministic resume-variant ranking against job title, requirements, job-family tags, operator preferences, and an optional primary-resume preference.
+- Added an exact-review approval flow that atomically updates the application's immutable document-version selection and creates a durable selection audit through migration `20260812_0017`.
+- Added desktop import metadata controls and an explainable ranked-review panel with native confirmation.
+
+### Changed
+
+- Resume import no longer hides a fixed `General` label: operators can name variants, attach job-family tags, and mark a primary resume before choosing the local file.
+- Application document selection now uses stable tie-breaking and shows every scoring reason; the top recommendation remains advisory and any reviewed candidate can be selected.
+
+### Security
+
+- Selection recomputes a SHA-256 fingerprint over the application, current job/requirements, eligible immutable versions, ranking results, exclusions, and preferences. Stale or unreviewed choices fail closed.
+- Ranking is local and deterministic. It adds no provider credential, browser login, external AI, or portal-write surface; imported contents remain encrypted at rest.
+
 ## [0.24.0-alpha.1] - Unreleased
 
 ### Added
