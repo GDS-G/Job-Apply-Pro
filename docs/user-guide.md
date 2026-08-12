@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Observed Form Control Capture `v0.30.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Verified Approved Field Execution `v0.31.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.30.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.31.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -95,7 +95,9 @@ After an application answer reaches Reviewed or Promoted state, capture the curr
 
 Select **Preview exact binding**. Review compatibility errors, confidence, answer source and revision, validation rules, and the proposed automation permission. Select **Approve reviewed binding** only when the observed control and canonical answer are the same field. The native dialog and backend fingerprint bind the approval to that exact answer revision and observation. If either changes, preview again.
 
-Signature, disclosure, file-upload, custom-widget, and legal-attestation controls remain visible user work even after binding. An approved binding is audit metadata, not proof that the value was filled or submitted. This build does not execute field bindings in the browser.
+Enable `JAP_SUPERVISED_FIELD_EXECUTION_ENABLED=true` only for supervised use. On a fingerprint-current page, an `AUTOFILL_ALLOWED` native text/select/checkbox binding offers **Review & populate exact field**. The desktop shows a native confirmation, the backend re-observes and revalidates the full binding, executes one verified action, records evidence without answer text, and returns control to you.
+
+Radio groups, signature, disclosure, file-upload, disabled, custom-widget, and legal-attestation controls remain visible user work even after binding. This execution path never submits the application.
 
 Legacy DOC and scanned-PDF support are opt-in because they invoke local document tools. Install LibreOffice and/or Tesseract from their official distributions, then configure exact absolute executable paths in the Windows user environment and restart Job Apply Pro. Do not enter command lines or portal credentials:
 

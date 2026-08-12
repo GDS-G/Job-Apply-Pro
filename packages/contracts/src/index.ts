@@ -1181,6 +1181,25 @@ export interface ApplicationFieldBinding extends Omit<
   updated_at: string;
 }
 
+export interface ApplicationFieldExecution {
+  id: string;
+  binding_id: string;
+  application_id: string;
+  application_answer_id: string;
+  answer_revision: number;
+  supervised_run_id: string;
+  browser_session_id: string;
+  portal: string;
+  page_fingerprint_before: string;
+  page_fingerprint_after: string;
+  control_key: string;
+  action_kind: "FILL" | "SELECT" | "CHECK" | "UNCHECK";
+  verified: boolean;
+  action_fingerprint: string;
+  error?: string | null;
+  created_at: string;
+}
+
 export interface CandidateKnowledgeSnapshot {
   profile_id: string;
   documents: CandidateDocument[];
@@ -1486,6 +1505,14 @@ export interface DesktopBridge {
     listApplicationFieldBindings(
       applicationId: string,
     ): Promise<ApplicationFieldBinding[]>;
+    executeApplicationField(
+      runId: string,
+      bindingId: string,
+      reviewPageFingerprint: string,
+    ): Promise<ApplicationFieldExecution | null>;
+    listApplicationFieldExecutions(
+      applicationId: string,
+    ): Promise<ApplicationFieldExecution[]>;
     previewTailoredDocument(
       input: TailoredDocumentRequest,
     ): Promise<TailoredDocumentPreview>;

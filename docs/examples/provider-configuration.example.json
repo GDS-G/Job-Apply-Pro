@@ -25,7 +25,13 @@
       "provider": "OUTLOOK",
       "client_id": "replace-with-microsoft-public-desktop-client-id",
       "redirect_uri": "http://127.0.0.1:8765/api/v1/communications/oauth/callback",
-      "requested_scopes": ["openid", "email", "offline_access", "User.Read", "Mail.Read"]
+      "requested_scopes": [
+        "openid",
+        "email",
+        "offline_access",
+        "User.Read",
+        "Mail.Read"
+      ]
     },
     {
       "provider": "OUTLOOK_CALENDAR",

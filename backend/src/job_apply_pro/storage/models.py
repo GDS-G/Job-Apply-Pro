@@ -292,6 +292,38 @@ class ApplicationFieldBindingRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ApplicationFieldExecutionRow(Base):
+    __tablename__ = "application_field_executions"
+    __table_args__ = (
+        Index(
+            "ix_application_field_executions_application_created",
+            "application_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    binding_id: Mapped[str] = mapped_column(ForeignKey("application_field_bindings.id"), index=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    application_answer_id: Mapped[str] = mapped_column(
+        ForeignKey("application_answers.id"), index=True
+    )
+    answer_revision: Mapped[int] = mapped_column(Integer)
+    supervised_run_id: Mapped[str] = mapped_column(
+        ForeignKey("supervised_portal_runs.id"), index=True
+    )
+    browser_session_id: Mapped[str] = mapped_column(ForeignKey("browser_sessions.id"), index=True)
+    portal: Mapped[str] = mapped_column(String(80))
+    page_fingerprint_before: Mapped[str] = mapped_column(String(200))
+    page_fingerprint_after: Mapped[str] = mapped_column(String(200))
+    control_key: Mapped[str] = mapped_column(String(200))
+    action_kind: Mapped[str] = mapped_column(String(40))
+    verified: Mapped[bool] = mapped_column(Boolean)
+    action_fingerprint: Mapped[str] = mapped_column(String(64))
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SubmittedDocumentEvidenceRow(Base):
     __tablename__ = "submitted_document_evidence"
     __table_args__ = (

@@ -6,6 +6,7 @@ import type {
   ApplicationAnswerDraftInput,
   ApplicationAnswerReviewInput,
   ApplicationFieldBinding,
+  ApplicationFieldExecution,
   ApplicationFieldBindingPreview,
   ApplicationFieldBindingPreviewInput,
   FieldAutomationPermission,
@@ -215,6 +216,33 @@ export class BackendClient {
   ): Promise<ApplicationFieldBinding[]> {
     return this.request(
       `/knowledge/applications/${encodeURIComponent(applicationId)}/field-bindings`,
+    );
+  }
+
+  executeApplicationField(
+    runId: string,
+    bindingId: string,
+    reviewPageFingerprint: string,
+  ): Promise<ApplicationFieldExecution> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(runId)}/field-executions`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          binding_id: bindingId,
+          review_page_fingerprint: reviewPageFingerprint,
+          confirmation_phrase: "EXECUTE APPROVED FIELD",
+        }),
+      },
+      120_000,
+    );
+  }
+
+  listApplicationFieldExecutions(
+    applicationId: string,
+  ): Promise<ApplicationFieldExecution[]> {
+    return this.request(
+      `/portals/supervised/applications/${encodeURIComponent(applicationId)}/field-executions`,
     );
   }
 

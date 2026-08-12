@@ -960,6 +960,52 @@ export function registerWorkbenchIpc(
         requiredText(applicationIdValue, "Application id", 100),
       ),
   );
+  ipcMain.handle(
+    "portals:execute-application-field",
+    async (
+      event,
+      runIdValue: unknown,
+      bindingIdValue: unknown,
+      fingerprintValue: unknown,
+    ) => {
+      const runId = requiredText(runIdValue, "Supervised portal run id", 100);
+      const bindingId = requiredText(bindingIdValue, "Field binding id", 100);
+      const fingerprint = requiredText(
+        fingerprintValue,
+        "Reviewed page fingerprint",
+        200,
+      );
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Populate this exact approved field?",
+        message:
+          "One reviewed answer will be entered into the currently observed field.",
+        detail:
+          "The backend will reject changed pages, answers, controls, legal attestations, uploads, signatures, custom widgets, and all final-submit actions.",
+        buttons: ["Cancel", "Populate exact approved field"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.executeApplicationField(
+        runId,
+        bindingId,
+        fingerprint,
+      );
+    },
+  );
+  ipcMain.handle(
+    "portals:list-application-field-executions",
+    (_event, applicationIdValue: unknown) =>
+      supervisor.client.listApplicationFieldExecutions(
+        requiredText(applicationIdValue, "Application id", 100),
+      ),
+  );
   ipcMain.handle("knowledge:preview-tailored", (_event, value: unknown) =>
     supervisor.client.previewTailoredDocument(tailoredDocumentInput(value)),
   );

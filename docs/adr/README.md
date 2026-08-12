@@ -41,3 +41,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0037: Typed application-answer validation](0037-typed-application-answer-validation.md)
 - [ADR-0038: Auditable portal field bindings](0038-auditable-portal-field-bindings.md)
 - [ADR-0039: Typed observed form controls](0039-typed-observed-form-controls.md)
+- [ADR-0040: Verified approved field execution](0040-verified-approved-field-execution.md)
+- [ADR-0039: Typed observed form controls](0039-typed-observed-form-controls.md)

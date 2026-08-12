@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.31.0-alpha.1] - Unreleased
+
+### Added
+
+- Added exact, verified execution for current `AUTOFILL_ALLOWED` text, textarea, email, telephone, number, date, select, and checkbox bindings.
+- Added migration `20260812_0022`, non-secret field-execution evidence, authenticated API routes, shared desktop contracts, native confirmation, renderer controls, and deterministic tests.
+- Added a separate default-off `JAP_SUPERVISED_FIELD_EXECUTION_ENABLED` policy gate.
+
+### Changed
+
+- Approved execution now re-observes the live page and revalidates the complete binding fingerprint, answer revision, workflow, portal, control, locator, constraints, and permission before one action.
+- The browser returns to visible user takeover after each field action.
+
+### Security
+
+- Sensitive action and verification values are redacted before browser-action persistence; answer text and answer-derived hashes are excluded from field-execution evidence.
+- Radio groups, uploads, signatures, disclosures, legal attestations, disabled controls, custom widgets, and final submission are prohibited by this execution path.
+
 ## [0.30.0-alpha.1] - Unreleased
 
 ### Added

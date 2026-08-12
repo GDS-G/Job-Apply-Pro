@@ -437,16 +437,32 @@ class BrowserRuntimeRepository:
         if row is None:
             raise LookupError(f"Browser session {result.session_id} was not found")
         try:
+            stored_action = result.action
+            stored_error = result.error
+            if result.action.sensitive_value:
+                stored_action = result.action.model_copy(
+                    update={
+                        "value": None,
+                        "verification": result.action.verification.model_copy(
+                            update={"value": None}
+                        ),
+                    }
+                )
+                stored_error = (
+                    "Sensitive browser action failed or could not be verified"
+                    if result.error
+                    else None
+                )
             self._session.add(
                 BrowserActionRow(
                     id=result.id,
                     session_id=result.session_id,
                     sequence=result.sequence,
-                    action_json=result.action.model_dump(mode="json"),
+                    action_json=stored_action.model_dump(mode="json"),
                     verified=result.verified,
                     attempts=result.attempts,
                     observation_json=result.observation.model_dump(mode="json"),
-                    error=result.error,
+                    error=stored_error,
                     created_at=result.created_at,
                 )
             )
