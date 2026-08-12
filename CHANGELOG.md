@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.34.0-alpha.1] - Unreleased
+
+### Added
+
+- Added a read-only required-field coverage review for the current supervised page, application, and workflow.
+- Added deterministic `READY_TO_EXECUTE`, `ALREADY_VERIFIED`, `MANUAL_REQUIRED`, `UNBOUND`, `STALE_BINDING`, and `AMBIGUOUS_BINDING` classifications with counts, reasons, and a metadata-only review fingerprint.
+- Added authenticated API, shared desktop contracts, IPC/preload wiring, renderer summary, and service regression coverage.
+
+### Security
+
+- Coverage review never resumes the browser, decrypts answer text, or performs an action; it evaluates only bounded observed-control and persisted evidence metadata.
+- Cross-workflow requests fail closed, optional controls are excluded, and legal, disabled, unsupported, stale, or ambiguous required controls never appear ready for automation.
+
 ## [0.33.0-alpha.1] - Unreleased
 
 ### Added

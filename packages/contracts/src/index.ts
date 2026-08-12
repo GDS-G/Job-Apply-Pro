@@ -1202,6 +1202,40 @@ export interface ApplicationFieldExecution {
   created_at: string;
 }
 
+export type ApplicationFieldCoverageStatus =
+  | "READY_TO_EXECUTE"
+  | "ALREADY_VERIFIED"
+  | "MANUAL_REQUIRED"
+  | "UNBOUND"
+  | "STALE_BINDING"
+  | "AMBIGUOUS_BINDING";
+
+export interface ApplicationFieldCoverageItem {
+  control_key: string;
+  label: string;
+  control_kind: PortalFieldControlKind;
+  required: true;
+  status: ApplicationFieldCoverageStatus;
+  binding_id?: string | null;
+  reason: string;
+}
+
+export interface ApplicationFieldCoverageReview {
+  application_id: string;
+  supervised_run_id: string;
+  portal: string;
+  page_fingerprint: string;
+  required_control_count: number;
+  ready_to_execute_count: number;
+  already_verified_count: number;
+  manual_required_count: number;
+  unbound_count: number;
+  stale_binding_count: number;
+  ambiguous_binding_count: number;
+  items: ApplicationFieldCoverageItem[];
+  review_fingerprint: string;
+}
+
 export interface CandidateKnowledgeSnapshot {
   profile_id: string;
   documents: CandidateDocument[];
@@ -1515,6 +1549,10 @@ export interface DesktopBridge {
     listApplicationFieldExecutions(
       applicationId: string,
     ): Promise<ApplicationFieldExecution[]>;
+    reviewApplicationFieldCoverage(
+      runId: string,
+      applicationId: string,
+    ): Promise<ApplicationFieldCoverageReview>;
     previewTailoredDocument(
       input: TailoredDocumentRequest,
     ): Promise<TailoredDocumentPreview>;

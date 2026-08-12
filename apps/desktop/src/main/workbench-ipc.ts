@@ -1006,6 +1006,14 @@ export function registerWorkbenchIpc(
         requiredText(applicationIdValue, "Application id", 100),
       ),
   );
+  ipcMain.handle(
+    "portals:review-application-field-coverage",
+    (_event, runIdValue: unknown, applicationIdValue: unknown) =>
+      supervisor.client.reviewApplicationFieldCoverage(
+        requiredText(runIdValue, "Supervised portal run id", 100),
+        requiredText(applicationIdValue, "Application id", 100),
+      ),
+  );
   ipcMain.handle("knowledge:preview-tailored", (_event, value: unknown) =>
     supervisor.client.previewTailoredDocument(tailoredDocumentInput(value)),
   );

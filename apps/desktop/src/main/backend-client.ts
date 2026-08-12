@@ -7,6 +7,7 @@ import type {
   ApplicationAnswerReviewInput,
   ApplicationFieldBinding,
   ApplicationFieldExecution,
+  ApplicationFieldCoverageReview,
   ApplicationFieldBindingPreview,
   ApplicationFieldBindingPreviewInput,
   FieldAutomationPermission,
@@ -243,6 +244,15 @@ export class BackendClient {
   ): Promise<ApplicationFieldExecution[]> {
     return this.request(
       `/portals/supervised/applications/${encodeURIComponent(applicationId)}/field-executions`,
+    );
+  }
+
+  reviewApplicationFieldCoverage(
+    runId: string,
+    applicationId: string,
+  ): Promise<ApplicationFieldCoverageReview> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(runId)}/applications/${encodeURIComponent(applicationId)}/field-coverage`,
     );
   }
 

@@ -8,6 +8,7 @@ from job_apply_pro.api.routes.browser import get_browser_service
 from job_apply_pro.browser.client import BrowserWorkerError, BrowserWorkerUnavailableError
 from job_apply_pro.config import get_settings
 from job_apply_pro.domain.applications import (
+    ApplicationFieldCoverageReview,
     ApplicationFieldExecution,
     ApplicationFieldExecutionApproval,
 )
@@ -32,6 +33,7 @@ from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.browser_runtime import BrowserPolicyError, BrowserSessionStateError
 from job_apply_pro.services.core import CoreService
 from job_apply_pro.services.field_bindings import ApplicationFieldBindingService
+from job_apply_pro.services.field_coverage import ApplicationFieldCoverageService
 from job_apply_pro.services.field_execution import (
     ApplicationFieldExecutionService,
     FieldExecutionConflictError,
@@ -148,6 +150,23 @@ def get_field_execution_service(
 
 FieldExecutionServiceDependency = Annotated[
     ApplicationFieldExecutionService, Depends(get_field_execution_service)
+]
+
+
+def get_field_coverage_service(
+    session: SessionDependency,
+) -> ApplicationFieldCoverageService:
+    return ApplicationFieldCoverageService(
+        bindings=ApplicationFieldBindingRepository(session),
+        answers=CandidateKnowledgeRepository(session),
+        applications=ApplicationRepository(session),
+        executions=ApplicationFieldExecutionRepository(session),
+        supervised=SupervisedPortalRepository(session),
+    )
+
+
+FieldCoverageServiceDependency = Annotated[
+    ApplicationFieldCoverageService, Depends(get_field_coverage_service)
 ]
 
 
@@ -298,6 +317,21 @@ def execute_approved_application_field(
         BrowserWorkerError,
         FieldExecutionError,
     ) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/supervised/runs/{run_id}/applications/{application_id}/field-coverage",
+    response_model=ApplicationFieldCoverageReview,
+)
+def review_required_field_coverage(
+    run_id: str,
+    application_id: str,
+    service: FieldCoverageServiceDependency,
+) -> ApplicationFieldCoverageReview:
+    try:
+        return service.review(run_id, application_id)
+    except (LookupError, ValueError) as error:
         raise _http_error(error) from error
 
 

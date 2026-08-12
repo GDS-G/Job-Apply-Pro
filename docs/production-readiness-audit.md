@@ -309,6 +309,16 @@ Source validation passed all 129 backend tests at 83.18% coverage and all 16 des
 
 The unsigned validation installer `Job-Apply-Pro-0.33.0-alpha.1-x64.exe` is 169,741,575 bytes, SHA-256 `ABCE74A9C03D8FDFA808DB57DCB3F696558AFF5CFCEF6514108FAC50E9293AD0`. The bundled backend executable is 18,498,339 bytes, SHA-256 `17707E616AE0ADF4E12DE5BA1BF8611F3C2654B398C078624779EA1641EFF9D7`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `12038AD21FF3EF0436DAF410BB5867DC9087D51F132F35F5BA3035DA4851C46E`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
 
+### Required Field Coverage Review source validation
+
+`Required Field Coverage Review v0.34.0-alpha.1` adds a read-only, workflow-bound checklist for currently observed required controls. It classifies each required control as ready, already verified, manual, unbound, stale, or ambiguous using only current observation and persisted binding, answer-revision, and execution metadata. It never resumes the browser, decrypts answer text, or performs an action. ADR-0043 records the decision.
+
+No database migration is required. The authenticated API and sandboxed desktop expose only bounded control labels, reasons, counts, identifiers, and a metadata-only review fingerprint. Cross-workflow requests fail closed, optional controls are excluded, and the review fingerprint grants no execution or submission authority.
+
+Source validation passed all 133 backend tests at 83.29% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, Windows packaging, and frozen-backend smoke.
+
+The unsigned validation installer `Job-Apply-Pro-0.34.0-alpha.1-x64.exe` is 169,749,318 bytes, SHA-256 `40C5EEDE8D95A98F23C212B35ADA666DD32E8FE90CE934482D48262D695BDC62`. The bundled backend executable is 18,505,377 bytes, SHA-256 `292F599C13F7F16F90574426B2638A3EF13670965B42371ED2BACAD6E99EDE8F`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `4A45DA4E73264EDFD4D8831069D3CE1666CA65B1EB8CA69E25AAFC0D4F7F1D26`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
