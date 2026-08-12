@@ -267,7 +267,7 @@ PR #53 merged the validated source to `main` as `7ef92da0ce3ba42d042bc09d0274145
 
 Migration `20260812_0021` adds encrypted observed-label/options persistence and indexes by application and answer. API, shared TypeScript contracts, guarded IPC, native confirmation, renderer review UI, and deterministic tests move together. File upload, signature, disclosure, custom-widget, and legal-attestation controls cannot receive unattended autofill authority. This build records audit metadata only and creates no browser action or live-site write. ADR-0038 records the decision.
 
-Exact local validation, packaged artifact, and protected GitHub evidence are recorded after the runtime source commit and integration are fixed.
+Runtime source commit `cb64b5b` passed all 122 backend tests at 83.27% coverage, all 16 desktop tests, strict formatting/lint/type checks, production build, migration round-trip, dependency audits, Windows packaging, and frozen-backend smoke. The unsigned validation installer `Job-Apply-Pro-0.29.0-alpha.1-x64.exe` is 169,710,901 bytes, SHA-256 `D39447514AF9872E95804909EB804F6448E9A790F3FBAEF54195381CB3531B64`. The bundled backend executable is 18,482,307 bytes, SHA-256 `C94ED5F811A92CAACCBA09527280CF1191E33D49A407A60780CE58E1662EAC1C`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `93C46E1353F7C8787325D1100BFDC7360B6496872241166B432D191C69608985`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
 
 ## External launch evidence still required
 
