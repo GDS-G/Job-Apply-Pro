@@ -60,7 +60,20 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_packaged_backend.ps1
 
       - name: Package unpacked Windows application
-        run: pnpm --filter @job-apply-pro/desktop package:dir
+        run: |
+          $maximumAttempts = 3
+          for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+            pnpm --filter @job-apply-pro/desktop package:dir
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            $failureCode = $LASTEXITCODE
+            if ($attempt -eq $maximumAttempts) {
+              exit $failureCode
+            }
+            Write-Warning "Electron packaging attempt $attempt failed; retrying the network-dependent step."
+            Start-Sleep -Seconds (15 * $attempt)
+          }
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
