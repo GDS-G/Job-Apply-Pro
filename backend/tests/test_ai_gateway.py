@@ -30,6 +30,7 @@ from job_apply_pro.domain.ai import (
     AIProviderDefinition,
     AIProviderRequest,
     AIProviderResponse,
+    AIRerankRequest,
     AIRoutingPolicy,
     AITaskType,
     AIToolDefinition,
@@ -229,6 +230,24 @@ def test_invalid_structured_output_is_retried_then_rejected(session: Session) ->
     assert "corrected JSON" in provider.requests[1].system_instruction
     invocation = session.scalar(select(ModelInvocationRow))
     assert invocation is not None and invocation.status == "FAILED" and invocation.attempts == 2
+
+
+def test_rerank_rejects_invalid_result_contract(session: Session) -> None:
+    provider = FakeProvider(
+        "local",
+        [json.dumps({"results": [{"index": 0, "score": "not-a-number"}]})],
+    )
+    models = _models("local")
+    policy = _policy(models[0].id).model_copy(update={"task_type": AITaskType.RERANKING})
+    service = _service(session, [provider], models, [policy])
+
+    with pytest.raises(AIGatewayUnavailableError):
+        service.rerank(
+            AIRerankRequest(
+                query="platform engineer",
+                documents=["Operated Kubernetes clusters"],
+            )
+        )
 
 
 def test_agent_evaluation_harness_uses_schema_valid_results(session: Session) -> None:
