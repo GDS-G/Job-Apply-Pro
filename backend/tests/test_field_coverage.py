@@ -216,6 +216,7 @@ def test_review_classifies_required_coverage_without_answer_values() -> None:
     ).review("run-1", "application-1")
 
     assert review.required_control_count == 3
+    assert review.satisfied_on_page_count == 0
     assert review.ready_to_execute_count == 1
     assert review.unbound_count == 1
     assert review.manual_required_count == 1
@@ -276,3 +277,19 @@ def test_review_requires_current_user_takeover_and_deterministic_locator() -> No
     )
     with pytest.raises(ValueError, match="awaits the user"):
         service.review("run-1", "application-1")
+
+
+def test_review_recognizes_native_constraint_validity_without_reading_value() -> None:
+    control = _control(
+        "email-control",
+        will_validate=True,
+        constraint_satisfied=True,
+    )
+    review = _service([control], bindings=[_binding()], answers=[_answer()]).review(
+        "run-1", "application-1"
+    )
+
+    assert review.satisfied_on_page_count == 1
+    assert review.ready_to_execute_count == 0
+    assert review.items[0].status is ApplicationFieldCoverageStatus.SATISFIED_ON_PAGE
+    assert "not-read-by-coverage-review" not in review.model_dump_json()

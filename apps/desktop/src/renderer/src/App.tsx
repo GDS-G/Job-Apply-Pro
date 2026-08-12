@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Required Field Coverage Review v0.34.0-alpha.1</strong>
+              <strong>Constraint-Aware Form Readiness v0.35.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2635,6 +2635,7 @@ export function App() {
                     </strong>
                     <span>
                       {fieldCoverage.already_verified_count} verified ﾂｷ{" "}
+                      {fieldCoverage.satisfied_on_page_count} valid on page ﾂｷ{" "}
                       {fieldCoverage.ready_to_execute_count} ready ﾂｷ{" "}
                       {fieldCoverage.manual_required_count} manual ﾂｷ{" "}
                       {fieldCoverage.unbound_count} unbound ﾂｷ{" "}

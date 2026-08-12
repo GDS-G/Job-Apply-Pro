@@ -116,6 +116,7 @@ class ApplicationFieldCoverageService:
             portal=run.portal.value,
             page_fingerprint=run.page_fingerprint,
             required_control_count=len(items),
+            satisfied_on_page_count=counts[ApplicationFieldCoverageStatus.SATISFIED_ON_PAGE],
             ready_to_execute_count=counts[ApplicationFieldCoverageStatus.READY_TO_EXECUTE],
             already_verified_count=counts[ApplicationFieldCoverageStatus.ALREADY_VERIFIED],
             manual_required_count=counts[ApplicationFieldCoverageStatus.MANUAL_REQUIRED],
@@ -155,6 +156,16 @@ class ApplicationFieldCoverageService:
                 ApplicationFieldCoverageStatus.MANUAL_REQUIRED,
                 None,
                 "This required control must remain under visible user handling.",
+            )
+        if control.will_validate and control.constraint_satisfied:
+            return self._item(
+                control,
+                label,
+                kind,
+                ApplicationFieldCoverageStatus.SATISFIED_ON_PAGE,
+                current[0].id if len(current) == 1 else None,
+                "The current page reports this required native control as constraint-valid; "
+                "its value remains private and semantic correctness still requires review.",
             )
         if control.locator is None or (
             control.kind is BrowserControlKind.RADIO_GROUP
