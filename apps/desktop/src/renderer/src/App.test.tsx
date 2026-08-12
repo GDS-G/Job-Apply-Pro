@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Layout-Aware Resume Ingestion v0.23.0-alpha.1"),
+      screen.getByText("Evidence-Ranked Tailoring v0.24.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -54,6 +54,11 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: /create encrypted profile/i }),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Template")).toBeInTheDocument();
+    expect(screen.getByLabelText("Evidence ranking")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(/allow external AI processing/i),
+    ).not.toBeChecked();
   });
 
   it("has no serious automated accessibility violations", async () => {

@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Layout-Aware Resume Ingestion `v0.23.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Evidence-Ranked Tailoring `v0.24.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.23.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.24.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -92,6 +92,8 @@ DOC conversion uses a disposable LibreOffice profile, fixed arguments, a timeout
 When a supported portal verifies the displayed upload filename and later observes an identifier-backed submission confirmation, it retains the exact document version, SHA-256 digest, role, and upload fingerprint with the application. This is evidence of which local file version was submitted; it is not a copy of a portal password, browser cookie, or employer response. If the portal filename or digest differs, retention fails closed and the submission must be reviewed manually.
 
 New PDF imports preserve layout lines and use conservative column-major ordering only after repeated, well-separated columns are detected. A visible extraction warning tells you when this heuristic ran. New DOCX imports preserve paragraphs and tables in their top-level document order. Review complex graphics, nested tables, floating text boxes, unusual spanning rows, and OCR text against the source before approving claims. LibreOffice and Tesseract are not bundled; OCR language data must be installed locally; deterministic token matching remains conservative; and advanced visual templates are not yet implemented.
+
+Tailored document review offers Professional and Compact templates. Deterministic local evidence ranking remains the default. Governed AI ranking is optional: select it for the preview, and separately check external processing consent only if you authorize an external configured route. Local AI routes do not need external consent. If the gateway is unavailable, blocked by policy, or returns an invalid ranking, the preview clearly reports deterministic fallback. Always review the displayed ranking method, exact paragraphs, selected evidence count, and missing requirements before choosing Review & generate exact document. Generation refuses a stale fingerprint and still opens a native confirmation dialog.
 
 ## Run a supervised portal validation
 

@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Layout-Aware Resume Ingestion"
+    BUILD_NAME = "Evidence-Ranked Tailoring"
 
     def __init__(
         self,

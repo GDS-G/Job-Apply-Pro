@@ -20,6 +20,16 @@ class DocumentOutputFormat(StrEnum):
     PDF = "PDF"
 
 
+class DocumentTemplate(StrEnum):
+    PROFESSIONAL = "PROFESSIONAL"
+    COMPACT = "COMPACT"
+
+
+class TailoringRankingMode(StrEnum):
+    DETERMINISTIC = "DETERMINISTIC"
+    GOVERNED_AI = "GOVERNED_AI"
+
+
 class ClaimVerificationStatus(StrEnum):
     PROPOSED = "PROPOSED"
     VERIFIED = "VERIFIED"
@@ -175,6 +185,9 @@ class TailoredDocumentRequest(BaseModel):
     output_format: DocumentOutputFormat = DocumentOutputFormat.DOCX
     variant_label: str = Field(default="Tailored", min_length=1, max_length=120)
     max_claims: int = Field(default=12, ge=1, le=30)
+    template: DocumentTemplate = DocumentTemplate.PROFESSIONAL
+    ranking_mode: TailoringRankingMode = TailoringRankingMode.DETERMINISTIC
+    external_ai_consent: bool = False
 
 
 class TailoredDocumentSection(BaseModel):
@@ -196,6 +209,10 @@ class TailoredDocumentPreview(BaseModel):
     employer: str
     title: str
     variant_label: str
+    template: DocumentTemplate
+    ranking_mode: TailoringRankingMode
+    ranking_method: str = Field(min_length=1, max_length=80)
+    ranking_notice: str | None = Field(default=None, max_length=300)
     sections: list[TailoredDocumentSection]
     selected_claim_ids: list[str]
     matched_requirement_ids: list[str]
@@ -220,6 +237,9 @@ class DocumentGenerationAudit(BaseModel):
     document_version_id: str
     kind: DocumentKind
     output_format: DocumentOutputFormat
+    template: DocumentTemplate
+    ranking_mode: TailoringRankingMode
+    ranking_method: str = Field(min_length=1, max_length=80)
     review_fingerprint: str
     evidence_claim_ids: list[str]
     requirement_ids: list[str]

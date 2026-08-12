@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
+from job_apply_pro.ai.configuration import build_ai_registry
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
 from job_apply_pro.documents.extractors import DocumentExtractionError, DocumentIngestionOptions
@@ -32,11 +33,13 @@ from job_apply_pro.domain.knowledge import (
 )
 from job_apply_pro.security.encryption import DecryptionError, SensitiveDataCipher
 from job_apply_pro.security.keys import KeyConfigurationError
+from job_apply_pro.services.ai import AIGatewayService
 from job_apply_pro.services.knowledge import (
     CandidateKnowledgeConflictError,
     CandidateKnowledgeError,
     CandidateKnowledgeService,
 )
+from job_apply_pro.storage.ai_repository import AIGatewayRepository
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.repositories import (
@@ -72,6 +75,9 @@ def get_knowledge_service(
             ocr_dpi=settings.document_ocr_dpi,
             ocr_max_pages=settings.document_ocr_max_pages,
             ocr_page_timeout_seconds=settings.document_ocr_page_timeout_seconds,
+        ),
+        ai_gateway=AIGatewayService(
+            build_ai_registry(settings.ai_config_json), AIGatewayRepository(session), cipher
         ),
     )
 

@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Layout-Aware Resume Ingestion",
+        build="Evidence-Ranked Tailoring",
         environment=settings.environment,
     )

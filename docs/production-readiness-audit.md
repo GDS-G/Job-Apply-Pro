@@ -201,6 +201,14 @@ Exact source head `76f6d980ad5774f2f7cc0a03a56a90a8c7571b58` produced the unsign
 
 This remains an alpha: advanced graphics, floating text boxes, spanning content, nested tables, a broad sanitized real-world résumé corpus, richer output templates, semantic ranking, and owner-installed helper validation remain incomplete or externally gated. The local installer is validation evidence only and must not be published as a production update.
 
+### Evidence-Ranked Tailoring source validation
+
+`Evidence-Ranked Tailoring v0.24.0-alpha.1` adds PROFESSIONAL and COMPACT deterministic DOCX/PDF templates plus optional GOVERNED_AI evidence ranking. Only locked, verified claims approved for applications are eligible. Governed ranking passes job requirements and eligible claim statements to the existing `AIGatewayService.rerank` boundary with `EMPLOYMENT_SENSITIVE` classification. External routes require explicit consent; local routes do not. Gateway routing, privacy redaction, structured-output validation, retries, cost limits, caching, and invocation audits remain authoritative.
+
+Any missing route, policy rejection, unavailable provider, invalid response, duplicate/out-of-range index, or empty positive result produces a visible `DETERMINISTIC_FALLBACK`. The template, requested mode, actual method, fallback notice, exact sections, selected claim IDs, matched requirement IDs, and missing requirements are all bound into the review fingerprint. Generation recomputes that preview before accepting native approval. Migration `20260812_0016` persists template/ranking provenance with every generation audit; encrypted document retention and submitted-version evidence are unchanged. ADR-0033 records the design.
+
+Full validation and exact artifact evidence are recorded after the source head is committed and packaged. Live external reranking remains gated on owner configuration, current provider terms/privacy/retention review, explicit per-preview consent, model availability, and authorized traffic. No test account, pasted credential, or private resume is used in source or CI.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

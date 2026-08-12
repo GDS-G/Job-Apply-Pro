@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.knowledge import get_knowledge_service
 from job_apply_pro.documents.extractors import extract_document
+from job_apply_pro.domain.ai import AIRerankRequest, AIRerankResult, DataClassification
 from job_apply_pro.domain.applications import (
     ApplicationCreate,
     ApplicationDocumentRole,
@@ -27,9 +28,11 @@ from job_apply_pro.domain.knowledge import (
     ClaimVerificationStatus,
     DocumentKind,
     DocumentOutputFormat,
+    DocumentTemplate,
     RetrievalQuery,
     TailoredDocumentApproval,
     TailoredDocumentRequest,
+    TailoringRankingMode,
 )
 from job_apply_pro.main import app
 from job_apply_pro.security.encryption import SensitiveDataCipher
@@ -313,6 +316,7 @@ def test_tailored_document_requires_locked_evidence_and_exact_review(
         kind=DocumentKind.RESUME,
         output_format=DocumentOutputFormat.DOCX,
         variant_label="Python evidence",
+        template=DocumentTemplate.COMPACT,
     )
     preview = service.preview_tailored_document(request)
     assert preview.selected_claim_ids == [python_claim.id]
@@ -348,6 +352,12 @@ def test_tailored_document_requires_locked_evidence_and_exact_review(
     )
     assert audit is not None
     assert audit.review_fingerprint == preview.review_fingerprint
+    assert audit.template == "COMPACT"
+    assert audit.ranking_method == "DETERMINISTIC_TOKEN_OVERLAP"
+    rendered = DocxDocument(BytesIO(service.get_document_content(generated.version.id)))
+    top_margin = rendered.sections[0].top_margin
+    assert top_margin is not None
+    assert top_margin.inches == pytest.approx(0.45, abs=0.01)
     assert service.list_generation_audits(application.id)[0] == generated.audit
 
     with pytest.raises(CandidateKnowledgeConflictError, match="hash changed"):
@@ -403,3 +413,93 @@ def test_tailored_document_requires_locked_evidence_and_exact_review(
     )
     assert cover.version.file_name.endswith(".pdf")
     assert "Python Automation Engineer" in service.get_extraction(cover.version.id).plain_text
+
+
+def test_tailored_document_governed_ranking_and_fallback_are_fingerprinted(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    base = _service(session, tmp_path)
+    imported = base.import_document(
+        profile_id,
+        file_name="ranking.txt",
+        data=b"Python\nKubernetes",
+        kind=DocumentKind.RESUME,
+        display_name="Ranking source",
+        variant_label="Source",
+        job_family_tags=["platform"],
+        is_primary=True,
+    )
+    for claim in imported.proposed_claims:
+        base.review_claim(
+            claim.id,
+            ClaimReview(approved=True, permitted_use=ClaimPermittedUse.APPLICATIONS),
+        )
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="ranking-1",
+            employer="Evidence Systems",
+            title="Platform Engineer",
+            description_hash=hashlib.sha256(b"platform").hexdigest(),
+        )
+    )
+    session.add(
+        JobRequirementRow(
+            id="requirement-kubernetes",
+            job_id=job.id,
+            category="skill",
+            text="Kubernetes operations",
+            required=True,
+            evidence_json={"source": "fixture"},
+        )
+    )
+    session.commit()
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="ranking-workflow",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+
+    class ReversingReranker:
+        def rerank(self, request: AIRerankRequest) -> list[AIRerankResult]:
+            assert request.classification is DataClassification.EMPLOYMENT_SENSITIVE
+            assert request.external_consent is False
+            return [AIRerankResult(index=1, score=0.9), AIRerankResult(index=0, score=0.8)]
+
+    ranked_service = CandidateKnowledgeService(
+        CandidateKnowledgeRepository(session),
+        CandidateRepository(session),
+        JobRepository(session),
+        ApplicationRepository(session),
+        SensitiveDataCipher(StaticKeyProvider(b"k" * 32)),
+        document_data_dir=tmp_path / "ranked-documents",
+        document_max_bytes=10_485_760,
+        ai_gateway=ReversingReranker(),
+    )
+    request = TailoredDocumentRequest(
+        application_id=application.id,
+        kind=DocumentKind.RESUME,
+        template=DocumentTemplate.COMPACT,
+        ranking_mode=TailoringRankingMode.GOVERNED_AI,
+        max_claims=2,
+    )
+    preview = ranked_service.preview_tailored_document(request)
+    assert preview.template is DocumentTemplate.COMPACT
+    assert preview.ranking_method == "GOVERNED_AI_RERANK"
+    assert preview.ranking_notice is None
+    deterministic_ids = [
+        claim.id
+        for claim in sorted(
+            imported.proposed_claims,
+            key=lambda claim: (claim.canonical_key, claim.id),
+        )
+    ]
+    assert preview.selected_claim_ids == list(reversed(deterministic_ids))
+
+    fallback = base.preview_tailored_document(request)
+    assert fallback.ranking_method == "DETERMINISTIC_FALLBACK"
+    assert fallback.ranking_notice is not None
+    assert fallback.review_fingerprint != preview.review_fingerprint
