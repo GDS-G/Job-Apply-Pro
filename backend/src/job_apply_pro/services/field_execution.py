@@ -28,6 +28,8 @@ from job_apply_pro.domain.browser import (
     BrowserSessionSnapshot,
     BrowserVerification,
     ConfirmationState,
+    LocatorStrategy,
+    SemanticLocator,
     VerificationKind,
 )
 from job_apply_pro.domain.portals import (
@@ -93,6 +95,7 @@ _SUPPORTED_CONTROL_KINDS = {
     BrowserControlKind.NUMBER,
     BrowserControlKind.DATE,
     BrowserControlKind.SELECT,
+    BrowserControlKind.RADIO_GROUP,
     BrowserControlKind.CHECKBOX,
 }
 
@@ -231,6 +234,16 @@ class ApplicationFieldExecutionService:
             raise FieldExecutionPolicyError("Legal attestations require visible user handling")
         if control.kind.value != binding.control_kind.value:
             raise FieldExecutionConflictError("Observed control kind changed after binding")
+        if control.kind is BrowserControlKind.RADIO_GROUP and any(
+            option.locator
+            != SemanticLocator(
+                strategy=LocatorStrategy.LABEL,
+                value=option.label,
+                exact=True,
+            )
+            for option in control.options
+        ):
+            raise FieldExecutionPolicyError("Radio options require exact visible-label locators")
 
     @staticmethod
     def _observed_field(
@@ -262,7 +275,21 @@ class ApplicationFieldExecutionService:
         locator = control.locator
         if locator is None:  # pragma: no cover - validated before construction
             raise FieldExecutionPolicyError("Field has no deterministic semantic locator")
-        if control.kind is BrowserControlKind.SELECT:
+        if control.kind is BrowserControlKind.RADIO_GROUP:
+            matches = [option for option in control.options if answer_value == option.label]
+            if len(matches) != 1 or matches[0].locator is None:
+                raise FieldExecutionConflictError(
+                    "Reviewed answer does not identify exactly one locatable radio option"
+                )
+            locator = matches[0].locator
+            value = None
+            kind = BrowserActionKind.CHECK
+            verification = BrowserVerification(
+                kind=VerificationKind.CHECKED_EQUALS,
+                locator=locator,
+                value="true",
+            )
+        elif control.kind is BrowserControlKind.SELECT:
             matches = [
                 option
                 for option in control.options

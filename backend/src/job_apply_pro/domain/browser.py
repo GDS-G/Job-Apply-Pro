@@ -150,6 +150,7 @@ class BrowserControlOption(BaseModel):
 
     value: str = Field(max_length=500)
     label: str = Field(max_length=300)
+    locator: SemanticLocator | None = None
 
 
 class BrowserObservedControl(BaseModel):
@@ -202,12 +203,22 @@ class BrowserObservedControl(BaseModel):
         options = []
         if isinstance(raw_options, list):
             for option in raw_options[:100]:
+                if isinstance(option, BaseModel):
+                    option = option.model_dump(mode="json")
                 if isinstance(option, dict):
                     option_value = str(option.get("value", ""))[:500]
                     option_label = str(option.get("label", option_value))[:300]
+                    option_locator = option.get("locator")
                 else:
                     option_value = option_label = str(option)[:300]
-                options.append({"value": option_value, "label": option_label})
+                    option_locator = None
+                options.append(
+                    {
+                        "value": option_value,
+                        "label": option_label,
+                        "locator": option_locator,
+                    }
+                )
         if tag == "textarea":
             kind = BrowserControlKind.TEXT_AREA
         elif tag == "select":

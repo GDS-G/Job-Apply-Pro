@@ -138,6 +138,7 @@ export type BrowserControlKind =
 export interface BrowserControlOption {
   value: string;
   label: string;
+  locator?: Record<string, unknown> | null;
 }
 
 export interface BrowserObservedControl {

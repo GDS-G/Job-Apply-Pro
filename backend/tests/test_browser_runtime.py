@@ -75,6 +75,16 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <script>years.value = localStorage.getItem('years') || '';</script>
                 </body>
             """,
+            "/preferences": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Work preferences</h1>
+                  <fieldset>
+                    <legend>Preferred work arrangement</legend>
+                    <label><input name="arrangement" type="radio" value="remote"> Remote</label>
+                    <label><input name="arrangement" type="radio" value="hybrid"> Hybrid</label>
+                  </fieldset>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -243,6 +253,50 @@ def test_browser_runtime_rejects_external_origins_when_production_is_locked(
                 )
             )
         assert not worker.running
+    finally:
+        worker.close()
+
+
+def test_radio_group_observation_has_exact_option_locators(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/preferences"),
+                    engine=BrowserEngine.CHROMIUM,
+                    profile_name="radio-option-locators",
+                )
+            )
+            assert started.observation is not None
+            assert len(started.observation.controls) == 1
+            group = started.observation.controls[0]
+            assert group.kind is BrowserControlKind.RADIO_GROUP
+            assert group.group_label == "Preferred work arrangement"
+            assert [option.label for option in group.options] == ["Remote", "Hybrid"]
+            assert [option.locator for option in group.options] == [
+                _label("Remote"),
+                _label("Hybrid"),
+            ]
+            selected = service.execute_action(
+                started.id,
+                BrowserAction(
+                    kind=BrowserActionKind.CHECK,
+                    locator=_label("Remote"),
+                    intended_result="Select the exact Remote radio option",
+                    verification=BrowserVerification(
+                        kind=VerificationKind.CHECKED_EQUALS,
+                        locator=_label("Remote"),
+                        value="true",
+                    ),
+                ),
+            )
+            assert selected.verified
     finally:
         worker.close()
 

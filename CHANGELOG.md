@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.32.0-alpha.1] - Unreleased
+
+### Added
+
+- Added exact visible-label semantic locators to typed observed radio options.
+- Added verified `CHECK` execution and post-action checked-state validation for one unambiguous reviewed radio option.
+- Added browser fixture and service regression coverage for option locator capture, successful selection, case mismatch, and duplicate-label refusal.
+
+### Security
+
+- Radio selection never relies on hidden HTML values; missing, changed, duplicate, case-variant, or non-label option locators fail closed.
+- Existing candidate-value redaction, native confirmation, default-off execution, human-only legal/upload/custom controls, and no-final-submit boundaries remain unchanged.
+
 ## [0.31.0-alpha.1] - Unreleased
 
 ### Added
