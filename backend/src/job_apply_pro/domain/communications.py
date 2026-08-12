@@ -25,6 +25,12 @@ class ProviderConfigurationSource(StrEnum):
     ENCRYPTED_DATABASE = "ENCRYPTED_DATABASE"
 
 
+class ProviderSyncMode(StrEnum):
+    INITIAL = "INITIAL"
+    INCREMENTAL = "INCREMENTAL"
+    RECOVERY = "RECOVERY"
+
+
 class OutboundPolicy(StrEnum):
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
     AUTOMATIC = "AUTOMATIC"
@@ -324,6 +330,19 @@ class ProviderMessageSyncResult(BaseModel):
     imported_count: int = Field(ge=0, le=1_000)
     duplicate_count: int = Field(ge=0, le=1_000)
     record_ids: list[str] = Field(default_factory=list, max_length=1_000)
+    sync_mode: ProviderSyncMode
+    cursor_updated_at: datetime
+
+
+class ProviderSyncState(BaseModel):
+    """Internal encrypted synchronization cursor; never return it through the API."""
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: IntegrationProvider
+    cursor: SecretStr = Field(min_length=1, max_length=8_000)
+    binding_fingerprint: str = Field(min_length=64, max_length=64)
+    updated_at: datetime
 
 
 class DraftCreate(BaseModel):

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,7 @@ from job_apply_pro.domain.communications import (
     MutationStatus,
     OutboundDraft,
     OutboundPolicy,
+    ProviderSyncState,
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.storage.models import (
@@ -25,6 +27,7 @@ from job_apply_pro.storage.models import (
     CommunicationRecordRow,
     FollowUpRow,
     OutboundDraftRow,
+    ProviderSyncStateRow,
 )
 
 
@@ -79,6 +82,76 @@ class CommunicationRepository:
             select(CommunicationRecordRow).order_by(CommunicationRecordRow.received_at.desc())
         ).all()
         return [self._record(row) for row in rows]
+
+    def get_sync_state(
+        self, provider: IntegrationProvider, binding_fingerprint: str
+    ) -> ProviderSyncState | None:
+        row = self._session.get(ProviderSyncStateRow, provider.value)
+        if row is None:
+            return None
+        payload = self._cipher.decrypt_json(
+            row.encrypted_cursor,
+            context=f"provider-sync:{provider.value}:cursor",
+        )
+        if payload.get("binding_fingerprint") != binding_fingerprint:
+            return None
+        return ProviderSyncState(
+            provider=provider,
+            cursor=SecretStr(str(payload["cursor"])),
+            binding_fingerprint=binding_fingerprint,
+            updated_at=_utc(row.updated_at),
+        )
+
+    def save_sync_state(
+        self,
+        provider: IntegrationProvider,
+        cursor: SecretStr,
+        binding_fingerprint: str,
+        expected_cursor: SecretStr | None,
+    ) -> ProviderSyncState:
+        now = datetime.now(UTC)
+        encrypted = self._cipher.encrypt_json(
+            {
+                "cursor": cursor.get_secret_value(),
+                "binding_fingerprint": binding_fingerprint,
+            },
+            context=f"provider-sync:{provider.value}:cursor",
+        )
+        row = self._session.get(ProviderSyncStateRow, provider.value)
+        if row is None:
+            self._session.add(
+                ProviderSyncStateRow(
+                    provider=provider.value,
+                    encrypted_cursor=encrypted,
+                    updated_at=now,
+                )
+            )
+        else:
+            current_payload = self._cipher.decrypt_json(
+                row.encrypted_cursor,
+                context=f"provider-sync:{provider.value}:cursor",
+            )
+            current_binding = current_payload.get("binding_fingerprint")
+            current_cursor = str(current_payload.get("cursor", ""))
+            expected_value = (
+                expected_cursor.get_secret_value() if expected_cursor is not None else None
+            )
+            if current_binding == binding_fingerprint and current_cursor != expected_value:
+                return ProviderSyncState(
+                    provider=provider,
+                    cursor=SecretStr(current_cursor),
+                    binding_fingerprint=binding_fingerprint,
+                    updated_at=_utc(row.updated_at),
+                )
+            row.encrypted_cursor = encrypted
+            row.updated_at = now
+        self._session.commit()
+        return ProviderSyncState(
+            provider=provider,
+            cursor=cursor,
+            binding_fingerprint=binding_fingerprint,
+            updated_at=now,
+        )
 
     def save_draft(self, draft: OutboundDraft) -> OutboundDraft:
         self._session.add(

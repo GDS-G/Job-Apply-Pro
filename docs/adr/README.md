@@ -30,3 +30,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0026: Bounded provider data synchronization](0026-bounded-provider-data-synchronization.md)
 - [ADR-0027: Encrypted provider configuration control](0027-encrypted-provider-configuration-control.md)
 - [ADR-0028: Privacy-safe actionable desktop notifications](0028-privacy-safe-desktop-notifications.md)
+- [ADR-0029: Encrypt incremental provider synchronization state](0029-encrypted-incremental-provider-sync.md)

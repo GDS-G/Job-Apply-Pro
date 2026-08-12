@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Actionable Desktop Notifications `v0.19.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization.
+This guide applies to Incremental Provider Sync `v0.20.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.19.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.20.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -60,7 +60,9 @@ For Microsoft:
 
 After configuration, select **Review & connect**, verify the provider host and displayed scopes, sign in manually, complete any MFA, and approve only the expected access. Return to Job Apply Pro and refresh the dashboard. Use **Revoke access** to revoke at the provider where supported and always delete the encrypted local credential. Microsoft may also require revocation from the account's application-consent page. **Clear config** disables local provider registrations but does not revoke provider consent or delete retained encrypted OAuth tokens; revoke each connection first when removing access.
 
-For a connected Gmail or Outlook account with read access, select **Sync messages**. The app follows at most ten provider pages and imports at most 1,000 messages per operation. Repeat provider message IDs reuse the existing encrypted record. Gmail attachment filenames come from bounded MIME metadata; Outlook attachment filenames are requested separately only when the message reports attachments. Inline resources are ignored, attachment bytes are never downloaded, and filenames do not authorize opening or trusting a file. A green result reports fetched, newly imported, and already-present counts. Provider errors, repeated page tokens, an off-origin Microsoft continuation URL, or a resource limit stop the sync without treating incomplete data as complete.
+For a connected Gmail or Outlook account with read access, select **Sync messages**. The first operation establishes encrypted provider state; later operations request only newly added Gmail history or newly created Outlook Inbox messages. A result identifies the operation as initial, incremental, or recovery and reports fetched, newly imported, and already-present counts. If Gmail expires a history ID or Microsoft requests a delta reset, the app performs one bounded recovery enumeration. The cursor advances only after all returned messages are durably processed, so an interrupted import safely replays provider IDs on retry. Reauthorizing a different account invalidates the prior account binding.
+
+The app follows at most ten provider pages and imports at most 1,000 messages per operation. Repeat provider message IDs reuse the existing encrypted record. Gmail attachment filenames come from bounded MIME metadata; Outlook attachment filenames are requested separately only when the message reports attachments. Inline resources are ignored, attachment bytes are never downloaded, and filenames do not authorize opening or trusting a file. Provider errors, repeated page tokens, an off-origin Microsoft continuation or delta URL, or a resource limit stop the sync without treating incomplete data as complete. Cursor contents remain encrypted and never appear in the interface, diagnostics, logs, or exports. Webhooks/push notifications are not enabled by this build.
 
 ## Generate and retain application documents
 

@@ -1,5 +1,7 @@
 from typing import Protocol
 
+from pydantic import SecretStr
+
 from job_apply_pro.domain.ai import AICacheRecord, AIInvocationRecord
 from job_apply_pro.domain.applications import (
     Application,
@@ -20,8 +22,10 @@ from job_apply_pro.domain.communications import (
     CalendarMutationPlan,
     CommunicationRecord,
     FollowUp,
+    IntegrationProvider,
     MutationAudit,
     OutboundDraft,
+    ProviderSyncState,
 )
 from job_apply_pro.domain.jobs import Job, JobCreate, JobRequirement
 from job_apply_pro.domain.knowledge import (
@@ -208,6 +212,18 @@ class CommunicationRepositoryProtocol(Protocol):
     def get_record(self, record_id: str) -> CommunicationRecord | None: ...
 
     def list_records(self) -> list[CommunicationRecord]: ...
+
+    def get_sync_state(
+        self, provider: IntegrationProvider, binding_fingerprint: str
+    ) -> ProviderSyncState | None: ...
+
+    def save_sync_state(
+        self,
+        provider: IntegrationProvider,
+        cursor: SecretStr,
+        binding_fingerprint: str,
+        expected_cursor: SecretStr | None,
+    ) -> ProviderSyncState: ...
 
     def save_draft(self, draft: OutboundDraft) -> OutboundDraft: ...
 

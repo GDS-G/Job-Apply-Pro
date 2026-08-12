@@ -498,6 +498,121 @@ def test_provider_response_and_gmail_mime_limits_fail_closed() -> None:
         deep_mime.list_messages()
 
 
+def test_gmail_sync_uses_encrypted_history_cursor_and_recovers_expired_state() -> None:
+    requests: list[httpx.Request] = []
+
+    def gmail_message(message_id: str) -> dict[str, object]:
+        return {
+            "id": message_id,
+            "threadId": f"thread-{message_id}",
+            "internalDate": "1786471200000",
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "recruiter@example.test"},
+                    {"name": "To", "value": "candidate@example.test"},
+                    {"name": "Subject", "value": "Interview"},
+                ],
+                "body": {"data": "Q2hvb3NlIGEgdGltZQ"},
+            },
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/profile"):
+            return httpx.Response(200, json={"historyId": "100"})
+        if request.url.path.endswith("/history"):
+            if request.url.params.get("startHistoryId") == "99":
+                return httpx.Response(404, json={"error": {"code": 404}})
+            return httpx.Response(
+                200,
+                json={
+                    "history": [{"messagesAdded": [{"message": {"id": "gmail-2"}}]}],
+                    "historyId": "101",
+                },
+            )
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "gmail-1"}]})
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json=gmail_message(message_id))
+
+    provider = GmailMessageProvider(
+        StaticTokens(), client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    initial = provider.sync_messages(cursor=None)
+    incremental = provider.sync_messages(cursor=initial.cursor)
+    recovery = provider.sync_messages(cursor=SecretStr("99"))
+
+    assert initial.mode.value == "INITIAL"
+    assert initial.cursor.get_secret_value() == "100"
+    assert [item.provider_message_id for item in incremental.messages] == ["gmail-2"]
+    assert incremental.cursor.get_secret_value() == "101"
+    assert recovery.mode.value == "RECOVERY"
+    assert recovery.cursor.get_secret_value() == "100"
+    history_request = next(request for request in requests if request.url.path.endswith("/history"))
+    assert dict(history_request.url.params) == {
+        "startHistoryId": "100",
+        "historyTypes": "messageAdded",
+        "maxResults": "500",
+    }
+
+
+def test_outlook_sync_uses_folder_delta_links_and_recovers_reset_state() -> None:
+    requests: list[httpx.Request] = []
+
+    def outlook_message(message_id: str) -> dict[str, object]:
+        return {
+            "id": message_id,
+            "conversationId": f"thread-{message_id}",
+            "subject": "Interview",
+            "bodyPreview": "Choose a time",
+            "receivedDateTime": "2026-08-11T18:00:00Z",
+            "sender": {"emailAddress": {"address": "recruiter@example.test"}},
+            "toRecipients": [{"emailAddress": {"address": "candidate@example.test"}}],
+            "hasAttachments": False,
+        }
+
+    base = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        token = request.url.params.get("$deltatoken")
+        if token == "expired":
+            return httpx.Response(410, json={"error": {"code": "syncStateNotFound"}})
+        if token == "one":
+            return httpx.Response(
+                200,
+                json={
+                    "value": [outlook_message("outlook-2")],
+                    "@odata.deltaLink": f"{base}?$deltatoken=two",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "value": [outlook_message("outlook-1")],
+                "@odata.deltaLink": f"{base}?$deltatoken=one",
+            },
+        )
+
+    provider = OutlookMessageProvider(
+        StaticTokens(), client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    initial = provider.sync_messages(cursor=None)
+    incremental = provider.sync_messages(cursor=initial.cursor)
+    recovery = provider.sync_messages(cursor=SecretStr(f"{base}?$deltatoken=expired"))
+
+    assert initial.mode.value == "INITIAL"
+    assert initial.cursor.get_secret_value().endswith("$deltatoken=one")
+    assert [item.provider_message_id for item in incremental.messages] == ["outlook-2"]
+    assert incremental.cursor.get_secret_value().endswith("$deltatoken=two")
+    assert recovery.mode.value == "RECOVERY"
+    assert any(request.headers.get("Prefer") == "odata.maxpagesize=100" for request in requests)
+    with pytest.raises(ProviderMutationError, match="untrusted next link"):
+        provider.sync_messages(
+            cursor=SecretStr("https://attacker.example/v1.0/me/mailFolders/inbox/messages/delta")
+        )
+
+
 def test_official_calendar_adapters_list_create_and_update() -> None:
     start = datetime(2026, 8, 20, 15, tzinfo=UTC)
     event = CalendarEventSnapshot(

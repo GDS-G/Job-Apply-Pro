@@ -305,7 +305,7 @@ export function App() {
           await window.jobApplyPro.workbench.syncProviderMessages(provider);
         await refreshWorkflows();
         setProviderSyncMessage(
-          `${provider.replaceAll("_", " ")}: fetched ${result.fetched_count}, imported ${result.imported_count}, already present ${result.duplicate_count}.`,
+          `${provider.replaceAll("_", " ")}: ${result.sync_mode.toLocaleLowerCase()} sync fetched ${result.fetched_count}, imported ${result.imported_count}, already present ${result.duplicate_count}.`,
         );
       } catch (caught) {
         setError(readableError(caught));
@@ -1045,7 +1045,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Actionable Desktop Notifications v0.19.0-alpha.1</strong>
+              <strong>Incremental Provider Sync v0.20.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Actionable Desktop Notifications",
-  version: "0.19.0-alpha.1",
+  name: "Incremental Provider Sync",
+  version: "0.20.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -570,6 +570,8 @@ export interface ProviderMessageSyncResult {
   imported_count: number;
   duplicate_count: number;
   record_ids: string[];
+  sync_mode: "INITIAL" | "INCREMENTAL" | "RECOVERY";
+  cursor_updated_at: string;
 }
 
 export interface DailyCommunicationSummary {

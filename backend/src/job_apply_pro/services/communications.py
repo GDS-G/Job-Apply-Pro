@@ -375,7 +375,21 @@ class CommunicationService:
             for record in repository.list_records()
             if record.analysis.message.provider is provider
         }
-        messages = self._message_adapters[provider].list_messages(since=since)
+        config = self._provider_configs.get(provider)
+        binding_value = "\0".join(
+            (
+                provider.value,
+                (config.credential_reference or "configured") if config is not None else "fixture",
+                config.account_hint or "" if config is not None else "",
+            )
+        )
+        binding_fingerprint = hashlib.sha256(binding_value.encode()).hexdigest()
+        prior_state = repository.get_sync_state(provider, binding_fingerprint)
+        batch = self._message_adapters[provider].sync_messages(
+            cursor=prior_state.cursor if prior_state is not None else None,
+            since=since,
+        )
+        messages = batch.messages
         record_ids: list[str] = []
         imported_count = 0
         for message in messages:
@@ -389,12 +403,20 @@ class CommunicationService:
             if is_new:
                 existing_ids.add(message.provider_message_id)
                 imported_count += 1
+        saved_state = repository.save_sync_state(
+            provider,
+            batch.cursor,
+            binding_fingerprint,
+            prior_state.cursor if prior_state is not None else None,
+        )
         return ProviderMessageSyncResult(
             provider=provider,
             fetched_count=len(messages),
             imported_count=imported_count,
             duplicate_count=len(messages) - imported_count,
             record_ids=record_ids,
+            sync_mode=batch.mode,
+            cursor_updated_at=saved_state.updated_at,
         )
 
     def list_records(self) -> list[CommunicationRecord]:

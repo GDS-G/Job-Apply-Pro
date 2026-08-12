@@ -9,14 +9,16 @@ from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
+from pydantic import SecretStr
 
 from job_apply_pro.domain.communications import (
     CalendarEventSnapshot,
     IntegrationProvider,
     NormalizedMessage,
     OutboundDraft,
+    ProviderSyncMode,
 )
-from job_apply_pro.integrations.communications import ProviderMutationError
+from job_apply_pro.integrations.communications import ProviderMessageBatch, ProviderMutationError
 from job_apply_pro.integrations.oauth import AccessTokenProvider, OAuthAuthorizationError
 
 MAX_PROVIDER_RESPONSE_BYTES = 5_000_000
@@ -248,23 +250,118 @@ class GmailMessageProvider:
             collection_key="messages",
             action="Gmail message listing",
         )
+        return self._fetch_messages(
+            [str(item["id"]) for item in items if isinstance(item.get("id"), str)]
+        )
+
+    def sync_messages(
+        self, *, cursor: SecretStr | None, since: datetime | None = None
+    ) -> ProviderMessageBatch:
+        if cursor is None:
+            return self._full_sync(since=since, mode=ProviderSyncMode.INITIAL)
+        if since is not None:
+            raise ValueError("A message synchronization time is allowed only before initial sync")
+        history_id = cursor.get_secret_value()
+        if not history_id.isdecimal() or len(history_id) > 100:
+            raise ProviderMutationError("Stored Gmail synchronization state is invalid")
+        params: dict[str, str | int] = {
+            "startHistoryId": history_id,
+            "historyTypes": "messageAdded",
+            "maxResults": 500,
+        }
+        message_ids: list[str] = []
+        seen_ids: set[str] = set()
+        seen_tokens: set[str] = set()
+        next_history_id: str | None = None
+        for page_index in range(MAX_PROVIDER_PAGES):
+            response = self._client.get(
+                f"{self._base}/history",
+                params=params,
+                headers=_token_headers(self._tokens, self.provider),
+            )
+            if page_index == 0 and response.status_code == 404:
+                return self._full_sync(since=None, mode=ProviderSyncMode.RECOVERY)
+            payload = _json(response, "Gmail history listing")
+            for history in _collection(payload, "history", "Gmail history listing"):
+                additions = history.get("messagesAdded", [])
+                if not isinstance(additions, list):
+                    raise ProviderMutationError(
+                        "Provider Gmail history listing returned an invalid collection"
+                    )
+                for addition in additions:
+                    message = addition.get("message", {}) if isinstance(addition, dict) else {}
+                    message_id = message.get("id") if isinstance(message, dict) else None
+                    if isinstance(message_id, str) and message_id and message_id not in seen_ids:
+                        seen_ids.add(message_id)
+                        message_ids.append(message_id)
+                        if len(message_ids) > MAX_PROVIDER_ITEMS:
+                            raise ProviderMutationError(
+                                "Provider Gmail history listing exceeded the item limit"
+                            )
+            returned_history_id = payload.get("historyId")
+            if (
+                not isinstance(returned_history_id, str)
+                or not returned_history_id.isdecimal()
+                or len(returned_history_id) > 100
+            ):
+                raise ProviderMutationError(
+                    "Provider Gmail history listing returned invalid synchronization state"
+                )
+            next_history_id = returned_history_id
+            token = payload.get("nextPageToken")
+            if token is None:
+                return ProviderMessageBatch(
+                    messages=self._fetch_messages(message_ids),
+                    cursor=SecretStr(next_history_id),
+                    mode=ProviderSyncMode.INCREMENTAL,
+                )
+            if (
+                not isinstance(token, str)
+                or not token
+                or len(token) > MAX_CONTINUATION_TOKEN_CHARACTERS
+                or token in seen_tokens
+            ):
+                raise ProviderMutationError(
+                    "Provider Gmail history listing returned an invalid or repeated page token"
+                )
+            seen_tokens.add(token)
+            params = {**params, "pageToken": token}
+        raise ProviderMutationError("Provider Gmail history listing exceeded the page limit")
+
+    def _full_sync(self, *, since: datetime | None, mode: ProviderSyncMode) -> ProviderMessageBatch:
+        profile = _json(
+            self._client.get(
+                f"{self._base}/profile",
+                headers=_token_headers(self._tokens, self.provider),
+            ),
+            "Gmail profile fetch",
+        )
+        history_id = profile.get("historyId")
+        if not isinstance(history_id, str) or not history_id.isdecimal() or len(history_id) > 100:
+            raise ProviderMutationError(
+                "Provider Gmail profile returned invalid synchronization state"
+            )
+        return ProviderMessageBatch(
+            messages=self.list_messages(since=since),
+            cursor=SecretStr(history_id),
+            mode=mode,
+        )
+
+    def _fetch_messages(self, message_ids: Iterable[str]) -> list[NormalizedMessage]:
         messages: list[NormalizedMessage] = []
         seen_message_ids: set[str] = set()
-        for item in items:
-            if not isinstance(item, dict) or not isinstance(item.get("id"), str):
-                continue
-            message_id = str(item["id"])
+        for message_id in message_ids:
             if message_id in seen_message_ids:
                 continue
             seen_message_ids.add(message_id)
-            raw = _json(
-                self._client.get(
-                    f"{self._base}/messages/{_path_segment(message_id)}",
-                    params={"format": "full"},
-                    headers=_token_headers(self._tokens, self.provider),
-                ),
-                "Gmail message fetch",
+            response = self._client.get(
+                f"{self._base}/messages/{_path_segment(message_id)}",
+                params={"format": "full"},
+                headers=_token_headers(self._tokens, self.provider),
             )
+            if response.status_code == 404:
+                continue
+            raw = _json(response, "Gmail message fetch")
             message_payload = raw.get("payload", {})
             if not isinstance(message_payload, dict):
                 continue
@@ -324,6 +421,8 @@ class GmailMessageProvider:
 class OutlookMessageProvider:
     provider = IntegrationProvider.OUTLOOK
     _base = "https://graph.microsoft.com/v1.0/me"
+    _delta_path = "/v1.0/me/mailFolders/inbox/messages/delta"
+    _delta_url = f"https://graph.microsoft.com{_delta_path}"
 
     def __init__(self, tokens: AccessTokenProvider, *, client: httpx.Client | None = None) -> None:
         self._tokens = tokens
@@ -347,6 +446,115 @@ class OutlookMessageProvider:
             path_prefix="/v1.0/me/messages",
             action="Outlook message listing",
         )
+        return self._messages(values)
+
+    def sync_messages(
+        self, *, cursor: SecretStr | None, since: datetime | None = None
+    ) -> ProviderMessageBatch:
+        if cursor is not None and since is not None:
+            raise ValueError("A message synchronization time is allowed only before initial sync")
+        return self._delta_sync(
+            cursor=cursor,
+            since=since,
+            mode=(ProviderSyncMode.INITIAL if cursor is None else ProviderSyncMode.INCREMENTAL),
+            allow_recovery=True,
+        )
+
+    def _delta_sync(
+        self,
+        *,
+        cursor: SecretStr | None,
+        since: datetime | None,
+        mode: ProviderSyncMode,
+        allow_recovery: bool,
+    ) -> ProviderMessageBatch:
+        select_fields = (
+            "id,conversationId,subject,bodyPreview,receivedDateTime,"
+            "sender,toRecipients,hasAttachments"
+        )
+        params: dict[str, str] | None = None
+        next_url = self._delta_url
+        if cursor is None:
+            params = {"$select": select_fields, "changeType": "created", "$top": "100"}
+            if since is not None:
+                params["$filter"] = f"receivedDateTime ge {since.astimezone(UTC).isoformat()}"
+        else:
+            next_url = self._validated_delta_link(cursor.get_secret_value())
+        headers = _token_headers(self._tokens, self.provider)
+        headers["Prefer"] = "odata.maxpagesize=100"
+        values: list[dict[str, object]] = []
+        seen_links: set[str] = set()
+        delta_link: str | None = None
+        for page_index in range(MAX_PROVIDER_PAGES):
+            response = self._client.get(next_url, params=params, headers=headers)
+            if cursor is not None and page_index == 0 and self._requires_delta_reset(response):
+                if not allow_recovery:
+                    raise ProviderMutationError("Outlook synchronization state reset failed")
+                return self._delta_sync(
+                    cursor=None,
+                    since=None,
+                    mode=ProviderSyncMode.RECOVERY,
+                    allow_recovery=False,
+                )
+            payload = _json(response, "Outlook delta message listing")
+            page_values = _collection(payload, "value", "Outlook delta message listing")
+            if len(values) + len(page_values) > MAX_PROVIDER_ITEMS:
+                raise ProviderMutationError(
+                    "Provider Outlook delta message listing exceeded the item limit"
+                )
+            values.extend(page_values)
+            next_link_value = payload.get("@odata.nextLink")
+            if next_link_value is not None:
+                next_link = self._validated_delta_link(next_link_value)
+                if next_link in seen_links:
+                    raise ProviderMutationError(
+                        "Provider Outlook delta message listing returned a repeated next link"
+                    )
+                seen_links.add(next_link)
+                next_url = next_link
+                params = None
+                continue
+            delta_link = self._validated_delta_link(payload.get("@odata.deltaLink"))
+            return ProviderMessageBatch(
+                messages=self._messages(values),
+                cursor=SecretStr(delta_link),
+                mode=mode,
+            )
+        raise ProviderMutationError(
+            "Provider Outlook delta message listing exceeded the page limit"
+        )
+
+    @classmethod
+    def _validated_delta_link(cls, value: object) -> str:
+        validated = _validated_graph_next_link(
+            value,
+            path_prefix=cls._delta_path,
+            action="Outlook delta message listing",
+        )
+        if validated is None:
+            raise ProviderMutationError(
+                "Provider Outlook delta message listing did not return synchronization state"
+            )
+        return validated
+
+    @staticmethod
+    def _requires_delta_reset(response: httpx.Response) -> bool:
+        if response.status_code == 410:
+            return True
+        if (
+            response.status_code not in {400, 404}
+            or len(response.content) > MAX_PROVIDER_RESPONSE_BYTES
+        ):
+            return False
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        error = payload.get("error", {}) if isinstance(payload, dict) else {}
+        code = error.get("code") if isinstance(error, dict) else None
+        return isinstance(code, str) and code.casefold() == "syncstatenotfound"
+
+    def _messages(self, values: Iterable[dict[str, object]]) -> list[NormalizedMessage]:
         messages: list[NormalizedMessage] = []
         seen_message_ids: set[str] = set()
         for raw in values:

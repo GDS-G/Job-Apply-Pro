@@ -2,6 +2,25 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.20.0-alpha.1] - Unreleased
+
+### Added
+
+- Added encrypted, account-bound synchronization state for Gmail and Outlook through Alembic migration `20260811_0014`.
+- Added Gmail partial synchronization with mailbox history IDs, `messageAdded` filtering, bounded history pagination, and one-time full recovery for expired history state.
+- Added Inbox-scoped Microsoft Graph message delta synchronization with complete encrypted delta links, created-message filtering, and one-time recovery for provider-requested sync resets.
+
+### Changed
+
+- Provider message synchronization now reports a sanitized initial, incremental, or recovery mode and cursor update time without exposing cursor values.
+- The desktop sync result explains whether the completed operation was initial, incremental, or recovery-based.
+
+### Security
+
+- Opaque cursors and account-binding fingerprints are encrypted at rest, never cross the backend boundary, and advance only after all returned messages are validated and durably imported.
+- Microsoft delta links remain limited to HTTPS on the exact Graph host, default TLS port, and fixed Inbox delta path; all provider pages, items, link lengths, MIME data, responses, and recovery attempts remain bounded.
+- A changed OAuth credential reference or account hint invalidates prior synchronization state, preventing cross-account cursor reuse.
+
 ## [0.19.0-alpha.1] - Unreleased
 
 ### Added
