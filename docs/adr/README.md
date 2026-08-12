@@ -37,3 +37,7 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0033: Governed evidence-ranked tailoring](0033-governed-evidence-ranked-tailoring.md)
 - [ADR-0034: Explainable immutable resume selection](0034-explainable-immutable-resume-selection.md)
 - [ADR-0035: Governed versioned answer library](0035-governed-versioned-answer-library.md)
+- [ADR-0036: Answer provenance and review-gated drafting](0036-answer-provenance-and-review-gated-drafting.md)
+- [ADR-0037: Typed application-answer validation](0037-typed-application-answer-validation.md)
+- [ADR-0038: Auditable portal field bindings](0038-auditable-portal-field-bindings.md)
+- [ADR-0039: Typed observed form controls](0039-typed-observed-form-controls.md)

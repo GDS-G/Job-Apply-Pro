@@ -16,6 +16,7 @@ from job_apply_pro.browser.client import BrowserWorkerClient
 from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserControlKind,
     BrowserEngine,
     BrowserSessionCreate,
     BrowserSessionState,
@@ -55,6 +56,8 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                     oninput="localStorage.setItem('full_name', this.value)"></label>
                   <label>Email <input name="email" type="email" required
                     oninput="localStorage.setItem('email', this.value)"></label>
+                  <label>Portal password <input name="portal_password" type="password"
+                    value="fixture-secret"></label>
                   <button type="button" onclick="location.href='/experience'">Continue</button>
                   <script>
                     full_name.value = localStorage.getItem('full_name') || '';
@@ -264,13 +267,32 @@ def test_multi_page_fixture_is_verified_traced_and_restartable(
             assert started.observation is not None
             assert started.observation.page_type == "CANDIDATE_IDENTITY"
             assert Path(started.observation.screenshot_path).is_file()
+            full_name = next(
+                control
+                for control in started.observation.controls
+                if control.field_name == "full_name"
+            )
+            assert full_name.kind is BrowserControlKind.TEXT
+            assert full_name.label == "Full name"
+            assert full_name.required
+            assert len(full_name.control_key) == 32
+            assert full_name.locator == _label("Full name")
+            assert all(control.input_type != "password" for control in started.observation.controls)
 
             assert service.execute_action(started.id, _fill("Full name", "Browser User")).verified
             assert service.execute_action(
                 started.id, _fill("Email", "browser@example.com")
             ).verified
             assert service.execute_action(started.id, _click_to("Continue", "/experience")).verified
-            assert service.execute_action(started.id, _fill("Years of experience", "7")).verified
+            experience = service.execute_action(started.id, _fill("Years of experience", "7"))
+            assert experience.verified
+            authorized = next(
+                control
+                for control in experience.observation.controls
+                if control.field_name == "authorized"
+            )
+            assert authorized.kind is BrowserControlKind.CHECKBOX
+            assert authorized.label == "Authorized to work"
 
             restarted = service.restart(started.id)
             assert restarted.state is BrowserSessionState.ACTIVE

@@ -14,6 +14,7 @@ from job_apply_pro.domain.browser import (
     BrowserActionKind,
     BrowserActionResult,
     BrowserObservation,
+    BrowserObservedControl,
     BrowserPermission,
     BrowserSessionCreate,
     BrowserSessionSnapshot,
@@ -66,6 +67,8 @@ class SupervisedPortalRepositoryProtocol(Protocol):
 
 class SupervisedBrowserProtocol(Protocol):
     def create_session(self, command: BrowserSessionCreate) -> BrowserSessionSnapshot: ...
+
+    def get_session(self, session_id: str) -> BrowserSessionSnapshot: ...
 
     def resume(self, session_id: str) -> BrowserSessionSnapshot: ...
 
@@ -199,7 +202,7 @@ class SupervisedPortalService:
         saved = self._repository.get(run.id)
         if saved is None:  # pragma: no cover - protected by repository transaction
             raise LookupError(f"Supervised portal run {run.id} was not found")
-        return saved
+        return saved.model_copy(update={"observed_controls": observation.controls})
 
     def capture(self, run_id: str, command: SupervisedPortalCapture) -> SupervisedPortalRunSnapshot:
         run = self._active(run_id)
@@ -244,7 +247,7 @@ class SupervisedPortalService:
             action_kind=None,
             verified=match is not None,
         )
-        return self.get(run_id)
+        return self.get(run_id).model_copy(update={"observed_controls": observation.controls})
 
     def submit(
         self, run_id: str, approval: SupervisedPortalSubmissionApproval
@@ -339,10 +342,17 @@ class SupervisedPortalService:
         run = self._repository.get(run_id)
         if run is None:
             raise LookupError(f"Supervised portal run {run_id} was not found")
-        return run
+        session = self._browser.get_session(run.browser_session_id)
+        observation = session.observation
+        controls = (
+            observation.controls
+            if observation is not None and observation.page_fingerprint == run.page_fingerprint
+            else []
+        )
+        return run.model_copy(update={"observed_controls": controls})
 
     def list_runs(self) -> list[SupervisedPortalRunSnapshot]:
-        return self._repository.list_runs()
+        return [self.get(run.id) for run in self._repository.list_runs()]
 
     def _active(self, run_id: str) -> SupervisedPortalRunSnapshot:
         run = self.get(run_id)
@@ -377,7 +387,7 @@ class SupervisedPortalService:
             labels = [
                 str(value)
                 for control in observation.controls
-                for value in (control.get("label"), control.get("text"))
+                for value in (control.label, control.text)
                 if value
             ]
             page_type = observation.page_type if observation.page_type != "UNKNOWN" else None
@@ -457,18 +467,18 @@ class SupervisedPortalService:
         return match.group(1) if match else None
 
     @staticmethod
-    def _submission_action(controls: Iterable[dict[str, object]]) -> BrowserAction:
+    def _submission_action(controls: Iterable[BrowserObservedControl]) -> BrowserAction:
         candidates: list[str] = []
         for control in controls:
-            tag = str(control.get("tag", "")).casefold()
-            control_type = str(control.get("type", "")).casefold()
+            tag = control.tag.casefold()
+            control_type = control.input_type.casefold()
             if tag != "button" and control_type != "submit":
                 continue
             label = next(
                 (
-                    str(control.get(key, "")).strip()
-                    for key in ("label", "text", "name", "value")
-                    if str(control.get(key, "")).strip()
+                    value.strip()
+                    for value in (control.label, control.text, control.field_name)
+                    if value.strip()
                 ),
                 "",
             )

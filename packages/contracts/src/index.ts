@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Auditable Form Field Binding",
-  version: "0.29.0-alpha.1",
+  name: "Observed Form Control Capture",
+  version: "0.30.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -118,6 +118,56 @@ export type BrowserActionKind =
   | "WAIT_FOR"
   | "SCREENSHOT";
 
+export type BrowserControlKind =
+  | "TEXT"
+  | "TEXT_AREA"
+  | "EMAIL"
+  | "TELEPHONE"
+  | "NUMBER"
+  | "DATE"
+  | "SELECT"
+  | "RADIO_GROUP"
+  | "CHECKBOX"
+  | "FILE_UPLOAD"
+  | "SIGNATURE"
+  | "DISCLOSURE"
+  | "BUTTON"
+  | "LINK"
+  | "CUSTOM";
+
+export interface BrowserControlOption {
+  value: string;
+  label: string;
+}
+
+export interface BrowserObservedControl {
+  index: number;
+  control_key: string;
+  kind: BrowserControlKind;
+  tag: string;
+  input_type: string;
+  role: string;
+  element_id: string;
+  field_name: string;
+  group_label: string;
+  label: string;
+  text: string;
+  href: string;
+  canonical_field: string;
+  accept: string;
+  checked: boolean;
+  required: boolean;
+  disabled: boolean;
+  legal_attestation: boolean;
+  character_limit?: number | null;
+  minimum_number?: number | null;
+  maximum_number?: number | null;
+  earliest_date?: string | null;
+  latest_date?: string | null;
+  options: BrowserControlOption[];
+  locator?: Record<string, unknown> | null;
+}
+
 export interface BrowserTab {
   index: number;
   url: string;
@@ -135,7 +185,7 @@ export interface BrowserObservation {
   tabs: BrowserTab[];
   accessibility_snapshot: string;
   visible_text: string;
-  controls: Record<string, unknown>[];
+  controls: BrowserObservedControl[];
   validation_errors: string[];
   modals: string[];
   console_errors: string[];
@@ -345,6 +395,7 @@ export interface SupervisedPortalRunSnapshot {
   disposition: SupervisedPortalDisposition;
   intervention_reasons: PortalInterventionReason[];
   evidence: SupervisedPortalStepEvidence[];
+  observed_controls: BrowserObservedControl[];
   trace_path?: string | null;
   created_at: string;
   updated_at: string;

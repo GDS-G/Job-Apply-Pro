@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
-from job_apply_pro.domain.browser import BrowserActionKind, BrowserEngine
+from job_apply_pro.domain.browser import BrowserActionKind, BrowserEngine, BrowserObservedControl
 from job_apply_pro.domain.workflow import WorkflowState
 
 
@@ -296,6 +296,7 @@ class SupervisedPortalRunSnapshot(BaseModel):
     disposition: SupervisedPortalDisposition
     intervention_reasons: list[PortalInterventionReason]
     evidence: list[SupervisedPortalStepEvidence]
+    observed_controls: list[BrowserObservedControl] = Field(default_factory=list, max_length=100)
     trace_path: str | None = None
     created_at: datetime
     updated_at: datetime

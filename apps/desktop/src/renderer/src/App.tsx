@@ -999,34 +999,61 @@ export function App() {
   }
 
   async function previewApplicationFieldBinding(form: FormData) {
+    const detectedKey = String(form.get("detected_control_key") ?? "");
+    const detected = latestSupervisedRun?.observed_controls.find(
+      (control) => control.control_key === detectedKey,
+    );
     const input: ApplicationFieldBindingPreviewInput = {
       application_answer_id: String(form.get("application_answer_id")),
-      observed_field: {
-        portal: String(form.get("portal")),
-        page_fingerprint: String(form.get("page_fingerprint")),
-        control_key: String(form.get("control_key")),
-        control_kind: String(
-          form.get("control_kind"),
-        ) as ApplicationFieldBindingPreviewInput["observed_field"]["control_kind"],
-        label: String(form.get("label")),
-        required: form.get("required") === "on",
-        options: String(form.get("options") ?? "")
-          .split("\n")
-          .map((value) => value.trim())
-          .filter(Boolean),
-        character_limit: form.get("character_limit")
-          ? Number(form.get("character_limit"))
-          : null,
-        minimum_number: form.get("minimum_number")
-          ? Number(form.get("minimum_number"))
-          : null,
-        maximum_number: form.get("maximum_number")
-          ? Number(form.get("maximum_number"))
-          : null,
-        earliest_date: String(form.get("earliest_date") ?? "") || null,
-        latest_date: String(form.get("latest_date") ?? "") || null,
-        legal_attestation: form.get("legal_attestation") === "on",
-      },
+      observed_field: detected
+        ? {
+            portal: latestSupervisedRun!.portal,
+            page_fingerprint: latestSupervisedRun!.page_fingerprint,
+            control_key: detected.control_key,
+            control_kind:
+              detected.kind as ApplicationFieldBindingPreviewInput["observed_field"]["control_kind"],
+            label:
+              detected.label ||
+              detected.group_label ||
+              detected.field_name ||
+              "Observed " + detected.kind.toLowerCase() + " control",
+            required: detected.required,
+            options: detected.options.map(
+              (option) => option.label || option.value,
+            ),
+            character_limit: detected.character_limit ?? null,
+            minimum_number: detected.minimum_number ?? null,
+            maximum_number: detected.maximum_number ?? null,
+            earliest_date: detected.earliest_date ?? null,
+            latest_date: detected.latest_date ?? null,
+            legal_attestation: detected.legal_attestation,
+          }
+        : {
+            portal: String(form.get("portal")),
+            page_fingerprint: String(form.get("page_fingerprint")),
+            control_key: String(form.get("control_key")),
+            control_kind: String(
+              form.get("control_kind"),
+            ) as ApplicationFieldBindingPreviewInput["observed_field"]["control_kind"],
+            label: String(form.get("label")),
+            required: form.get("required") === "on",
+            options: String(form.get("options") ?? "")
+              .split("\n")
+              .map((value) => value.trim())
+              .filter(Boolean),
+            character_limit: form.get("character_limit")
+              ? Number(form.get("character_limit"))
+              : null,
+            minimum_number: form.get("minimum_number")
+              ? Number(form.get("minimum_number"))
+              : null,
+            maximum_number: form.get("maximum_number")
+              ? Number(form.get("maximum_number"))
+              : null,
+            earliest_date: String(form.get("earliest_date") ?? "") || null,
+            latest_date: String(form.get("latest_date") ?? "") || null,
+            legal_attestation: form.get("legal_attestation") === "on",
+          },
     };
     setBusy(true);
     setError(null);
@@ -1452,7 +1479,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Auditable Form Field Binding v0.29.0-alpha.1</strong>
+              <strong>Observed Form Control Capture v0.30.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2418,6 +2445,35 @@ export function App() {
                         </option>
                       ))}
                   </select>
+                </label>
+                <label>
+                  Detected control from current supervised page
+                  <select name="detected_control_key" defaultValue="">
+                    <option value="">Enter sanitized metadata manually</option>
+                    {(latestSupervisedRun?.observed_controls ?? [])
+                      .filter(
+                        (control) =>
+                          !["BUTTON", "LINK"].includes(control.kind) &&
+                          !control.disabled,
+                      )
+                      .map((control) => (
+                        <option
+                          key={control.control_key}
+                          value={control.control_key}
+                        >
+                          {control.label ||
+                            control.group_label ||
+                            control.field_name ||
+                            control.kind}{" "}
+                          · {control.kind.replaceAll("_", " ")}
+                          {control.required ? " · required" : ""}
+                        </option>
+                      ))}
+                  </select>
+                  <small>
+                    Selecting a detected control uses its exact portal, page
+                    fingerprint, deterministic key, options, and constraints.
+                  </small>
                 </label>
                 <label>
                   Portal / ATS

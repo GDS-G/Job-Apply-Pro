@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Auditable Form Field Binding v0.29.0-alpha.1"),
+      screen.getByText("Observed Form Control Capture v0.30.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
