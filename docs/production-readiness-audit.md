@@ -223,7 +223,11 @@ The top candidate is advisory. The desktop allows any reviewed candidate to be c
 
 This release adds no live-provider or external-AI dependency. Ranking decrypts candidate evidence only inside the existing authenticated local backend and does not use credentials, browser state, protected traits, or unverified profile claims. Sanitized service and API tests cover recommendation order, exclusions, ties, stale review refusal, native-facing contracts, atomic selection, and audit retrieval.
 
-Final source, packaging, checksums, and protected GitHub integration evidence will be recorded after exact-head validation.
+All 109 backend tests passed at 82.98% total coverage and all 16 desktop tests passed. Strict Ruff formatting/lint, mypy, TypeScript, oxlint, Prettier, production Electron build, migration upgrade/downgrade/re-upgrade, `pnpm audit --audit-level high`, and `pip-audit --skip-editable` passed; pip-audit skipped only the unpublished editable backend package.
+
+Exact runtime source head `2849d6ce7b380fe46a75c7df41408e71d29bac5e` produced the unsigned installer `Job-Apply-Pro-0.25.0-alpha.1-x64.exe`, 169,648,853 bytes, SHA-256 `7EEB7FA1FAF8CCF89D063D4A8E40A0A58BBDC1C91B90C6CB3462F29C838F6060`. The bundled backend executable is 18,446,954 bytes with SHA-256 `D929302B997774746886FD2EF24614B242D613B7AD98885B660905735F962F3A`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `90CC658C452425E0F808082C9D01629711EFD11AB1A294CF7CAB43B3D0F4B42C`. All three report `NotSigned`, as expected without release credentials. The packaged-backend smoke, NSIS installer, unpacked application, PDFium DLL, and pypdfium2 license tree passed/persisted. This documentation-only evidence update does not alter runtime output.
+
+Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
 
 ## External launch evidence still required
 
