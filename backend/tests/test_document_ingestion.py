@@ -73,7 +73,7 @@ def test_legacy_doc_conversion_uses_fixed_shell_free_command(
 
     assert media_type == "application/msword"
     assert extraction.plain_text == "Converted legacy resume"
-    assert extraction.parser == "libreoffice-doc-to-docx/1+python-docx/1"
+    assert extraction.parser == "libreoffice-doc-to-docx/1+python-docx-layout/2"
     assert extraction.warnings
     assert captured[0] == str(executable.resolve())
     assert "--headless" in captured
@@ -157,6 +157,75 @@ def test_partially_textless_pdf_is_imported_with_warning() -> None:
     assert extraction.warnings == ["1 PDF page(s) had no meaningful text; OCR was not enabled"]
 
 
+def test_pdf_layout_orders_two_columns_for_resume_reading() -> None:
+    output = BytesIO()
+    canvas = Canvas(output)
+    canvas.drawString(72, 740, "Candidate Name")
+    canvas.drawString(72, 700, "Experience")
+    canvas.drawString(330, 700, "Skills")
+    canvas.drawString(72, 680, "Platform Engineer")
+    canvas.drawString(330, 680, "Python")
+    canvas.save()
+
+    _, extraction = extract_document("two-column.pdf", output.getvalue())
+
+    assert extraction.parser == "pypdf-layout/2"
+    assert [block.text for block in extraction.blocks] == [
+        "Candidate Name",
+        "Experience",
+        "Platform Engineer",
+        "Skills",
+        "Python",
+    ]
+    assert [block.column for block in extraction.blocks] == [None, 0, 0, 1, 1]
+    assert extraction.warnings == [
+        "Layout-aware column ordering was applied to PDF page(s): 1; "
+        "review complex graphics or spanning content"
+    ]
+
+
+def test_pdf_layout_does_not_promote_one_off_indented_content_to_a_column() -> None:
+    output = BytesIO()
+    canvas = Canvas(output)
+    canvas.drawString(72, 740, "Candidate Name")
+    canvas.drawString(72, 700, "Experience")
+    canvas.drawString(330, 700, "2021 to present")
+    canvas.drawString(72, 680, "Platform Engineer")
+    canvas.save()
+
+    _, extraction = extract_document("indented.pdf", output.getvalue())
+
+    assert [block.text for block in extraction.blocks] == [
+        "Candidate Name",
+        "Experience 2021 to present",
+        "Platform Engineer",
+    ]
+    assert all(block.column is None for block in extraction.blocks)
+    assert extraction.warnings == []
+
+
+def test_docx_preserves_paragraph_and_table_document_order() -> None:
+    output = BytesIO()
+    document = DocxDocument()
+    document.add_paragraph("Summary")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Skill"
+    table.cell(0, 1).text = "Python"
+    document.add_paragraph("Experience")
+    document.save(output)
+
+    _, extraction = extract_document("mixed-layout.docx", output.getvalue())
+
+    assert extraction.parser == "python-docx-layout/2"
+    assert [block.text for block in extraction.blocks] == [
+        "Summary",
+        "Skill | Python",
+        "Experience",
+    ]
+    assert extraction.blocks[1].table == 0
+    assert extraction.blocks[1].row == 0
+
+
 def test_ocr_rejects_unapproved_executable_name(tmp_path: Path) -> None:
     executable = tmp_path / "cmd.exe"
     executable.write_bytes(b"fixture")
@@ -199,7 +268,7 @@ def test_image_only_pdf_uses_bounded_tesseract_fallback(
     )
 
     assert extraction.plain_text == "OCR recovered candidate resume"
-    assert extraction.parser == "pypdf/1+tesseract/1"
+    assert extraction.parser == "pypdf-layout/2+tesseract/1"
     assert extraction.blocks[0].kind == "OCR_PAGE_TEXT"
     assert extraction.blocks[0].style == "tesseract:eng:150dpi"
     assert captured[0] == str(executable.resolve())

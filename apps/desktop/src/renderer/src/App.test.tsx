@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Native Gemini Fallback v0.22.0-alpha.1"),
+      screen.getByText("Layout-Aware Resume Ingestion v0.23.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

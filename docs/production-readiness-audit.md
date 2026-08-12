@@ -189,6 +189,14 @@ Exact committed-head packaging was repeated from `b0a1f461bfffb0a53aad9711ea21ed
 
 This is source and sanitized-fixture evidence, not a live Gemini availability or production claim. Live validation remains externally gated on an owner-created API key stored only in local secret configuration, explicit external-processing consent, current Google terms/privacy/retention/quota/data-region review, model availability, and authorized provider traffic. No credential pasted into chat is used or persisted.
 
+### Layout-Aware Resume Ingestion source validation
+
+`Layout-Aware Resume Ingestion v0.23.0-alpha.1` closes the first richer-layout source gap without claiming universal visual understanding. New PDF imports reject decoded page content streams above 20 MiB, use pypdf fixed-width layout mode, retain bounded line blocks with page/row coordinates, and infer column-major order only after two or more rows expose repeated starts separated by at least twelve character cells. The parser keeps content before the first multi-column row first and emits a review warning whenever inferred columns are used. New DOCX imports iterate top-level paragraphs and tables in document order and retain table/row coordinates, correcting the previous behavior that appended all tables after all paragraphs.
+
+`LayoutBlock` adds optional `row`, `column`, and `table` fields in Python and TypeScript. Missing values default to `None`/absence, so previously encrypted extraction JSON remains valid without a migration. Parser provenance advances to `pypdf-layout/2` and `python-docx-layout/2`. Existing bounds, archive checks, isolated OCR/conversion helpers, encryption, hashes, evidence IDs, claim review, retrieval policy, tailored-document fingerprints, and final approval controls are unchanged. ADR-0032 records the heuristic, compatibility, and manual-review boundaries. Generated two-column PDF and mixed-content DOCX fixtures contain no private candidate data.
+
+Full validation and exact artifact evidence are recorded after the source head is committed and packaged. This remains an alpha: advanced graphics, floating text boxes, spanning content, nested tables, a broad sanitized real-world résumé corpus, richer output templates, semantic ranking, and owner-installed helper validation remain incomplete or externally gated.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

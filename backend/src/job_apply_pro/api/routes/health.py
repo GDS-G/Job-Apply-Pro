@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Native Gemini Fallback",
+        build="Layout-Aware Resume Ingestion",
         environment=settings.environment,
     )

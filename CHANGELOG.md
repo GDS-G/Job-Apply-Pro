@@ -2,6 +2,23 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.23.0-alpha.1] - Unreleased
+
+### Added
+
+- Added optional row, column, and table coordinates to the backward-compatible document layout-block contract.
+- Added deterministic fixtures for a two-column PDF résumé and a DOCX containing a table between paragraphs.
+
+### Changed
+
+- New PDF imports reject decoded page content streams above 20 MiB, use pypdf layout mode, split fixed-width lines into bounded blocks, and apply column-major reading order only when at least two repeated rows expose well-separated repeated column starts.
+- New DOCX imports follow top-level document order so tables are no longer moved after all paragraphs. Parser provenance advances to `pypdf-layout/2` and `python-docx-layout/2`.
+
+### Security
+
+- Existing file/page/character/block/archive/OCR/conversion limits, isolated helper processes, encryption, hashes, evidence IDs, and explicit claim review remain unchanged.
+- Column detection is deterministic and emits a review warning; the build does not claim perfect semantic understanding of graphics, floating text boxes, spanning content, nested tables, or arbitrary PDF geometry.
+
 ## [0.22.0-alpha.1] - Unreleased
 
 ### Added

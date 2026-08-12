@@ -214,19 +214,19 @@ const bridge: DesktopBridge = {
     exportSupportDiagnostics: async () => null,
     getUpdateStatus: async () => ({
       state: "DISABLED",
-      current_version: "0.22.0-alpha.1",
+      current_version: "0.23.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     checkForUpdates: async () => ({
       state: "DISABLED",
-      current_version: "0.22.0-alpha.1",
+      current_version: "0.23.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
     downloadUpdate: async () => ({
       state: "DISABLED",
-      current_version: "0.22.0-alpha.1",
+      current_version: "0.23.0-alpha.1",
       message: "Updates are disabled for development builds.",
       checked_at: new Date(0).toISOString(),
     }),
@@ -234,7 +234,7 @@ const bridge: DesktopBridge = {
     onUpdateStatus: (listener) => {
       listener({
         state: "DISABLED",
-        current_version: "0.22.0-alpha.1",
+        current_version: "0.23.0-alpha.1",
         message: "Updates are disabled for development builds.",
         checked_at: new Date(0).toISOString(),
       });

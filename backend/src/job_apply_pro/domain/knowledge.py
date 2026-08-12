@@ -54,6 +54,9 @@ class LayoutBlock(BaseModel):
 
     index: int = Field(ge=0)
     page: int | None = Field(default=None, ge=1)
+    row: int | None = Field(default=None, ge=0)
+    column: int | None = Field(default=None, ge=0)
+    table: int | None = Field(default=None, ge=0)
     kind: str = Field(min_length=1, max_length=40)
     style: str | None = Field(default=None, max_length=100)
     text: str = Field(max_length=20_000)

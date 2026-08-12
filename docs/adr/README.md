@@ -33,3 +33,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0029: Encrypt incremental provider synchronization state](0029-encrypted-incremental-provider-sync.md)
 - [ADR-0030: Encrypted calendar interview awareness](0030-encrypted-calendar-interview-awareness.md)
 - [ADR-0031: Native Gemini secondary provider](0031-native-gemini-secondary-provider.md)
+- [ADR-0032: Conservative layout-aware document ingestion](0032-conservative-layout-aware-document-ingestion.md)

@@ -11,6 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from docx import Document as DocxDocument
+from docx.table import Table
 from pypdf import PdfReader
 
 from job_apply_pro.domain.knowledge import DocumentExtraction, LayoutBlock
@@ -24,6 +25,10 @@ MAX_DOCX_EXPANDED_BYTES = 52_428_800
 MAX_DOCX_SINGLE_ENTRY_BYTES = 20_971_520
 MAX_OCR_PAGE_PIXELS = 25_000_000
 MAX_OCR_PAGE_OUTPUT_BYTES = 80_000
+MAX_PDF_PAGE_CONTENT_BYTES = 20_971_520
+PDF_COLUMN_GAP_CHARACTERS = 4
+PDF_MIN_COLUMN_SEPARATION = 12
+PDF_MIN_MULTI_COLUMN_ROWS = 2
 HELPER_INHERITED_ENVIRONMENT = {
     "COMSPEC",
     "PATHEXT",
@@ -223,22 +228,27 @@ def _extract_pdf(
             raise DocumentExtractionError("Password-protected PDF files are not supported")
         if len(reader.pages) > MAX_PAGES:
             raise DocumentExtractionError(f"PDF exceeds the {MAX_PAGES}-page limit")
-        blocks = [
-            LayoutBlock(
-                index=index,
-                page=index + 1,
-                kind="PAGE_TEXT",
-                text=(page.extract_text() or "")[:20_000],
-            )
-            for index, page in enumerate(reader.pages)
-        ]
+        page_blocks: list[list[LayoutBlock]] = []
+        multi_column_pages: list[int] = []
+        for page_index, page in enumerate(reader.pages):
+            contents = page.get_contents()
+            if contents is not None and len(contents.get_data()) > MAX_PDF_PAGE_CONTENT_BYTES:
+                raise DocumentExtractionError(
+                    f"PDF page {page_index + 1} content stream exceeds the safety limit"
+                )
+            extracted, multi_column = _extract_pdf_layout_page(page, page_index + 1)
+            page_blocks.append(extracted)
+            if multi_column:
+                multi_column_pages.append(page_index + 1)
     except DocumentExtractionError:
         raise
     except Exception as error:
         raise DocumentExtractionError("PDF parsing failed") from error
     warnings: list[str] = []
     blank_pages = [
-        block.index for block in blocks if len(block.text.strip()) < MIN_MEANINGFUL_PAGE_CHARACTERS
+        page_index
+        for page_index, page in enumerate(page_blocks)
+        if len(" ".join(block.text for block in page).strip()) < MIN_MEANINGFUL_PAGE_CHARACTERS
     ]
     if blank_pages and options and options.ocr_enabled:
         selected_pages = blank_pages[: options.ocr_max_pages]
@@ -248,25 +258,34 @@ def _extract_pdf(
             warnings.append(
                 f"OCR page limit skipped {len(blank_pages) - len(selected_pages)} PDF page(s)"
             )
-        blocks = [
-            LayoutBlock(
-                index=block.index,
-                page=block.page,
-                kind="OCR_PAGE_TEXT",
-                style=f"tesseract:{options.ocr_language}:{options.ocr_dpi}dpi",
-                text=recovered[block.index],
-            )
-            if block.index in recovered
-            else block
-            for block in blocks
-        ]
-        parser = "pypdf/1+tesseract/1" if recovered else "pypdf/1"
+        for page_index, text in recovered.items():
+            page_blocks[page_index] = [
+                LayoutBlock(
+                    index=0,
+                    page=page_index + 1,
+                    row=0,
+                    kind="OCR_PAGE_TEXT",
+                    style=f"tesseract:{options.ocr_language}:{options.ocr_dpi}dpi",
+                    text=text,
+                )
+            ]
+        parser = "pypdf-layout/2+tesseract/1" if recovered else "pypdf-layout/2"
     else:
-        parser = "pypdf/1"
+        parser = "pypdf-layout/2"
         if blank_pages:
             warnings.append(
                 f"{len(blank_pages)} PDF page(s) had no meaningful text; OCR was not enabled"
             )
+    if multi_column_pages:
+        warnings.append(
+            "Layout-aware column ordering was applied to PDF page(s): "
+            + ", ".join(str(page) for page in multi_column_pages)
+            + "; review complex graphics or spanning content"
+        )
+    blocks = [
+        block.model_copy(update={"index": index})
+        for index, block in enumerate(block for page in page_blocks for block in page)
+    ]
     try:
         return _bounded(blocks, parser, len(reader.pages), warnings)
     except DocumentExtractionError as error:
@@ -276,6 +295,95 @@ def _extract_pdf(
                 "for scanned PDFs"
             ) from error
         raise
+
+
+def _layout_segments(line: str) -> list[tuple[int, str]]:
+    segments: list[tuple[int, str]] = []
+    for match in re.finditer(
+        rf"\S(?:.*?\S)?(?=\s{{{PDF_COLUMN_GAP_CHARACTERS},}}|\s*$)", line.rstrip()
+    ):
+        text = match.group(0).strip()
+        if text:
+            segments.append((match.start(), text))
+    return segments
+
+
+def _column_starts(rows: list[list[tuple[int, str]]]) -> list[int]:
+    multi_rows = [row for row in rows if len(row) >= 2]
+    if len(multi_rows) < PDF_MIN_MULTI_COLUMN_ROWS:
+        return []
+    starts = sorted(start for row in multi_rows for start, _ in row)
+    clusters: list[list[int]] = []
+    for start in starts:
+        if not clusters or start - round(sum(clusters[-1]) / len(clusters[-1])) >= 4:
+            clusters.append([start])
+        else:
+            clusters[-1].append(start)
+    centers = [round(sum(cluster) / len(cluster)) for cluster in clusters if len(cluster) >= 2]
+    separated = [centers[0]] if centers else []
+    for center in centers[1:]:
+        if center - separated[-1] >= PDF_MIN_COLUMN_SEPARATION:
+            separated.append(center)
+    return separated if len(separated) >= 2 else []
+
+
+def _extract_pdf_layout_page(page: object, page_number: int) -> tuple[list[LayoutBlock], bool]:
+    layout = (
+        page.extract_text(  # type: ignore[attr-defined]
+            extraction_mode="layout",
+            layout_mode_space_vertically=False,
+        )
+        or ""
+    )
+    rows = [_layout_segments(line) for line in layout.splitlines() if line.strip()]
+    if not rows:
+        return [
+            LayoutBlock(index=0, page=page_number, row=0, kind="PDF_LAYOUT_LINE", text="")
+        ], False
+    starts = _column_starts(rows)
+    if not starts:
+        return (
+            [
+                LayoutBlock(
+                    index=0,
+                    page=page_number,
+                    row=row_index,
+                    kind="PDF_LAYOUT_LINE",
+                    text=" ".join(text for _, text in row)[:20_000],
+                )
+                for row_index, row in enumerate(rows)
+                if row
+            ],
+            False,
+        )
+
+    first_multi_row = next(index for index, row in enumerate(rows) if len(row) >= 2)
+    ordered: list[tuple[int, int | None, str]] = []
+    for row_index, row in enumerate(rows[:first_multi_row]):
+        if row:
+            ordered.append((row_index, None, " ".join(text for _, text in row)))
+    columns: list[list[tuple[int, str]]] = [[] for _ in starts]
+    for row_index, row in enumerate(rows[first_multi_row:], start=first_multi_row):
+        for start, text in row:
+            column = min(range(len(starts)), key=lambda index: abs(starts[index] - start))
+            columns[column].append((row_index, text))
+    for column, entries in enumerate(columns):
+        ordered.extend((row_index, column, text) for row_index, text in entries)
+    return (
+        [
+            LayoutBlock(
+                index=0,
+                page=page_number,
+                row=row,
+                column=column,
+                kind="PDF_LAYOUT_LINE",
+                style="pypdf:layout:column-major" if column is not None else "pypdf:layout",
+                text=text[:20_000],
+            )
+            for row, column, text in ordered
+        ],
+        True,
+    )
 
 
 def _extract_docx(data: bytes) -> DocumentExtraction:
@@ -297,30 +405,35 @@ def _extract_docx(data: bytes) -> DocumentExtraction:
     except Exception as error:
         raise DocumentExtractionError("DOCX parsing failed") from error
     blocks: list[LayoutBlock] = []
-    for paragraph in document.paragraphs:
-        text = paragraph.text.strip()
+    table_index = 0
+    for item in document.iter_inner_content():
+        if isinstance(item, Table):
+            for row_index, row in enumerate(item.rows):
+                text = " | ".join(cell.text.strip() for cell in row.cells).strip(" |")
+                if text:
+                    blocks.append(
+                        LayoutBlock(
+                            index=len(blocks),
+                            row=row_index,
+                            table=table_index,
+                            kind="TABLE_ROW",
+                            style=f"table:{table_index}:row:{row_index}",
+                            text=text[:20_000],
+                        )
+                    )
+            table_index += 1
+            continue
+        text = item.text.strip()
         if text:
             blocks.append(
                 LayoutBlock(
                     index=len(blocks),
                     kind="PARAGRAPH",
-                    style=paragraph.style.name[:100] if paragraph.style else None,
+                    style=item.style.name[:100] if item.style else None,
                     text=text[:20_000],
                 )
             )
-    for table_index, table in enumerate(document.tables):
-        for row_index, row in enumerate(table.rows):
-            text = " | ".join(cell.text.strip() for cell in row.cells).strip(" |")
-            if text:
-                blocks.append(
-                    LayoutBlock(
-                        index=len(blocks),
-                        kind="TABLE_ROW",
-                        style=f"table:{table_index}:row:{row_index}",
-                        text=text[:20_000],
-                    )
-                )
-    return _bounded(blocks, "python-docx/1", 1)
+    return _bounded(blocks, "python-docx-layout/2", 1)
 
 
 def _extract_rtf(data: bytes) -> DocumentExtraction:

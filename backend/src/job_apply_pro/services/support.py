@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Native Gemini Fallback"
+    BUILD_NAME = "Layout-Aware Resume Ingestion"
 
     def __init__(
         self,
