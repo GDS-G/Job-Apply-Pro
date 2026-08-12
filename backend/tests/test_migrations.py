@@ -132,6 +132,7 @@ def test_answer_revision_migration_backfills_ciphertext_without_decryption(
         "communication_configurations",
         "provider_sync_states",
         "provider_calendar_events",
+        "application_field_bindings",
     } <= tables
     audit_columns = {
         column["name"] for column in inspector.get_columns("document_generation_audits")

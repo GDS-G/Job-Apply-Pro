@@ -251,8 +251,6 @@ Runtime source commit `f7268d7` produced the unsigned installer `Job-Apply-Pro-0
 
 Protected GitHub pull-request and final main CI/security evidence will be recorded after integration.
 
-## External launch evidence still required
-
 ### Typed Application Answers source validation
 
 `Typed Application Answers v0.28.0-alpha.1` adds persisted answer kinds and deterministic constraints to the encrypted application-answer workflow. Multiple-choice options are bounded, non-empty, and unique; numeric/salary bounds and values must be finite; date/availability bounds and values must be real ISO calendar dates; yes/no, exact, and short-text values have explicit canonical forms and limits. Invalid reusable or model-drafted content does not become an accepted draft, and invalid operator review fails before promotion.
@@ -261,7 +259,17 @@ Migration `20260812_0020` adds the kind, validation-rules JSON, and kind index w
 
 Runtime source commit `846d30f` produced the unsigned validation installer `Job-Apply-Pro-0.28.0-alpha.1-x64.exe`, 169,688,911 bytes, SHA-256 `B661AE08DED10DC63C38D0319B33B027609E36ABC6799FA85DF208142C0614CB`. The bundled backend executable is 18,468,428 bytes with SHA-256 `B6A988914199639CF1F6D8490575D277900C0A62F9B08956CD16E70E43594D96`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `2F8B8AF7FF070D6BA1CACA63542C8AF1DCF1A937A6F7C612D5CD240F803501D7`. All report `NotSigned`, as expected without owner-provided signing credentials. The frozen-backend smoke test passed. These artifacts are local validation evidence only.
 
-Protected GitHub pull-request and final-main evidence will be recorded after integration.
+PR #53 merged the validated source to `main` as `7ef92da0ce3ba42d042bc09d0274145a4b376918`. Pull-request CI run `31634560453` and Security run `31634560459` passed. Final-main CI run `31635139744` and Security run `31635139753` also passed on the merge commit, including frozen-backend packaging, smoke testing, unpacked Windows packaging, dependency auditing, secret scanning, and CodeQL.
+
+### Auditable Form Field Binding source validation
+
+`Auditable Form Field Binding v0.29.0-alpha.1` introduces a preview-and-approval boundary between reviewed typed answers and observed portal controls. The contract records portal/page/control identity, widget kind, label, options, required state, numeric/date/character constraints, legal-attestation status, canonical field, confidence/source, answer source/status/kind/revision, validation rules, compatibility failures, and proposed permission. Approval recomputes a SHA-256 review fingerprint and refuses stale, incompatible, prohibited, or duplicate mappings.
+
+Migration `20260812_0021` adds encrypted observed-label/options persistence and indexes by application and answer. API, shared TypeScript contracts, guarded IPC, native confirmation, renderer review UI, and deterministic tests move together. File upload, signature, disclosure, custom-widget, and legal-attestation controls cannot receive unattended autofill authority. This build records audit metadata only and creates no browser action or live-site write. ADR-0038 records the decision.
+
+Exact local validation, packaged artifact, and protected GitHub evidence are recorded after the runtime source commit and integration are fixed.
+
+## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
 2. A signed current-version installer whose Authenticode subject and SHA-256 checksum match the release record.

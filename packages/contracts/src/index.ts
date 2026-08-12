@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Typed Application Answers",
-  version: "0.28.0-alpha.1",
+  name: "Auditable Form Field Binding",
+  version: "0.29.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -1055,6 +1055,81 @@ export interface ApplicationAnswerReviewInput {
   reuse_permission: ClaimPermittedUse;
 }
 
+export type PortalFieldControlKind =
+  | "TEXT"
+  | "TEXT_AREA"
+  | "EMAIL"
+  | "TELEPHONE"
+  | "NUMBER"
+  | "DATE"
+  | "SELECT"
+  | "RADIO_GROUP"
+  | "CHECKBOX"
+  | "FILE_UPLOAD"
+  | "SIGNATURE"
+  | "DISCLOSURE"
+  | "CUSTOM";
+
+export type FieldAutomationPermission =
+  "PROHIBITED" | "REVIEW_REQUIRED" | "AUTOFILL_ALLOWED";
+
+export interface ObservedPortalField {
+  portal: string;
+  page_fingerprint: string;
+  control_key: string;
+  control_kind: PortalFieldControlKind;
+  label: string;
+  required: boolean;
+  options: string[];
+  character_limit?: number | null;
+  minimum_number?: number | null;
+  maximum_number?: number | null;
+  earliest_date?: string | null;
+  latest_date?: string | null;
+  legal_attestation: boolean;
+}
+
+export interface ApplicationFieldBindingPreviewInput {
+  application_answer_id: string;
+  observed_field: ObservedPortalField;
+}
+
+export interface ApplicationFieldBindingPreview {
+  application_id: string;
+  application_answer_id: string;
+  answer_revision: number;
+  portal: string;
+  page_fingerprint: string;
+  control_key: string;
+  control_kind: PortalFieldControlKind;
+  label: string;
+  required: boolean;
+  options: string[];
+  canonical_field: string;
+  confidence: number;
+  binding_source:
+    "EXACT_CANONICAL_MATCH" | "ANSWER_QUESTION_MATCH" | "USER_CONFIRMED";
+  answer_source: ApplicationAnswerSource;
+  answer_status: ApplicationAnswerStatus;
+  answer_kind: ApplicationAnswerKind;
+  validation_rules: Record<string, unknown>;
+  compatible: boolean;
+  validation_errors: string[];
+  proposed_permission: FieldAutomationPermission;
+  review_fingerprint: string;
+}
+
+export interface ApplicationFieldBinding extends Omit<
+  ApplicationFieldBindingPreview,
+  "answer_status" | "compatible" | "validation_errors" | "proposed_permission"
+> {
+  id: string;
+  binding_source: "USER_CONFIRMED";
+  automation_permission: Exclude<FieldAutomationPermission, "PROHIBITED">;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CandidateKnowledgeSnapshot {
   profile_id: string;
   documents: CandidateDocument[];
@@ -1348,6 +1423,18 @@ export interface DesktopBridge {
       answerId: string,
       expectedRevision: number,
     ): Promise<ApplicationAnswer | null>;
+    previewApplicationFieldBinding(
+      input: ApplicationFieldBindingPreviewInput,
+    ): Promise<ApplicationFieldBindingPreview>;
+    approveApplicationFieldBinding(
+      input: ApplicationFieldBindingPreviewInput,
+      expectedAnswerRevision: number,
+      reviewFingerprint: string,
+      automationPermission: Exclude<FieldAutomationPermission, "PROHIBITED">,
+    ): Promise<ApplicationFieldBinding | null>;
+    listApplicationFieldBindings(
+      applicationId: string,
+    ): Promise<ApplicationFieldBinding[]>;
     previewTailoredDocument(
       input: TailoredDocumentRequest,
     ): Promise<TailoredDocumentPreview>;

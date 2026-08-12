@@ -6,6 +6,8 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import type {
   ApplicationAnswerDraftInput,
   ApplicationAnswerReviewInput,
+  ApplicationFieldBindingPreviewInput,
+  FieldAutomationPermission,
   AnswerLibraryInput,
   CandidateDocumentImportInput,
   CandidateProfileCreate,
@@ -54,6 +56,21 @@ const supervisedPortals = new Set<PortalKind>([
   "GREENHOUSE",
 ]);
 const permittedUses = new Set(["PROFILE_ONLY", "APPLICATIONS", "ANY"]);
+const portalFieldControlKinds = new Set([
+  "TEXT",
+  "TEXT_AREA",
+  "EMAIL",
+  "TELEPHONE",
+  "NUMBER",
+  "DATE",
+  "SELECT",
+  "RADIO_GROUP",
+  "CHECKBOX",
+  "FILE_UPLOAD",
+  "SIGNATURE",
+  "DISCLOSURE",
+  "CUSTOM",
+]);
 
 function requiredText(value: unknown, name: string, maxLength: number): string {
   if (
@@ -280,6 +297,90 @@ function expectedRevision(value: unknown): number {
     throw new TypeError("Expected answer revision is invalid.");
   }
   return value;
+}
+
+function applicationFieldBindingInput(
+  value: unknown,
+): ApplicationFieldBindingPreviewInput {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Field-binding input is invalid.");
+  }
+  const field = Reflect.get(value, "observed_field");
+  if (typeof field !== "object" || field === null) {
+    throw new TypeError("Observed portal field is invalid.");
+  }
+  const controlKind = requiredText(
+    Reflect.get(field, "control_kind"),
+    "Control kind",
+    40,
+  );
+  if (!portalFieldControlKinds.has(controlKind)) {
+    throw new TypeError("Observed control kind is invalid.");
+  }
+  const optionsValue = Reflect.get(field, "options");
+  if (!Array.isArray(optionsValue) || optionsValue.length > 100) {
+    throw new TypeError("Observed options are invalid.");
+  }
+  const optionalNumber = (name: string): number | null => {
+    const candidate = Reflect.get(field, name);
+    if (candidate === undefined || candidate === null) return null;
+    if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+      throw new TypeError(`${name.replaceAll("_", " ")} is invalid.`);
+    }
+    return candidate;
+  };
+  const optionalDate = (name: string): string | null => {
+    const candidate = Reflect.get(field, name);
+    if (candidate === undefined || candidate === null || candidate === "")
+      return null;
+    const result = requiredText(candidate, name.replaceAll("_", " "), 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) {
+      throw new TypeError(`${name.replaceAll("_", " ")} must use YYYY-MM-DD.`);
+    }
+    return result;
+  };
+  const characterLimit = optionalNumber("character_limit");
+  if (
+    characterLimit !== null &&
+    (!Number.isInteger(characterLimit) ||
+      characterLimit < 1 ||
+      characterLimit > 20_000)
+  ) {
+    throw new TypeError("Observed character limit is invalid.");
+  }
+  return {
+    application_answer_id: requiredText(
+      Reflect.get(value, "application_answer_id"),
+      "Application answer id",
+      100,
+    ),
+    observed_field: {
+      portal: requiredText(Reflect.get(field, "portal"), "Portal", 80),
+      page_fingerprint: requiredText(
+        Reflect.get(field, "page_fingerprint"),
+        "Page fingerprint",
+        200,
+      ),
+      control_key: requiredText(
+        Reflect.get(field, "control_key"),
+        "Control key",
+        200,
+      ),
+      control_kind:
+        controlKind as ApplicationFieldBindingPreviewInput["observed_field"]["control_kind"],
+      label: requiredText(Reflect.get(field, "label"), "Field label", 500),
+      required: Reflect.get(field, "required") === true,
+      options: optionsValue.map((option) =>
+        requiredText(option, "Observed option", 500),
+      ),
+      character_limit: characterLimit,
+      minimum_number: optionalNumber("minimum_number"),
+      maximum_number: optionalNumber("maximum_number"),
+      earliest_date: optionalDate("earliest_date"),
+      latest_date: optionalDate("latest_date"),
+      legal_attestation: Reflect.get(field, "legal_attestation") === true,
+    },
+  };
 }
 
 function referencePortalInput(value: unknown): ReferencePortalRunCreate {
@@ -798,6 +899,66 @@ export function registerWorkbenchIpc(
       if (confirmation.response !== 1) return null;
       return supervisor.client.promoteApplicationAnswer(answerId, revision);
     },
+  );
+  ipcMain.handle("knowledge:preview-field-binding", (_event, value: unknown) =>
+    supervisor.client.previewApplicationFieldBinding(
+      applicationFieldBindingInput(value),
+    ),
+  );
+  ipcMain.handle(
+    "knowledge:approve-field-binding",
+    async (
+      event,
+      value: unknown,
+      revisionValue: unknown,
+      fingerprintValue: unknown,
+      permissionValue: unknown,
+    ) => {
+      const input = applicationFieldBindingInput(value);
+      const revision = expectedRevision(revisionValue);
+      const fingerprint = requiredText(
+        fingerprintValue,
+        "Field-binding review fingerprint",
+        64,
+      );
+      const permission = requiredText(
+        permissionValue,
+        "Field automation permission",
+        40,
+      );
+      if (!new Set(["REVIEW_REQUIRED", "AUTOFILL_ALLOWED"]).has(permission)) {
+        throw new TypeError("Field automation permission is invalid.");
+      }
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Approve this observed field binding?",
+        message: `${input.observed_field.label} will map to the reviewed application answer.`,
+        detail:
+          "The backend will refuse stale answers, changed observations, incompatible controls, and unattended legal/signature fields.",
+        buttons: ["Cancel", "Approve exact field binding"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveApplicationFieldBinding(
+        input,
+        revision,
+        fingerprint,
+        permission as Exclude<FieldAutomationPermission, "PROHIBITED">,
+      );
+    },
+  );
+  ipcMain.handle(
+    "knowledge:list-field-bindings",
+    (_event, applicationIdValue: unknown) =>
+      supervisor.client.listApplicationFieldBindings(
+        requiredText(applicationIdValue, "Application id", 100),
+      ),
   );
   ipcMain.handle("knowledge:preview-tailored", (_event, value: unknown) =>
     supervisor.client.previewTailoredDocument(tailoredDocumentInput(value)),

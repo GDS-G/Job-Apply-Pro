@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Typed Application Answers `v0.28.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Auditable Form Field Binding `v0.29.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.28.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.29.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -88,6 +88,14 @@ Use **Application answer provenance** after creating an application. Select the 
 When governed AI drafting is enabled, the model receives only retrieved locked claims and limited job context. Check external-processing consent only when you authorize an externally configured provider; local routes do not require that consent. A generated answer must cite retrieved claims and always remains review-required. Read the displayed source, evidence IDs, provider/model/prompt identity, confidence, limits, and limitations.
 
 Edit the text and evidence list, then select **Review & save** and approve the native dialog. Yes/no values normalize to `Yes` or `No`; numbers remove display punctuation and currency symbols; dates normalize to `YYYY-MM-DD`; and multiple-choice values must exactly match a recorded option. This saves an application-specific reviewed revision; it does not change locked profile facts. Use **Promote reviewed answer** only when the wording should become a locked reusable library entry. Promotion has a second native confirmation and rejects stale or unreviewed records. No operation in this panel signs into or submits to a portal.
+
+## Review observed portal field bindings
+
+After an application answer reaches Reviewed or Promoted state, use **Observed portal field binding** to describe the exact control currently visible in the supervised browser. Copy the portal/ATS identifier, current page fingerprint, a stable control key, label, widget kind, options, required state, and any visible character, number, or date constraints. Mark legal attestations and signatures explicitly.
+
+Select **Preview exact binding**. Review compatibility errors, confidence, answer source and revision, validation rules, and the proposed automation permission. Select **Approve reviewed binding** only when the observed control and canonical answer are the same field. The native dialog and backend fingerprint bind the approval to that exact answer revision and observation. If either changes, preview again.
+
+Signature, disclosure, file-upload, custom-widget, and legal-attestation controls remain visible user work even after binding. An approved binding is audit metadata, not proof that the value was filled or submitted. This build does not execute field bindings in the browser.
 
 Legacy DOC and scanned-PDF support are opt-in because they invoke local document tools. Install LibreOffice and/or Tesseract from their official distributions, then configure exact absolute executable paths in the Windows user environment and restart Job Apply Pro. Do not enter command lines or portal credentials:
 

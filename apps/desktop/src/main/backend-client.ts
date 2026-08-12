@@ -5,6 +5,10 @@ import type {
   ApplicationAnswer,
   ApplicationAnswerDraftInput,
   ApplicationAnswerReviewInput,
+  ApplicationFieldBinding,
+  ApplicationFieldBindingPreview,
+  ApplicationFieldBindingPreviewInput,
+  FieldAutomationPermission,
   BackupManifest,
   BackupSchedule,
   BackupVerification,
@@ -176,6 +180,41 @@ export class BackendClient {
           confirmation_phrase: "PROMOTE REVIEWED ANSWER",
         }),
       },
+    );
+  }
+
+  previewApplicationFieldBinding(
+    input: ApplicationFieldBindingPreviewInput,
+  ): Promise<ApplicationFieldBindingPreview> {
+    return this.request("/knowledge/application-field-bindings/preview", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  approveApplicationFieldBinding(
+    input: ApplicationFieldBindingPreviewInput,
+    expectedAnswerRevision: number,
+    reviewFingerprint: string,
+    automationPermission: Exclude<FieldAutomationPermission, "PROHIBITED">,
+  ): Promise<ApplicationFieldBinding> {
+    return this.request("/knowledge/application-field-bindings", {
+      method: "POST",
+      body: JSON.stringify({
+        ...input,
+        expected_answer_revision: expectedAnswerRevision,
+        review_fingerprint: reviewFingerprint,
+        automation_permission: automationPermission,
+        confirmation_phrase: "APPROVE FIELD BINDING",
+      }),
+    });
+  }
+
+  listApplicationFieldBindings(
+    applicationId: string,
+  ): Promise<ApplicationFieldBinding[]> {
+    return this.request(
+      `/knowledge/applications/${encodeURIComponent(applicationId)}/field-bindings`,
     );
   }
 

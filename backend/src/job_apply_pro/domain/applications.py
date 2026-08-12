@@ -55,6 +55,34 @@ class ApplicationAnswerKind(StrEnum):
     EMPLOYER_SPECIFIC = "EMPLOYER_SPECIFIC"
 
 
+class PortalFieldControlKind(StrEnum):
+    TEXT = "TEXT"
+    TEXT_AREA = "TEXT_AREA"
+    EMAIL = "EMAIL"
+    TELEPHONE = "TELEPHONE"
+    NUMBER = "NUMBER"
+    DATE = "DATE"
+    SELECT = "SELECT"
+    RADIO_GROUP = "RADIO_GROUP"
+    CHECKBOX = "CHECKBOX"
+    FILE_UPLOAD = "FILE_UPLOAD"
+    SIGNATURE = "SIGNATURE"
+    DISCLOSURE = "DISCLOSURE"
+    CUSTOM = "CUSTOM"
+
+
+class FieldAutomationPermission(StrEnum):
+    PROHIBITED = "PROHIBITED"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    AUTOFILL_ALLOWED = "AUTOFILL_ALLOWED"
+
+
+class FieldBindingSource(StrEnum):
+    EXACT_CANONICAL_MATCH = "EXACT_CANONICAL_MATCH"
+    ANSWER_QUESTION_MATCH = "ANSWER_QUESTION_MATCH"
+    USER_CONFIRMED = "USER_CONFIRMED"
+
+
 class ApplicationCreate(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -182,6 +210,116 @@ class ApplicationAnswerRecord(BaseModel):
     limitations: list[str]
     user_edited: bool
     reuse_permission: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ObservedPortalField(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    portal: str = Field(min_length=1, max_length=80)
+    page_fingerprint: str = Field(min_length=1, max_length=200)
+    control_key: str = Field(min_length=1, max_length=200)
+    control_kind: PortalFieldControlKind
+    label: str = Field(min_length=1, max_length=500)
+    required: bool = False
+    options: list[str] = Field(default_factory=list, max_length=100)
+    character_limit: int | None = Field(default=None, ge=1, le=20_000)
+    minimum_number: float | None = None
+    maximum_number: float | None = None
+    earliest_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    latest_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    legal_attestation: bool = False
+
+
+class ApplicationFieldBindingPreviewRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_answer_id: str = Field(min_length=1, max_length=100)
+    observed_field: ObservedPortalField
+
+
+class ApplicationFieldBindingApproval(ApplicationFieldBindingPreviewRequest):
+    expected_answer_revision: int = Field(ge=1)
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+    automation_permission: FieldAutomationPermission
+    confirmation_phrase: str = Field(min_length=1, max_length=100)
+
+
+class ApplicationFieldBindingPreview(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_id: str
+    application_answer_id: str
+    answer_revision: int = Field(ge=1)
+    portal: str
+    page_fingerprint: str
+    control_key: str
+    control_kind: PortalFieldControlKind
+    label: str
+    required: bool
+    options: list[str]
+    canonical_field: str
+    confidence: float = Field(ge=0, le=1)
+    binding_source: FieldBindingSource
+    answer_source: ApplicationAnswerSource
+    answer_status: ApplicationAnswerStatus
+    answer_kind: ApplicationAnswerKind
+    validation_rules: dict[str, object]
+    compatible: bool
+    validation_errors: list[str]
+    proposed_permission: FieldAutomationPermission
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class ApplicationFieldBinding(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    application_id: str
+    application_answer_id: str
+    answer_revision: int = Field(ge=1)
+    portal: str
+    page_fingerprint: str
+    control_key: str
+    control_kind: PortalFieldControlKind
+    label: str
+    required: bool
+    options: list[str]
+    canonical_field: str
+    confidence: float = Field(ge=0, le=1)
+    binding_source: FieldBindingSource
+    answer_source: ApplicationAnswerSource
+    answer_kind: ApplicationAnswerKind
+    validation_rules: dict[str, object]
+    automation_permission: FieldAutomationPermission
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApplicationFieldBindingRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    application_id: str
+    application_answer_id: str
+    answer_revision: int = Field(ge=1)
+    portal: str
+    page_fingerprint: str
+    control_key: str
+    control_kind: PortalFieldControlKind
+    encrypted_label: str
+    encrypted_options: str
+    required: bool
+    canonical_field: str
+    confidence: float = Field(ge=0, le=1)
+    binding_source: FieldBindingSource
+    answer_source: ApplicationAnswerSource
+    answer_kind: ApplicationAnswerKind
+    validation_rules: dict[str, object]
+    automation_permission: FieldAutomationPermission
+    review_fingerprint: str = Field(min_length=64, max_length=64)
     created_at: datetime
     updated_at: datetime
 

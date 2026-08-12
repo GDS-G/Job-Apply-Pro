@@ -12,7 +12,7 @@ from reportlab.pdfgen.canvas import Canvas
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from job_apply_pro.api.routes.knowledge import get_knowledge_service
+from job_apply_pro.api.routes.knowledge import get_field_binding_service, get_knowledge_service
 from job_apply_pro.documents.extractors import extract_document
 from job_apply_pro.domain.ai import (
     AIGatewayRequest,
@@ -31,6 +31,11 @@ from job_apply_pro.domain.applications import (
     ApplicationAnswerStatus,
     ApplicationCreate,
     ApplicationDocumentRole,
+    ApplicationFieldBindingApproval,
+    ApplicationFieldBindingPreviewRequest,
+    FieldAutomationPermission,
+    ObservedPortalField,
+    PortalFieldControlKind,
     SubmittedDocumentCapture,
 )
 from job_apply_pro.domain.candidate import CandidateProfileCreate, ContactDetails
@@ -55,16 +60,22 @@ from job_apply_pro.main import app
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.core import CoreService
+from job_apply_pro.services.field_bindings import (
+    ApplicationFieldBindingService,
+    FieldBindingConflictError,
+)
 from job_apply_pro.services.knowledge import (
     CandidateKnowledgeConflictError,
     CandidateKnowledgeError,
     CandidateKnowledgeService,
 )
+from job_apply_pro.storage.field_binding_repository import ApplicationFieldBindingRepository
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.models import (
     AnswerLibraryRevisionRow,
     AnswerLibraryRow,
     ApplicationAnswerRow,
+    ApplicationFieldBindingRow,
     DocumentGenerationAuditRow,
     DocumentVersionRow,
     JobRequirementRow,
@@ -793,6 +804,93 @@ def test_application_answer_api_requires_review_before_promotion(
         app.dependency_overrides.clear()
 
 
+def test_application_field_binding_api_preview_approval_and_list(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    knowledge = _service(session, tmp_path)
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="field-binding-api",
+            employer="API Systems",
+            title="Platform Engineer",
+            description_hash=hashlib.sha256(b"field-binding-api").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="field-binding-api",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    drafted = knowledge.draft_application_answer(
+        ApplicationAnswerDraftRequest(
+            application_id=application.id,
+            question="Choose your work arrangement.",
+            canonical_field="work_arrangement",
+            answer_kind=ApplicationAnswerKind.MULTIPLE_CHOICE,
+            choices=["Remote", "Hybrid"],
+        )
+    )
+    reviewed = knowledge.review_application_answer(
+        drafted.id,
+        ApplicationAnswerReview(
+            expected_revision=1,
+            answer="Hybrid",
+            confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
+        ),
+    )
+    binding_service = ApplicationFieldBindingService(
+        CandidateKnowledgeRepository(session),
+        ApplicationFieldBindingRepository(session),
+        SensitiveDataCipher(StaticKeyProvider(b"k" * 32)),
+    )
+    app.dependency_overrides[get_field_binding_service] = lambda: binding_service
+    client = TestClient(app)
+    request = {
+        "application_answer_id": reviewed.id,
+        "observed_field": {
+            "portal": "FIXTURE_ATS",
+            "page_fingerprint": "api-application-page",
+            "control_key": "work-arrangement",
+            "control_kind": "SELECT",
+            "label": "Work arrangement",
+            "required": True,
+            "options": ["Remote", "Hybrid"],
+            "legal_attestation": False,
+        },
+    }
+    try:
+        preview_response = client.post(
+            "/api/v1/knowledge/application-field-bindings/preview",
+            json=request,
+        )
+        assert preview_response.status_code == 200
+        preview = preview_response.json()
+        assert preview["compatible"] is True
+        assert preview["proposed_permission"] == "AUTOFILL_ALLOWED"
+
+        approval = client.post(
+            "/api/v1/knowledge/application-field-bindings",
+            json={
+                **request,
+                "expected_answer_revision": reviewed.revision,
+                "review_fingerprint": preview["review_fingerprint"],
+                "automation_permission": "AUTOFILL_ALLOWED",
+                "confirmation_phrase": "APPROVE FIELD BINDING",
+            },
+        )
+        assert approval.status_code == 201
+        assert approval.json()["label"] == "Work arrangement"
+        listed = client.get(f"/api/v1/knowledge/applications/{application.id}/field-bindings")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()] == [approval.json()["id"]]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_application_answer_logs_review_and_atomic_promotion(
     session: Session, tmp_path: Path
 ) -> None:
@@ -1106,6 +1204,175 @@ def test_typed_application_answer_rejects_invalid_constraints_and_values(
                 answer="On-site",
                 confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
             ),
+        )
+
+
+def test_reviewed_typed_answer_requires_auditable_field_binding(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    knowledge = _service(session, tmp_path)
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="field-binding",
+            employer="Binding Fixture",
+            title="Engineer",
+            description_hash=hashlib.sha256(b"field-binding").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="field-binding",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    drafted = knowledge.draft_application_answer(
+        ApplicationAnswerDraftRequest(
+            application_id=application.id,
+            question="Are you authorized to work?",
+            canonical_field="work_authorization",
+            answer_kind=ApplicationAnswerKind.YES_NO,
+        )
+    )
+    field = ObservedPortalField(
+        portal="FIXTURE_ATS",
+        page_fingerprint="application-page-v1",
+        control_key="work-authorization",
+        control_kind=PortalFieldControlKind.RADIO_GROUP,
+        label="Work authorization",
+        required=True,
+        options=["Yes", "No"],
+    )
+    bindings = ApplicationFieldBindingService(
+        CandidateKnowledgeRepository(session),
+        ApplicationFieldBindingRepository(session),
+        SensitiveDataCipher(StaticKeyProvider(b"k" * 32)),
+    )
+    before_review = bindings.preview(
+        ApplicationFieldBindingPreviewRequest(
+            application_answer_id=drafted.id,
+            observed_field=field,
+        )
+    )
+    assert not before_review.compatible
+    assert before_review.proposed_permission is FieldAutomationPermission.PROHIBITED
+
+    reviewed = knowledge.review_application_answer(
+        drafted.id,
+        ApplicationAnswerReview(
+            expected_revision=1,
+            answer="yes",
+            confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
+        ),
+    )
+    preview = bindings.preview(
+        ApplicationFieldBindingPreviewRequest(
+            application_answer_id=reviewed.id,
+            observed_field=field,
+        )
+    )
+    assert preview.compatible
+    assert preview.proposed_permission is FieldAutomationPermission.AUTOFILL_ALLOWED
+    with pytest.raises(FieldBindingConflictError, match="changed"):
+        bindings.approve(
+            ApplicationFieldBindingApproval(
+                application_answer_id=reviewed.id,
+                observed_field=field,
+                expected_answer_revision=reviewed.revision,
+                review_fingerprint="0" * 64,
+                automation_permission=FieldAutomationPermission.AUTOFILL_ALLOWED,
+                confirmation_phrase="APPROVE FIELD BINDING",
+            )
+        )
+    approved = bindings.approve(
+        ApplicationFieldBindingApproval(
+            application_answer_id=reviewed.id,
+            observed_field=field,
+            expected_answer_revision=reviewed.revision,
+            review_fingerprint=preview.review_fingerprint,
+            automation_permission=FieldAutomationPermission.AUTOFILL_ALLOWED,
+            confirmation_phrase="APPROVE FIELD BINDING",
+        )
+    )
+    assert approved.label == "Work authorization"
+    assert approved.options == ["Yes", "No"]
+    assert approved.answer_revision == reviewed.revision
+    assert bindings.list_bindings(application.id) == [approved]
+    stored = session.scalar(select(ApplicationFieldBindingRow))
+    assert stored is not None
+    assert "Work authorization" not in stored.encrypted_label
+
+
+def test_legal_and_signature_field_bindings_cannot_allow_autofill(
+    session: Session, tmp_path: Path
+) -> None:
+    profile_id = _profile(session)
+    knowledge = _service(session, tmp_path)
+    job = JobRepository(session).add(
+        JobCreate(
+            source="fixture",
+            external_id="legal-field-binding",
+            employer="Binding Fixture",
+            title="Engineer",
+            description_hash=hashlib.sha256(b"legal-field-binding").hexdigest(),
+        )
+    )
+    application = ApplicationRepository(session).add(
+        ApplicationCreate(
+            workflow_id="legal-field-binding",
+            profile_id=profile_id,
+            job_id=job.id,
+        )
+    )
+    drafted = knowledge.draft_application_answer(
+        ApplicationAnswerDraftRequest(
+            application_id=application.id,
+            question="Enter your legal signature.",
+            canonical_field="legal_signature",
+            answer_kind=ApplicationAnswerKind.EXACT,
+        )
+    )
+    reviewed = knowledge.review_application_answer(
+        drafted.id,
+        ApplicationAnswerReview(
+            expected_revision=1,
+            answer="Fixture User",
+            confirmation_phrase="SAVE REVIEWED APPLICATION ANSWER",
+        ),
+    )
+    field = ObservedPortalField(
+        portal="FIXTURE_ATS",
+        page_fingerprint="legal-page-v1",
+        control_key="signature",
+        control_kind=PortalFieldControlKind.SIGNATURE,
+        label="Legal signature",
+        required=True,
+        legal_attestation=True,
+    )
+    bindings = ApplicationFieldBindingService(
+        CandidateKnowledgeRepository(session),
+        ApplicationFieldBindingRepository(session),
+        SensitiveDataCipher(StaticKeyProvider(b"k" * 32)),
+    )
+    preview = bindings.preview(
+        ApplicationFieldBindingPreviewRequest(
+            application_answer_id=reviewed.id,
+            observed_field=field,
+        )
+    )
+    assert preview.proposed_permission is FieldAutomationPermission.REVIEW_REQUIRED
+    with pytest.raises(FieldBindingConflictError, match="visible user"):
+        bindings.approve(
+            ApplicationFieldBindingApproval(
+                application_answer_id=reviewed.id,
+                observed_field=field,
+                expected_answer_revision=reviewed.revision,
+                review_fingerprint=preview.review_fingerprint,
+                automation_permission=FieldAutomationPermission.AUTOFILL_ALLOWED,
+                confirmation_phrase="APPROVE FIELD BINDING",
+            )
         )
 
 

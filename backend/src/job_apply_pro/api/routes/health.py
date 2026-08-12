@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Typed Application Answers",
+        build="Auditable Form Field Binding",
         environment=settings.environment,
     )
