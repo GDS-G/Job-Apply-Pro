@@ -189,6 +189,18 @@ Exact committed-head packaging was repeated from `b0a1f461bfffb0a53aad9711ea21ed
 
 This is source and sanitized-fixture evidence, not a live Gemini availability or production claim. Live validation remains externally gated on an owner-created API key stored only in local secret configuration, explicit external-processing consent, current Google terms/privacy/retention/quota/data-region review, model availability, and authorized provider traffic. No credential pasted into chat is used or persisted.
 
+### Layout-Aware Resume Ingestion source validation
+
+`Layout-Aware Resume Ingestion v0.23.0-alpha.1` closes the first richer-layout source gap without claiming universal visual understanding. New PDF imports reject decoded page content streams above 20 MiB, use pypdf fixed-width layout mode, retain bounded line blocks with page/row coordinates, and infer column-major order only after two or more rows expose repeated starts separated by at least twelve character cells. The parser keeps content before the first multi-column row first and emits a review warning whenever inferred columns are used. New DOCX imports iterate top-level paragraphs and tables in document order and retain table/row coordinates, correcting the previous behavior that appended all tables after all paragraphs.
+
+`LayoutBlock` adds optional `row`, `column`, and `table` fields in Python and TypeScript. Missing values default to `None`/absence, so previously encrypted extraction JSON remains valid without a migration. Parser provenance advances to `pypdf-layout/2` and `python-docx-layout/2`. Existing bounds, archive checks, isolated OCR/conversion helpers, encryption, hashes, evidence IDs, claim review, retrieval policy, tailored-document fingerprints, and final approval controls are unchanged. ADR-0032 records the heuristic, compatibility, and manual-review boundaries. Generated two-column PDF and mixed-content DOCX fixtures contain no private candidate data.
+
+Local source validation used Node 24.14.0, pnpm 11.16.0, and Python 3.12.13. All 102 backend tests passed at 82.76% total coverage, all 16 desktop tests passed, strict Ruff, mypy and TypeScript validation passed, and the production Electron build completed. `pnpm audit --audit-level high` and `pip-audit --skip-editable` reported no known dependency vulnerabilities; pip-audit skipped only the unpublished editable backend package.
+
+Exact source head `76f6d980ad5774f2f7cc0a03a56a90a8c7571b58` produced the unsigned installer `Job-Apply-Pro-0.23.0-alpha.1-x64.exe`, 169,631,230 bytes, SHA-256 `D40156B73B8944FD071BF238668744FA7142C7692923B8712212573D44BD6931`. The bundled backend executable is 18,437,065 bytes with SHA-256 `75A4DA954C4B8689653E11E87F9647CCF2D57361BA5AB33B39FCD26B626BDA89`; the unpacked desktop executable is 225,500,672 bytes with SHA-256 `501B572A069C32EB9B3489D07DAC3331A959EE3DCFB9F5066B22E354ECE7C23E`. All three report `NotSigned`, as expected without release credentials. The packaged-backend smoke, unpacked Windows package, NSIS installer, PDFium DLL, and pypdfium2 license trees passed/persisted.
+
+This remains an alpha: advanced graphics, floating text boxes, spanning content, nested tables, a broad sanitized real-world résumé corpus, richer output templates, semantic ranking, and owner-installed helper validation remain incomplete or externally gated. The local installer is validation evidence only and must not be published as a production update.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

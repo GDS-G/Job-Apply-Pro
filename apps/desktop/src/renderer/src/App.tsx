@@ -1065,7 +1065,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Native Gemini Fallback v0.22.0-alpha.1</strong>
+              <strong>Layout-Aware Resume Ingestion v0.23.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

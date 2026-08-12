@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Native Gemini Fallback build
+## Layout-Aware Resume Ingestion build
 
-The active milestone is **Native Gemini Fallback `v0.22.0-alpha.1`**. It adds a native, stateless Google Gemini Interactions adapter for structured text completion, client-side function calls, usage accounting, and batch embeddings. The gateway can now fail over across independent OpenAI-compatible, Gemini, and loopback llama.cpp wire contracts while retaining consent, privacy classification, budget, timeout, schema, tool-call, cache, and audit controls. The build retains encrypted calendar and mail sync, privacy-safe desktop notifications, bounded document ingestion, evidence-bound generation, supervised portal execution, and the Portal Readiness baselines.
+The active milestone is **Layout-Aware Resume Ingestion `v0.23.0-alpha.1`**. New PDF imports use pypdf's fixed-width layout extraction, retain line/column coordinates, and apply conservative column-major ordering when repeated, well-separated column starts are detected. New DOCX imports preserve top-level paragraph/table document order and retain table/row coordinates. The build keeps bounded OCR and legacy conversion, encrypted evidence, explicit claim review, native Gemini fallback, calendar/mail sync, supervised portal execution, and every prior safety boundary.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

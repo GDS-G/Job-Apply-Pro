@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Native Gemini Fallback",
-  version: "0.22.0-alpha.1",
+  name: "Layout-Aware Resume Ingestion",
+  version: "0.23.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -956,6 +956,9 @@ export interface CandidateKnowledgeSnapshot {
 export interface DocumentLayoutBlock {
   index: number;
   page?: number | null;
+  row?: number | null;
+  column?: number | null;
+  table?: number | null;
   kind: string;
   style?: string | null;
   text: string;
