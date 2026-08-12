@@ -38,6 +38,7 @@ from job_apply_pro.domain.knowledge import (
     CandidateDocumentVersion,
     CandidateDocumentVersionRecord,
     DocumentGenerationAudit,
+    DocumentSelectionAudit,
     EvidenceSource,
     RetrievalChunkRecord,
 )
@@ -161,6 +162,10 @@ class CandidateKnowledgeRepositoryProtocol(Protocol):
     def add_generation_audit(self, audit: DocumentGenerationAudit) -> DocumentGenerationAudit: ...
 
     def list_generation_audits(self, application_id: str) -> list[DocumentGenerationAudit]: ...
+
+    def approve_selection(self, audit: DocumentSelectionAudit) -> DocumentSelectionAudit: ...
+
+    def list_selection_audits(self, application_id: str) -> list[DocumentSelectionAudit]: ...
 
     def add_submitted_document(
         self, evidence: SubmittedDocumentEvidence

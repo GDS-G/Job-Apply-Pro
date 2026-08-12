@@ -44,6 +44,7 @@ def test_migrations_are_repeatable(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "backup_schedules",
         "restore_plans",
         "document_generation_audits",
+        "document_selection_audits",
         "submitted_document_evidence",
         "communication_configurations",
         "provider_sync_states",

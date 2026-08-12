@@ -215,6 +215,16 @@ PR validation exposed two unrelated CI-reliability defects after the application
 
 Live external reranking remains gated on owner configuration, current provider terms/privacy/retention review, explicit per-preview consent, model availability, and authorized traffic. No test account, pasted credential, or private resume is used in source or CI. The local installer is validation evidence only and must not be published as a production update.
 
+### Explainable Resume Selection source validation
+
+`Explainable Resume Selection v0.25.0-alpha.1` adds local deterministic ranking of active resume variants against the current application job. The policy combines required-requirement coverage, all-requirement coverage, job-title overlap, job-family/operator-tag overlap, and an optional primary-resume preference. Every ranked candidate exposes its score, matched requirement IDs, matched tags, and plain-language reasons. Stable tie-breaking makes repeat previews reproducible.
+
+The top candidate is advisory. The desktop allows any reviewed candidate to be chosen only after a native confirmation. Approval recomputes the current ranking and rejects stale fingerprints. The selected immutable document-version ID and append-only audit are committed atomically; migration `20260812_0017` persists the score, criteria, reasons, and fingerprint. Desktop import now captures the operator's variant label, tags, and primary preference rather than applying hidden fixed metadata. ADR-0034 records the policy and boundaries.
+
+This release adds no live-provider or external-AI dependency. Ranking decrypts candidate evidence only inside the existing authenticated local backend and does not use credentials, browser state, protected traits, or unverified profile claims. Sanitized service and API tests cover recommendation order, exclusions, ties, stale review refusal, native-facing contracts, atomic selection, and audit retrieval.
+
+Final source, packaging, checksums, and protected GitHub integration evidence will be recorded after exact-head validation.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

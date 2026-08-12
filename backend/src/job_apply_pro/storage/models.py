@@ -198,6 +198,22 @@ class ApplicationRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DocumentSelectionAuditRow(Base):
+    __tablename__ = "document_selection_audits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("candidate_profiles.id"), index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"))
+    document_version_id: Mapped[str] = mapped_column(ForeignKey("document_versions.id"))
+    score: Mapped[float] = mapped_column(Float)
+    review_fingerprint: Mapped[str] = mapped_column(String(64))
+    criteria_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    reasons_json: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ApplicationAnswerRow(Base):
     __tablename__ = "application_answers"
 

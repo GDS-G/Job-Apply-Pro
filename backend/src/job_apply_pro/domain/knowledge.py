@@ -119,6 +119,68 @@ class CandidateDocumentVersionRecord(CandidateDocumentVersion):
     encrypted_extraction: str
 
 
+class DocumentSelectionRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_id: str = Field(min_length=1, max_length=100)
+    kind: DocumentKind = DocumentKind.RESUME
+    preferred_tags: list[str] = Field(default_factory=list, max_length=30)
+    excluded_document_ids: list[str] = Field(default_factory=list, max_length=100)
+    prefer_primary: bool = True
+
+
+class DocumentRecommendation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    document_id: str
+    document_version_id: str
+    display_name: str
+    variant_label: str
+    score: float = Field(ge=0, le=1)
+    matched_job_family_tags: list[str]
+    matched_requirement_ids: list[str]
+    reasons: list[str] = Field(min_length=1, max_length=100)
+    is_primary: bool
+
+
+class DocumentSelectionPreview(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_id: str
+    profile_id: str
+    job_id: str
+    employer: str
+    title: str
+    current_document_version_id: str | None
+    recommended_document_version_id: str
+    recommendations: list[DocumentRecommendation] = Field(min_length=1, max_length=100)
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class DocumentSelectionApproval(DocumentSelectionRequest):
+    model_config = ConfigDict(frozen=True)
+
+    document_version_id: str = Field(min_length=1, max_length=100)
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+    confirmation_phrase: str = Field(min_length=1, max_length=100)
+
+
+class DocumentSelectionAudit(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    application_id: str
+    profile_id: str
+    job_id: str
+    document_id: str
+    document_version_id: str
+    score: float = Field(ge=0, le=1)
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+    criteria: dict[str, object]
+    reasons: list[str]
+    created_at: datetime
+
+
 class EvidenceSource(BaseModel):
     model_config = ConfigDict(frozen=True)
 

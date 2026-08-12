@@ -31,6 +31,7 @@ import type {
   BackupManifest,
   BackupSchedule,
   BrowserSessionSnapshot,
+  CandidateDocumentImportInput,
   CandidateKnowledgeSnapshot,
   CandidateProfile,
   ChallengeAnswerSuggestion,
@@ -40,6 +41,8 @@ import type {
   DesktopUpdateStatus,
   DesktopNotificationDestination,
   DesktopNotificationStatus,
+  DocumentSelectionPreview,
+  DocumentSelectionRequest,
   HelpTopic,
   IntegrationHealth,
   IntegrationProvider,
@@ -152,6 +155,10 @@ export function App() {
   const [tailoredDocument, setTailoredDocument] = useState<{
     input: TailoredDocumentRequest;
     preview: TailoredDocumentPreview;
+  } | null>(null);
+  const [documentSelection, setDocumentSelection] = useState<{
+    input: DocumentSelectionRequest;
+    preview: DocumentSelectionPreview;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -657,16 +664,76 @@ export function App() {
     }
   }
 
-  async function importResume() {
+  async function importResume(form: FormData) {
     if (!profileId) return;
+    const input: CandidateDocumentImportInput = {
+      variant_label: String(form.get("variant_label")),
+      job_family_tags: String(form.get("job_family_tags"))
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+      is_primary: form.get("is_primary") === "on",
+    };
     setBusy(true);
     setError(null);
     try {
-      const result =
-        await window.jobApplyPro.workbench.selectAndImportResume(profileId);
+      const result = await window.jobApplyPro.workbench.selectAndImportResume(
+        profileId,
+        input,
+      );
       if (result) {
         setKnowledge(result.snapshot);
         setIngestionWarnings(result.extraction.warnings);
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewDocumentSelection(form: FormData) {
+    const input: DocumentSelectionRequest = {
+      application_id: String(form.get("application_id")),
+      kind: "RESUME",
+      preferred_tags: String(form.get("preferred_tags"))
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+      excluded_document_ids: [],
+      prefer_primary: form.get("prefer_primary") === "on",
+    };
+    setBusy(true);
+    setError(null);
+    try {
+      const preview =
+        await window.jobApplyPro.workbench.previewDocumentSelection(input);
+      setDocumentSelection({ input, preview });
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveDocumentSelection(documentVersionId: string) {
+    if (!documentSelection) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const approved =
+        await window.jobApplyPro.workbench.approveDocumentSelection(
+          documentSelection.input,
+          documentVersionId,
+          documentSelection.preview.review_fingerprint,
+        );
+      if (approved) {
+        await refreshWorkflows();
+        const preview =
+          await window.jobApplyPro.workbench.previewDocumentSelection(
+            documentSelection.input,
+          );
+        setDocumentSelection({ input: documentSelection.input, preview });
       }
     } catch (caught) {
       setError(readableError(caught));
@@ -1072,7 +1139,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Evidence-Ranked Tailoring v0.24.0-alpha.1</strong>
+              <strong>Explainable Resume Selection v0.25.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -1418,29 +1485,63 @@ export function App() {
                     : "Create or select a candidate profile to begin"}
                 </p>
               </div>
-              <button
-                className="button button--secondary"
-                disabled={busy || !profileId}
-                onClick={() => void importResume()}
-                type="button"
-              >
-                <Upload size={15} /> Import resume
-              </button>
+              <Upload size={19} />
             </div>
+            <form
+              action={(form) => void importResume(form)}
+              className="workbench-form document-import-form"
+            >
+              <label>
+                Variant label
+                <input
+                  name="variant_label"
+                  defaultValue="General"
+                  maxLength={120}
+                  required
+                />
+              </label>
+              <label>
+                Job-family tags
+                <input
+                  name="job_family_tags"
+                  placeholder="platform, cloud, security"
+                  maxLength={1000}
+                />
+              </label>
+              <label className="checkbox-row">
+                <input name="is_primary" type="checkbox" />
+                Prefer as the primary resume
+              </label>
+              <button
+                className="button button--secondary form-submit"
+                disabled={busy || !profileId}
+                type="submit"
+              >
+                <Upload size={15} /> Choose & import resume
+              </button>
+            </form>
             <div className="knowledge-grid">
               <div className="document-variants">
                 <strong>Resume variants</strong>
-                {knowledge?.documents.length ? (
-                  knowledge.documents.map((document) => (
-                    <div className="knowledge-row" key={document.id}>
-                      <FileText size={15} />
-                      <span>
-                        <b>{document.display_name}</b>
-                        <small>{document.variant_label}</small>
-                      </span>
-                      {document.is_primary ? <em>Primary</em> : null}
-                    </div>
-                  ))
+                {knowledge?.documents.some(
+                  (document) =>
+                    document.kind === "RESUME" && !document.archived,
+                ) ? (
+                  knowledge.documents
+                    .filter(
+                      (document) =>
+                        document.kind === "RESUME" && !document.archived,
+                    )
+                    .map((document) => (
+                      <div className="knowledge-row" key={document.id}>
+                        <FileText size={15} />
+                        <span>
+                          <b>{document.display_name}</b>
+                          <small>{document.variant_label}</small>
+                        </span>
+                        {document.is_primary ? <em>Primary</em> : null}
+                      </div>
+                    ))
                 ) : (
                   <div className="empty-state empty-state--compact">
                     No candidate documents imported.
@@ -1482,6 +1583,122 @@ export function App() {
                 ) : (
                   <div className="empty-state empty-state--compact">
                     No proposed facts are waiting for review.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="panel__header panel__header--subsection">
+              <div>
+                <h3>Explainable resume selection</h3>
+                <p>
+                  Rank immutable variants against the job, requirements, tags,
+                  and your primary preference; selection always requires review
+                </p>
+              </div>
+              <ListChecks size={18} />
+            </div>
+            <div className="portal-grid">
+              <form
+                action={(form) => void previewDocumentSelection(form)}
+                className="workbench-form"
+              >
+                <label>
+                  Target application
+                  <select name="application_id" required>
+                    {workflows
+                      .filter((workflow) => workflow.profile_id === profileId)
+                      .map((workflow) => (
+                        <option
+                          key={workflow.application_id}
+                          value={workflow.application_id}
+                        >
+                          {workflow.title} at {workflow.employer}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Preferred tags
+                  <input
+                    name="preferred_tags"
+                    placeholder="platform, Kubernetes, fintech"
+                    maxLength={1000}
+                  />
+                </label>
+                <label className="checkbox-row">
+                  <input name="prefer_primary" type="checkbox" defaultChecked />
+                  Use primary-resume preference as one ranking factor
+                </label>
+                <button
+                  className="button button--secondary form-submit"
+                  disabled={
+                    busy ||
+                    !knowledge?.documents.length ||
+                    !workflows.some(
+                      (workflow) => workflow.profile_id === profileId,
+                    )
+                  }
+                  type="submit"
+                >
+                  <Search size={16} /> Rank resume variants
+                </button>
+              </form>
+              <div className="portal-status selection-results">
+                {documentSelection ? (
+                  <>
+                    <span className="status-pill status-pill--safe">
+                      Review required
+                    </span>
+                    <strong>
+                      {documentSelection.preview.title} at{" "}
+                      {documentSelection.preview.employer}
+                    </strong>
+                    {documentSelection.preview.recommendations.map(
+                      (recommendation, index) => {
+                        const selected =
+                          recommendation.document_version_id ===
+                          documentSelection.preview.current_document_version_id;
+                        return (
+                          <div
+                            className="selection-result"
+                            key={recommendation.document_version_id}
+                          >
+                            <span>
+                              <b>
+                                {index + 1}. {recommendation.variant_label}
+                              </b>
+                              <em>{Math.round(recommendation.score * 100)}%</em>
+                            </span>
+                            <small>{recommendation.display_name}</small>
+                            <ul>
+                              {recommendation.reasons.map((reason) => (
+                                <li key={reason}>{reason}</li>
+                              ))}
+                            </ul>
+                            <button
+                              className="button button--primary"
+                              disabled={busy || selected}
+                              onClick={() =>
+                                void approveDocumentSelection(
+                                  recommendation.document_version_id,
+                                )
+                              }
+                              type="button"
+                            >
+                              <ShieldCheck size={15} />
+                              {selected
+                                ? "Currently selected"
+                                : "Review & select"}
+                            </button>
+                          </div>
+                        );
+                      },
+                    )}
+                  </>
+                ) : (
+                  <div className="empty-state empty-state--compact">
+                    Rankings explain every score. Approval is bound to the exact
+                    job, requirements, document versions, and ranking criteria.
                   </div>
                 )}
               </div>

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Evidence-Ranked Tailoring",
-  version: "0.24.0-alpha.1",
+  name: "Explainable Resume Selection",
+  version: "0.25.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -978,6 +978,58 @@ export interface CandidateDocumentImportResult {
   extraction: DocumentExtraction;
 }
 
+export interface CandidateDocumentImportInput {
+  variant_label: string;
+  job_family_tags: string[];
+  is_primary: boolean;
+}
+
+export interface DocumentSelectionRequest {
+  application_id: string;
+  kind: "RESUME";
+  preferred_tags: string[];
+  excluded_document_ids: string[];
+  prefer_primary: boolean;
+}
+
+export interface DocumentRecommendation {
+  document_id: string;
+  document_version_id: string;
+  display_name: string;
+  variant_label: string;
+  score: number;
+  matched_job_family_tags: string[];
+  matched_requirement_ids: string[];
+  reasons: string[];
+  is_primary: boolean;
+}
+
+export interface DocumentSelectionPreview {
+  application_id: string;
+  profile_id: string;
+  job_id: string;
+  employer: string;
+  title: string;
+  current_document_version_id?: string | null;
+  recommended_document_version_id: string;
+  recommendations: DocumentRecommendation[];
+  review_fingerprint: string;
+}
+
+export interface DocumentSelectionAudit {
+  id: string;
+  application_id: string;
+  profile_id: string;
+  job_id: string;
+  document_id: string;
+  document_version_id: string;
+  score: number;
+  review_fingerprint: string;
+  criteria: Record<string, unknown>;
+  reasons: string[];
+  created_at: string;
+}
+
 export interface TailoredDocumentRequest {
   application_id: string;
   kind: "RESUME" | "COVER_LETTER";
@@ -1150,7 +1202,16 @@ export interface DesktopBridge {
     ): Promise<CandidateKnowledgeSnapshot>;
     selectAndImportResume(
       profileId: string,
+      input: CandidateDocumentImportInput,
     ): Promise<CandidateDocumentImportResult | null>;
+    previewDocumentSelection(
+      input: DocumentSelectionRequest,
+    ): Promise<DocumentSelectionPreview>;
+    approveDocumentSelection(
+      input: DocumentSelectionRequest,
+      documentVersionId: string,
+      reviewFingerprint: string,
+    ): Promise<DocumentSelectionAudit | null>;
     reviewCandidateClaim(
       claimId: string,
       approved: boolean,

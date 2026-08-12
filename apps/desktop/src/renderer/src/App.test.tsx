@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Evidence-Ranked Tailoring v0.24.0-alpha.1"),
+      screen.getByText("Explainable Resume Selection v0.25.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -56,6 +56,12 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Template")).toBeInTheDocument();
     expect(screen.getByLabelText("Evidence ranking")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /explainable resume selection/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /choose & import resume/i }),
+    ).toBeInTheDocument();
     expect(
       screen.getByLabelText(/allow external AI processing/i),
     ).not.toBeChecked();

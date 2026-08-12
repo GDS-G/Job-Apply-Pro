@@ -7,6 +7,7 @@ import type {
   BackupVerification,
   BrowserSessionSnapshot,
   CandidateClaim,
+  CandidateDocumentImportInput,
   CandidateDocumentImportResult,
   CandidateKnowledgeSnapshot,
   CandidateProfile,
@@ -18,6 +19,9 @@ import type {
   ChallengeSessionSnapshot,
   CommunicationRecord,
   DailyCommunicationSummary,
+  DocumentSelectionAudit,
+  DocumentSelectionPreview,
+  DocumentSelectionRequest,
   FollowUp,
   IntegrationHealth,
   IntegrationProvider,
@@ -86,14 +90,16 @@ export class BackendClient {
   async importResume(
     profileId: string,
     filePath: string,
+    input: CandidateDocumentImportInput,
   ): Promise<CandidateDocumentImportResult> {
     const data = await readFile(filePath);
     const form = new FormData();
     form.append("file", new Blob([data]), basename(filePath));
     form.append("kind", "RESUME");
     form.append("display_name", basename(filePath));
-    form.append("variant_label", "General");
-    form.append("is_primary", "false");
+    form.append("variant_label", input.variant_label);
+    form.append("job_family_tags", input.job_family_tags.join(","));
+    form.append("is_primary", String(input.is_primary));
     const imported = await this.request<{
       extraction: CandidateDocumentImportResult["extraction"];
     }>(`/knowledge/profiles/${encodeURIComponent(profileId)}/documents`, {
@@ -104,6 +110,31 @@ export class BackendClient {
       snapshot: await this.getCandidateKnowledge(profileId),
       extraction: imported.extraction,
     };
+  }
+
+  previewDocumentSelection(
+    input: DocumentSelectionRequest,
+  ): Promise<DocumentSelectionPreview> {
+    return this.request("/knowledge/documents/selection/preview", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  approveDocumentSelection(
+    input: DocumentSelectionRequest,
+    documentVersionId: string,
+    reviewFingerprint: string,
+  ): Promise<DocumentSelectionAudit> {
+    return this.request("/knowledge/documents/selection/approve", {
+      method: "POST",
+      body: JSON.stringify({
+        ...input,
+        document_version_id: documentVersionId,
+        review_fingerprint: reviewFingerprint,
+        confirmation_phrase: "SELECT REVIEWED DOCUMENT",
+      }),
+    });
   }
 
   reviewCandidateClaim(

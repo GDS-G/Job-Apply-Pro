@@ -36,6 +36,11 @@ from job_apply_pro.domain.knowledge import (
     DocumentGenerationAudit,
     DocumentImportResult,
     DocumentKind,
+    DocumentRecommendation,
+    DocumentSelectionApproval,
+    DocumentSelectionAudit,
+    DocumentSelectionPreview,
+    DocumentSelectionRequest,
     EvidenceSource,
     ExperienceSummary,
     RetrievalChunkRecord,
@@ -216,6 +221,198 @@ class CandidateKnowledgeService:
     def list_documents(self, profile_id: str) -> list[CandidateDocument]:
         self._profile(profile_id)
         return self._repository.list_documents(profile_id)
+
+    def preview_document_selection(
+        self, command: DocumentSelectionRequest
+    ) -> DocumentSelectionPreview:
+        application = self._applications.get(command.application_id)
+        if application is None:
+            raise LookupError(f"Application {command.application_id} was not found")
+        job = self._jobs.get(application.job_id)
+        if job is None:
+            raise LookupError(f"Job {application.job_id} was not found")
+        self._profile(application.profile_id)
+        requirements = self._jobs.list_requirements(job.id)
+        preferred_tags = sorted(
+            {
+                " ".join(value.casefold().split())
+                for value in command.preferred_tags
+                if value.strip()
+            }
+        )
+        excluded = set(command.excluded_document_ids)
+        target_tokens = self._plain_tokens(
+            " ".join(
+                [job.title, job.employer, *preferred_tags, *[item.text for item in requirements]]
+            )
+        )
+        title_tokens = self._plain_tokens(job.title)
+        recommendations: list[DocumentRecommendation] = []
+        for document in self._repository.list_documents(application.profile_id):
+            if document.archived or document.kind is not command.kind or document.id in excluded:
+                continue
+            versions = self._repository.list_versions(document.id)
+            if not versions:
+                continue
+            version = max(versions, key=lambda item: (item.version, item.created_at, item.id))
+            extraction = self.get_extraction(version.id)
+            metadata_tokens = self._plain_tokens(
+                " ".join([document.display_name, document.variant_label, *document.job_family_tags])
+            )
+            content_tokens = self._plain_tokens(extraction.plain_text)
+            evidence_tokens = metadata_tokens | content_tokens
+            matched_requirements = [
+                item
+                for item in requirements
+                if (tokens := self._plain_tokens(item.text)) and tokens <= evidence_tokens
+            ]
+            matched_tags = sorted(
+                tag for tag in document.job_family_tags if self._plain_tokens(tag) & target_tokens
+            )
+            required = [item for item in requirements if item.required]
+            required_matches = sum(item in matched_requirements for item in required)
+            requirement_coverage = (
+                len(matched_requirements) / len(requirements) if requirements else 0.0
+            )
+            required_coverage = (
+                required_matches / len(required) if required else requirement_coverage
+            )
+            title_overlap = (
+                len(title_tokens & evidence_tokens) / len(title_tokens) if title_tokens else 0.0
+            )
+            preferred_tokens = self._plain_tokens(" ".join(preferred_tags))
+            preferred_overlap = (
+                len(preferred_tokens & evidence_tokens) / len(preferred_tokens)
+                if preferred_tokens
+                else 0.0
+            )
+            tag_overlap = min(1.0, len(matched_tags) / max(1, len(document.job_family_tags)))
+            score = min(
+                1.0,
+                0.35 * required_coverage
+                + 0.25 * requirement_coverage
+                + 0.2 * title_overlap
+                + 0.1 * max(tag_overlap, preferred_overlap)
+                + (0.1 if command.prefer_primary and document.is_primary else 0.0),
+            )
+            reasons: list[str] = []
+            if requirements:
+                reasons.append(
+                    f"Matches {len(matched_requirements)} of {len(requirements)} job requirements"
+                )
+            if matched_tags:
+                reasons.append(f"Matching job-family tags: {', '.join(matched_tags)}")
+            if title_overlap:
+                reasons.append("Variant evidence overlaps the target job title")
+            if preferred_overlap:
+                reasons.append("Variant evidence matches the operator's preferred tags")
+            if command.prefer_primary and document.is_primary:
+                reasons.append("Primary-document preference applied")
+            if not reasons:
+                reasons.append("No direct target match; manual review is required")
+            recommendations.append(
+                DocumentRecommendation(
+                    document_id=document.id,
+                    document_version_id=version.id,
+                    display_name=document.display_name,
+                    variant_label=document.variant_label,
+                    score=round(score, 6),
+                    matched_job_family_tags=matched_tags,
+                    matched_requirement_ids=[item.id for item in matched_requirements],
+                    reasons=reasons,
+                    is_primary=document.is_primary,
+                )
+            )
+        recommendations.sort(
+            key=lambda item: (-item.score, item.variant_label.casefold(), item.document_id)
+        )
+        if not recommendations:
+            raise CandidateKnowledgeConflictError(
+                "No eligible document variants are available for this application"
+            )
+        payload = {
+            "application_id": application.id,
+            "profile_id": application.profile_id,
+            "job_id": job.id,
+            "employer": job.employer,
+            "title": job.title,
+            "current_document_version_id": application.selected_document_version_id,
+            "recommended_document_version_id": recommendations[0].document_version_id,
+            "recommendations": [item.model_dump(mode="json") for item in recommendations],
+            "criteria": {
+                "kind": command.kind.value,
+                "preferred_tags": preferred_tags,
+                "excluded_document_ids": sorted(excluded),
+                "prefer_primary": command.prefer_primary,
+            },
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return DocumentSelectionPreview.model_validate(
+            {key: value for key, value in payload.items() if key != "criteria"}
+            | {"review_fingerprint": fingerprint}
+        )
+
+    def approve_document_selection(
+        self, approval: DocumentSelectionApproval
+    ) -> DocumentSelectionAudit:
+        request = DocumentSelectionRequest.model_validate(
+            approval.model_dump(
+                exclude={"document_version_id", "review_fingerprint", "confirmation_phrase"}
+            )
+        )
+        preview = self.preview_document_selection(request)
+        if approval.review_fingerprint != preview.review_fingerprint:
+            raise CandidateKnowledgeConflictError(
+                "Document recommendation changed; preview and review again"
+            )
+        if approval.confirmation_phrase != "SELECT REVIEWED DOCUMENT":
+            raise CandidateKnowledgeError("Document selection confirmation phrase is invalid")
+        selected = next(
+            (
+                item
+                for item in preview.recommendations
+                if item.document_version_id == approval.document_version_id
+            ),
+            None,
+        )
+        if selected is None:
+            raise CandidateKnowledgeConflictError(
+                "Selected document version is not in the reviewed recommendation set"
+            )
+        criteria: dict[str, object] = {
+            "kind": approval.kind.value,
+            "preferred_tags": sorted(
+                {
+                    " ".join(value.casefold().split())
+                    for value in approval.preferred_tags
+                    if value.strip()
+                }
+            ),
+            "excluded_document_ids": sorted(set(approval.excluded_document_ids)),
+            "prefer_primary": approval.prefer_primary,
+            "recommended_document_version_id": preview.recommended_document_version_id,
+        }
+        audit = DocumentSelectionAudit(
+            id=str(uuid4()),
+            application_id=preview.application_id,
+            profile_id=preview.profile_id,
+            job_id=preview.job_id,
+            document_id=selected.document_id,
+            document_version_id=selected.document_version_id,
+            score=selected.score,
+            review_fingerprint=preview.review_fingerprint,
+            criteria=criteria,
+            reasons=selected.reasons,
+            created_at=utc_now(),
+        )
+        return self._repository.approve_selection(audit)
+
+    def list_document_selection_audits(self, application_id: str) -> list[DocumentSelectionAudit]:
+        if self._applications.get(application_id) is None:
+            raise LookupError(f"Application {application_id} was not found")
+        return self._repository.list_selection_audits(application_id)
 
     def preview_tailored_document(
         self, command: TailoredDocumentRequest

@@ -22,6 +22,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Evidence-Ranked Tailoring",
+        build="Explainable Resume Selection",
         environment=settings.environment,
     )

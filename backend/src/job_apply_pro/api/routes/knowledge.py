@@ -23,6 +23,10 @@ from job_apply_pro.domain.knowledge import (
     DocumentGenerationAudit,
     DocumentImportResult,
     DocumentKind,
+    DocumentSelectionApproval,
+    DocumentSelectionAudit,
+    DocumentSelectionPreview,
+    DocumentSelectionRequest,
     ExperienceSummary,
     RetrievalQuery,
     RetrievalResult,
@@ -145,6 +149,51 @@ def list_candidate_documents(
 ) -> list[CandidateDocument]:
     try:
         return service.list_documents(profile_id)
+    except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/documents/selection/preview", response_model=DocumentSelectionPreview)
+def preview_document_selection(
+    command: DocumentSelectionRequest, service: KnowledgeServiceDependency
+) -> DocumentSelectionPreview:
+    try:
+        return service.preview_document_selection(command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.post("/documents/selection/approve", response_model=DocumentSelectionAudit)
+def approve_document_selection(
+    command: DocumentSelectionApproval, service: KnowledgeServiceDependency
+) -> DocumentSelectionAudit:
+    try:
+        return service.approve_document_selection(command)
+    except (
+        LookupError,
+        CandidateKnowledgeError,
+        CandidateKnowledgeConflictError,
+        KeyConfigurationError,
+        DecryptionError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/applications/{application_id}/document-selections",
+    response_model=list[DocumentSelectionAudit],
+)
+def list_document_selection_audits(
+    application_id: str, service: KnowledgeServiceDependency
+) -> list[DocumentSelectionAudit]:
+    try:
+        return service.list_document_selection_audits(application_id)
     except LookupError as error:
         raise _http_error(error) from error
 
