@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Verified Radio Group Execution `v0.32.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Verified Select Option Execution `v0.33.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.32.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.33.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -96,6 +96,8 @@ After an application answer reaches Reviewed or Promoted state, capture the curr
 Select **Preview exact binding**. Review compatibility errors, confidence, answer source and revision, validation rules, and the proposed automation permission. Select **Approve reviewed binding** only when the observed control and canonical answer are the same field. The native dialog and backend fingerprint bind the approval to that exact answer revision and observation. If either changes, preview again.
 
 Enable `JAP_SUPERVISED_FIELD_EXECUTION_ENABLED=true` only for supervised use. On a fingerprint-current page, an `AUTOFILL_ALLOWED` native text/select/checkbox/radio binding offers **Review & populate exact field**. The desktop shows a native confirmation, the backend re-observes and revalidates the full binding, executes one verified action, records evidence without answer text, and returns control to you.
+
+Native select answers must exactly match one current visible option label, including case. Hidden HTML option values are never accepted as reviewed answers. Duplicate visible labels remain manual because the selection would be ambiguous.
 
 Radio options execute only when the reviewed answer exactly equals one unique visible option label and that option has the same exact semantic label locator. Duplicate or changed labels fail closed. Signature, disclosure, file-upload, disabled, custom-widget, and legal-attestation controls remain visible user work even after binding. This execution path never submits the application.
 

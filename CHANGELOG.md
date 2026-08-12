@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.33.0-alpha.1] - Unreleased
+
+### Added
+
+- Added a distinct `SELECT_LABEL` browser action and `SELECTED_LABEL_EQUALS` postcondition for reviewed native select fields.
+- Added Playwright and service regressions proving visible-label selection with unrelated hidden values.
+
+### Security
+
+- Approved select execution now requires one exact, case-sensitive, unique current visible label; hidden values, case variants, unknown labels, and duplicate labels fail closed.
+- Challenge select behavior remains a separate value-based contract; native confirmation, fresh binding validation, candidate-value redaction, human-only controls, and no-final-submit boundaries are unchanged.
+
 ## [0.32.0-alpha.1] - Unreleased
 
 ### Added

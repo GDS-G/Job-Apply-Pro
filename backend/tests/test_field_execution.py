@@ -398,6 +398,46 @@ def test_radio_group_uses_exact_visible_option_locator() -> None:
         )
 
 
+def test_select_uses_unique_exact_visible_label() -> None:
+    control = BrowserObservedControl(
+        index=0,
+        control_key="schedule-control",
+        kind=BrowserControlKind.SELECT,
+        tag="select",
+        field_name="schedule",
+        label="Preferred schedule",
+        options=[
+            BrowserControlOption(value="schedule-internal-1", label="Day shift"),
+            BrowserControlOption(value="schedule-internal-2", label="Night shift"),
+        ],
+        locator=SemanticLocator(
+            strategy=LocatorStrategy.LABEL,
+            value="Preferred schedule",
+        ),
+    )
+
+    action = ApplicationFieldExecutionService._action(control, "Day shift")
+
+    assert action.kind is BrowserActionKind.SELECT_LABEL
+    assert action.value == "Day shift"
+    assert action.verification.kind is VerificationKind.SELECTED_LABEL_EQUALS
+    assert action.verification.value == "Day shift"
+    with pytest.raises(FieldExecutionConflictError, match="visible select option"):
+        ApplicationFieldExecutionService._action(control, "schedule-internal-1")
+    with pytest.raises(FieldExecutionConflictError, match="visible select option"):
+        ApplicationFieldExecutionService._action(control, "day shift")
+    duplicate = control.model_copy(
+        update={
+            "options": [
+                *control.options,
+                BrowserControlOption(value="other", label="Day shift"),
+            ]
+        }
+    )
+    with pytest.raises(FieldExecutionConflictError, match="visible select option"):
+        ApplicationFieldExecutionService._action(duplicate, "Day shift")
+
+
 def test_sensitive_browser_action_is_redacted_before_persistence(session: Session) -> None:
     control = BrowserObservedControl(
         index=0,

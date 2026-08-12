@@ -290,19 +290,15 @@ class ApplicationFieldExecutionService:
                 value="true",
             )
         elif control.kind is BrowserControlKind.SELECT:
-            matches = [
-                option
-                for option in control.options
-                if answer_value.casefold() in {option.label.casefold(), option.value.casefold()}
-            ]
+            matches = [option for option in control.options if answer_value == option.label]
             if len(matches) != 1:
                 raise FieldExecutionConflictError(
-                    "Reviewed answer does not identify exactly one current select option"
+                    "Reviewed answer does not identify exactly one visible select option"
                 )
-            value = matches[0].value
-            kind = BrowserActionKind.SELECT
+            value = matches[0].label
+            kind = BrowserActionKind.SELECT_LABEL
             verification = BrowserVerification(
-                kind=VerificationKind.VALUE_EQUALS, locator=locator, value=value
+                kind=VerificationKind.SELECTED_LABEL_EQUALS, locator=locator, value=value
             )
         elif control.kind is BrowserControlKind.CHECKBOX:
             normalized = answer_value.strip().casefold()

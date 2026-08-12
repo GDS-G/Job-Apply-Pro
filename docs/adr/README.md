@@ -43,4 +43,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0039: Typed observed form controls](0039-typed-observed-form-controls.md)
 - [ADR-0040: Verified approved field execution](0040-verified-approved-field-execution.md)
 - [ADR-0041: Exact radio option locators](0041-exact-radio-option-locators.md)
+- [ADR-0042: Exact visible select option execution](0042-exact-visible-select-option-execution.md)
 - [ADR-0039: Typed observed form controls](0039-typed-observed-form-controls.md)
