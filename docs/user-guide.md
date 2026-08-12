@@ -151,6 +151,10 @@ Restart Job Apply Pro after changing local environment configuration. Leave the 
 
 The application cannot prevent the account owner from manually clicking controls in a visible browser. Such actions remain the owner's actions; the evidence stream distinguishes captured user-driven state from an automated, fingerprint-approved submission.
 
+### Review required-field coverage
+
+After capturing an application page and choosing its local application record, select **Review required-field coverage**. The report includes required controls only and classifies each as ready, already verified, manual, unbound, stale, or ambiguous. Resolve unbound and stale mappings individually; handle manual controls directly in the visible provider page. The review does not decrypt answers, fill fields, or authorize submission.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

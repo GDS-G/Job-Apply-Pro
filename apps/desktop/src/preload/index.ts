@@ -126,6 +126,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
         "portals:list-application-field-executions",
         applicationId,
       ),
+    reviewApplicationFieldCoverage: (runId: string, applicationId: string) =>
+      ipcRenderer.invoke(
+        "portals:review-application-field-coverage",
+        runId,
+        applicationId,
+      ),
     previewTailoredDocument: (input: TailoredDocumentRequest) =>
       ipcRenderer.invoke("knowledge:preview-tailored", input),
     generateTailoredDocument: (

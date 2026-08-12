@@ -32,6 +32,7 @@ import type {
   ApplicationAnswerReviewInput,
   ApplicationFieldBinding,
   ApplicationFieldExecution,
+  ApplicationFieldCoverageReview,
   ApplicationFieldBindingPreview,
   ApplicationFieldBindingPreviewInput,
   AnswerLibraryInput,
@@ -176,6 +177,8 @@ export function App() {
   const [fieldExecutions, setFieldExecutions] = useState<
     ApplicationFieldExecution[]
   >([]);
+  const [fieldCoverage, setFieldCoverage] =
+    useState<ApplicationFieldCoverageReview | null>(null);
   const [fieldBindingPreview, setFieldBindingPreview] = useState<{
     input: ApplicationFieldBindingPreviewInput;
     preview: ApplicationFieldBindingPreview;
@@ -878,6 +881,7 @@ export function App() {
     setError(null);
     try {
       setAnswerApplicationId(applicationId);
+      setFieldCoverage(null);
       setApplicationAnswers(
         await window.jobApplyPro.workbench.listApplicationAnswers(
           applicationId,
@@ -1124,7 +1128,31 @@ export function App() {
         const refreshed =
           await window.jobApplyPro.workbench.listSupervisedPortalRuns();
         setSupervisedPortalRuns(refreshed);
+        setFieldCoverage(
+          await window.jobApplyPro.workbench.reviewApplicationFieldCoverage(
+            latestSupervisedRun.id,
+            binding.application_id,
+          ),
+        );
       }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewApplicationFieldCoverage() {
+    if (!latestSupervisedRun || !answerApplicationId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setFieldCoverage(
+        await window.jobApplyPro.workbench.reviewApplicationFieldCoverage(
+          latestSupervisedRun.id,
+          answerApplicationId,
+        ),
+      );
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -1512,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Observed Form Control Capture v0.30.0-alpha.1</strong>
+              <strong>Required Field Coverage Review v0.34.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2587,6 +2615,44 @@ export function App() {
                 </button>
               </form>
               <div className="answer-library__entries">
+                {latestSupervisedRun && answerApplicationId ? (
+                  <button
+                    className="button button--secondary"
+                    disabled={
+                      busy ||
+                      latestSupervisedRun.workflow_id !== selected?.workflow_id
+                    }
+                    onClick={() => void reviewApplicationFieldCoverage()}
+                    type="button"
+                  >
+                    <ListChecks size={14} /> Review required-field coverage
+                  </button>
+                ) : null}
+                {fieldCoverage ? (
+                  <article className="answer-entry field-binding-preview">
+                    <strong>
+                      {fieldCoverage.required_control_count} required controls
+                    </strong>
+                    <span>
+                      {fieldCoverage.already_verified_count} verified ﾂｷ{" "}
+                      {fieldCoverage.ready_to_execute_count} ready ﾂｷ{" "}
+                      {fieldCoverage.manual_required_count} manual ﾂｷ{" "}
+                      {fieldCoverage.unbound_count} unbound ﾂｷ{" "}
+                      {fieldCoverage.stale_binding_count} stale ﾂｷ{" "}
+                      {fieldCoverage.ambiguous_binding_count} ambiguous
+                    </span>
+                    {fieldCoverage.items.map((item) => (
+                      <small key={item.control_key}>
+                        {item.label} ﾂｷ {item.status.replaceAll("_", " ")} ﾂｷ{" "}
+                        {item.reason}
+                      </small>
+                    ))}
+                    <small>
+                      Review {fieldCoverage.review_fingerprint.slice(0, 16)}窶ｦ
+                      ﾂｷ metadata only; no answer text decrypted
+                    </small>
+                  </article>
+                ) : null}
                 {fieldBindingPreview ? (
                   <article className="answer-entry field-binding-preview">
                     <strong>{fieldBindingPreview.preview.label}</strong>

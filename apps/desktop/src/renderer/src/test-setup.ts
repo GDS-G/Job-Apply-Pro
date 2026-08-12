@@ -43,6 +43,21 @@ const bridge: DesktopBridge = {
     listApplicationFieldBindings: async () => [],
     executeApplicationField: async () => null,
     listApplicationFieldExecutions: async () => [],
+    reviewApplicationFieldCoverage: async (runId, applicationId) => ({
+      application_id: applicationId,
+      supervised_run_id: runId,
+      portal: "REFERENCE_ATS",
+      page_fingerprint: "fixture-page",
+      required_control_count: 0,
+      ready_to_execute_count: 0,
+      already_verified_count: 0,
+      manual_required_count: 0,
+      unbound_count: 0,
+      stale_binding_count: 0,
+      ambiguous_binding_count: 0,
+      items: [],
+      review_fingerprint: "0".repeat(64),
+    }),
     previewTailoredDocument: async () => {
       throw new Error("Not implemented in this test.");
     },
