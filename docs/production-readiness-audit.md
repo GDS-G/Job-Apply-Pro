@@ -275,6 +275,10 @@ Runtime source commit `cb64b5b` passed all 122 backend tests at 83.27% coverage,
 
 The desktop binding UI can select a current detected control and derive the complete observed-field input without manual transcription. Portal classification, challenge detection, Reference ATS mapping, and final-submit detection consume the same validated contract. This release creates no browser action and performs no field fill or live-site write. ADR-0039 records the decision.
 
+Runtime source commit `ce4565818c5a5e5e671108c78cd3ec3b1b70336c` passed all 122 backend tests at 83.37% coverage, all 16 desktop tests, Ruff/Prettier formatting, Ruff/oxlint lint, mypy/TypeScript checks, the production Electron build, migration upgrade/downgrade/upgrade, high-severity pnpm audit, pip-audit, Windows packaging, and frozen-backend smoke.
+
+The unsigned validation installer `Job-Apply-Pro-0.30.0-alpha.1-x64.exe` is 169,726,652 bytes, SHA-256 `1F00DCA0F0A8511BC5111BAE8FD50B5F363C4AADDF9663AA4EE13CBA967860B3`. The bundled backend executable is 18,486,827 bytes, SHA-256 `2D0D9B4548526EE7788853CDB2ED028A13A8412C5318F81493641DECCE000DB0`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `44452F25BC9FF81EB4211168FA6795689F174FF175AD695E07DFDD61166048DA`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
