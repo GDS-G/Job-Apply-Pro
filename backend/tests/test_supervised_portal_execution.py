@@ -13,6 +13,7 @@ from job_apply_pro.domain.browser import (
     BrowserActionResult,
     BrowserEngine,
     BrowserObservation,
+    BrowserObservedControl,
     BrowserSessionCreate,
     BrowserSessionSnapshot,
     BrowserSessionState,
@@ -56,7 +57,7 @@ def _observation(
         tabs=[BrowserTab(index=0, url=url, title="LinkedIn fixture", active=True)],
         accessibility_snapshot="",
         visible_text=visible_text,
-        controls=controls or [],
+        controls=[BrowserObservedControl.model_validate(value) for value in controls or []],
         validation_errors=[],
         modals=[],
         console_errors=[],
@@ -103,6 +104,10 @@ class _Browser:
     def create_session(self, command: BrowserSessionCreate) -> BrowserSessionSnapshot:
         assert command.headless is False
         assert str(command.start_url).startswith("https://www.linkedin.com/")
+        return self._snapshot()
+
+    def get_session(self, session_id: str) -> BrowserSessionSnapshot:
+        assert session_id == self.session_id
         return self._snapshot()
 
     def resume(self, session_id: str) -> BrowserSessionSnapshot:
@@ -205,6 +210,7 @@ def test_supervised_run_captures_manual_steps_and_exact_final_submission(
     assert started.disposition is SupervisedPortalDisposition.USER_ACTION_REQUIRED
     assert started.intervention_reasons == [PortalInterventionReason.USER_TAKEOVER]
     assert len(started.evidence) == 1
+    assert started.observed_controls == []
 
     ready = service.capture(
         started.id,
@@ -213,6 +219,8 @@ def test_supervised_run_captures_manual_steps_and_exact_final_submission(
     assert ready.state is SupervisedPortalRunState.READY_TO_SUBMIT
     assert ready.disposition is SupervisedPortalDisposition.FINAL_CONFIRMATION_REQUIRED
     assert len(ready.evidence) == 2
+    assert ready.observed_controls[0].kind.value == "BUTTON"
+    assert ready.observed_controls[0].label == "Submit application"
 
     with pytest.raises(SupervisedPortalStateError, match="fingerprint"):
         service.submit(

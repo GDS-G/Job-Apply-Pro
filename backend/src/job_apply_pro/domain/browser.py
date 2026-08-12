@@ -1,7 +1,11 @@
+import hashlib
+import json
+import re
 from datetime import datetime
 from enum import StrEnum
+from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 
 class BrowserEngine(StrEnum):
@@ -39,6 +43,24 @@ class BrowserActionKind(StrEnum):
     UPLOAD = "UPLOAD"
     WAIT_FOR = "WAIT_FOR"
     SCREENSHOT = "SCREENSHOT"
+
+
+class BrowserControlKind(StrEnum):
+    TEXT = "TEXT"
+    TEXT_AREA = "TEXT_AREA"
+    EMAIL = "EMAIL"
+    TELEPHONE = "TELEPHONE"
+    NUMBER = "NUMBER"
+    DATE = "DATE"
+    SELECT = "SELECT"
+    RADIO_GROUP = "RADIO_GROUP"
+    CHECKBOX = "CHECKBOX"
+    FILE_UPLOAD = "FILE_UPLOAD"
+    SIGNATURE = "SIGNATURE"
+    DISCLOSURE = "DISCLOSURE"
+    BUTTON = "BUTTON"
+    LINK = "LINK"
+    CUSTOM = "CUSTOM"
 
 
 class BrowserPermission(StrEnum):
@@ -122,6 +144,181 @@ class BrowserTab(BaseModel):
     active: bool
 
 
+class BrowserControlOption(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    value: str = Field(max_length=500)
+    label: str = Field(max_length=300)
+
+
+class BrowserObservedControl(BaseModel):
+    """Privacy-bounded, deterministic description of one observed page control."""
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int = Field(ge=0, le=999)
+    control_key: str = Field(min_length=1, max_length=200)
+    kind: BrowserControlKind
+    tag: str = Field(max_length=40)
+    input_type: str = Field(default="", max_length=40)
+    role: str = Field(default="", max_length=80)
+    element_id: str = Field(default="", max_length=300)
+    field_name: str = Field(default="", max_length=300)
+    group_label: str = Field(default="", max_length=300)
+    label: str = Field(default="", max_length=300)
+    text: str = Field(default="", max_length=200)
+    href: str = Field(default="", max_length=2_000)
+    canonical_field: str = Field(default="", max_length=160)
+    accept: str = Field(default="", max_length=500)
+    checked: bool = False
+    required: bool = False
+    disabled: bool = False
+    legal_attestation: bool = False
+    character_limit: int | None = Field(default=None, ge=1, le=20_000)
+    minimum_number: float | None = None
+    maximum_number: float | None = None
+    earliest_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    latest_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    options: list[BrowserControlOption] = Field(default_factory=list, max_length=100)
+    locator: SemanticLocator | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_worker_control(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        item = dict(value)
+        tag = str(item.get("tag", "")).casefold()[:40]
+        input_type = str(item.get("input_type", item.get("type", ""))).casefold()[:40]
+        role = str(item.get("role", ""))[:80]
+        label = str(item.get("label", "")).strip()[:300]
+        text = str(item.get("text", "")).strip()[:200]
+        field_name = str(item.get("field_name", item.get("fieldName", "")))[:300]
+        element_id = str(item.get("element_id", item.get("id", "")))[:300]
+        group_label = str(item.get("group_label", item.get("groupLabel", "")))[:300]
+        canonical_field = str(item.get("canonical_field", item.get("canonicalField", "")))[:160]
+        raw_options = item.get("options", [])
+        options = []
+        if isinstance(raw_options, list):
+            for option in raw_options[:100]:
+                if isinstance(option, dict):
+                    option_value = str(option.get("value", ""))[:500]
+                    option_label = str(option.get("label", option_value))[:300]
+                else:
+                    option_value = option_label = str(option)[:300]
+                options.append({"value": option_value, "label": option_label})
+        if tag == "textarea":
+            kind = BrowserControlKind.TEXT_AREA
+        elif tag == "select":
+            kind = BrowserControlKind.SELECT
+        elif tag == "button" or role == "button" or input_type in {"button", "submit"}:
+            kind = BrowserControlKind.BUTTON
+        elif tag == "a" or role == "link":
+            kind = BrowserControlKind.LINK
+        elif input_type == "email":
+            kind = BrowserControlKind.EMAIL
+        elif input_type == "tel":
+            kind = BrowserControlKind.TELEPHONE
+        elif input_type == "number":
+            kind = BrowserControlKind.NUMBER
+        elif input_type == "date":
+            kind = BrowserControlKind.DATE
+        elif input_type == "radio":
+            kind = BrowserControlKind.RADIO_GROUP
+        elif input_type == "checkbox":
+            kind = BrowserControlKind.CHECKBOX
+        elif input_type == "file":
+            kind = BrowserControlKind.FILE_UPLOAD
+        elif tag == "input" and input_type not in {"hidden", "password"}:
+            kind = BrowserControlKind.TEXT
+        else:
+            kind = BrowserControlKind.CUSTOM
+        semantic_name = (group_label if input_type == "radio" and group_label else label) or str(
+            item.get("name", "")
+        ).strip()[:300]
+        locator: dict[str, object] | None = None
+        if semantic_name:
+            locator = {
+                "strategy": LocatorStrategy.LABEL,
+                "value": semantic_name,
+                "exact": True,
+            }
+        elif kind in {BrowserControlKind.BUTTON, BrowserControlKind.LINK} and text:
+            locator = {
+                "strategy": LocatorStrategy.ROLE,
+                "value": "button" if kind is BrowserControlKind.BUTTON else "link",
+                "name": text,
+                "exact": True,
+            }
+        index = int(item.get("index", 0))
+        key_payload = {
+            "id": element_id,
+            "name": field_name,
+            "label": semantic_name,
+            "tag": tag,
+            "type": input_type,
+            "group": group_label,
+            "index": 0 if input_type == "radio" and field_name else index,
+        }
+        control_key = (
+            str(item.get("control_key", "")).strip()
+            or hashlib.sha256(
+                json.dumps(key_payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()[:32]
+        )
+        legal_text = " ".join((label, group_label, text)).casefold()
+        legal_attestation = bool(item.get("legal_attestation")) or bool(
+            re.search(
+                r"\b(?:certif(?:y|ication)|attest|signature|consent|agree|terms)\b", legal_text
+            )
+        )
+        if "signature" in legal_text:
+            kind = BrowserControlKind.SIGNATURE
+        elif re.search(r"\b(?:disclosure|consent|terms)\b", legal_text):
+            kind = BrowserControlKind.DISCLOSURE
+
+        def optional_scalar(*names: str) -> object | None:
+            for name in names:
+                candidate = item.get(name)
+                if candidate not in {None, ""}:
+                    return candidate
+            return None
+
+        href = str(item.get("href", ""))[:2_000]
+        if href:
+            parsed_href = urlsplit(href)
+            href = urlunsplit((parsed_href.scheme, parsed_href.netloc, parsed_href.path, "", ""))[
+                :2_000
+            ]
+        return {
+            "index": index,
+            "control_key": control_key,
+            "kind": kind,
+            "tag": tag,
+            "input_type": input_type,
+            "role": role,
+            "element_id": element_id,
+            "field_name": field_name,
+            "group_label": group_label,
+            "label": label,
+            "text": text,
+            "href": href,
+            "canonical_field": canonical_field,
+            "accept": str(item.get("accept", ""))[:500],
+            "checked": bool(item.get("checked")),
+            "required": bool(item.get("required")),
+            "disabled": bool(item.get("disabled")),
+            "legal_attestation": legal_attestation,
+            "character_limit": optional_scalar("character_limit", "maxLength"),
+            "minimum_number": optional_scalar("minimum_number", "min"),
+            "maximum_number": optional_scalar("maximum_number", "max"),
+            "earliest_date": optional_scalar("earliest_date", "minDate"),
+            "latest_date": optional_scalar("latest_date", "maxDate"),
+            "options": options,
+            "locator": locator,
+        }
+
+
 class BrowserObservation(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -134,7 +331,7 @@ class BrowserObservation(BaseModel):
     tabs: list[BrowserTab]
     accessibility_snapshot: str
     visible_text: str
-    controls: list[dict[str, object]]
+    controls: list[BrowserObservedControl]
     validation_errors: list[str]
     modals: list[str]
     console_errors: list[str]

@@ -92,8 +92,8 @@ class ReferenceAtsAdapter:
         if observation.page_type != "JOB_SEARCH_RESULTS":
             raise PortalContractError("Expected a reference ATS search-results page")
         for control in observation.controls:
-            href = control.get("href")
-            if control.get("tag") == "a" and isinstance(href, str) and "/jobs/" in href:
+            href = control.href
+            if control.tag == "a" and "/jobs/" in href:
                 return AnyHttpUrl(urljoin(observation.url, href))
         raise PortalContractError("Reference ATS search returned no supported job links")
 
@@ -119,15 +119,15 @@ class ReferenceAtsAdapter:
     def map_fields(self, observation: BrowserObservation) -> list[PortalFieldMapping]:
         mappings: list[PortalFieldMapping] = []
         for control in observation.controls:
-            canonical = control.get("canonicalField")
-            label = control.get("label")
+            canonical = control.canonical_field
+            label = control.label
             if isinstance(canonical, str) and canonical and isinstance(label, str) and label:
                 mappings.append(
                     PortalFieldMapping(
                         page_type=observation.page_type,
                         canonical_field=canonical,
                         label=label,
-                        required=bool(control.get("required")),
+                        required=control.required,
                     )
                 )
         return mappings

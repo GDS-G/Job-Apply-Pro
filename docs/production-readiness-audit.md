@@ -269,6 +269,12 @@ Migration `20260812_0021` adds encrypted observed-label/options persistence and 
 
 Runtime source commit `cb64b5b` passed all 122 backend tests at 83.27% coverage, all 16 desktop tests, strict formatting/lint/type checks, production build, migration round-trip, dependency audits, Windows packaging, and frozen-backend smoke. The unsigned validation installer `Job-Apply-Pro-0.29.0-alpha.1-x64.exe` is 169,710,901 bytes, SHA-256 `D39447514AF9872E95804909EB804F6448E9A790F3FBAEF54195381CB3531B64`. The bundled backend executable is 18,482,307 bytes, SHA-256 `C94ED5F811A92CAACCBA09527280CF1191E33D49A407A60780CE58E1662EAC1C`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `93C46E1353F7C8787325D1100BFDC7360B6496872241166B432D191C69608985`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
 
+### Observed Form Control Capture source validation
+
+`Observed Form Control Capture v0.30.0-alpha.1` replaces unvalidated browser-control dictionaries with frozen typed contracts. The worker omits password controls and current field values while recording deterministic control keys, semantic kinds/locators, labels, group labels, required/disabled state, select/radio options, and visible length/number/date constraints. Supervised snapshots expose controls only when the live browser observation and persisted run fingerprints match.
+
+The desktop binding UI can select a current detected control and derive the complete observed-field input without manual transcription. Portal classification, challenge detection, Reference ATS mapping, and final-submit detection consume the same validated contract. This release creates no browser action and performs no field fill or live-site write. ADR-0039 records the decision.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

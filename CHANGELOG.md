@@ -2,6 +2,24 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.30.0-alpha.1] - Unreleased
+
+### Added
+
+- Added typed, privacy-bounded browser control observations with deterministic keys, semantic kinds and locators, select/radio options, and visible constraints.
+- Added current observed controls to supervised portal snapshots and direct detected-control selection in the field-binding UI.
+- Added regression coverage for typed text, checkbox, and submit-control capture.
+
+### Changed
+
+- Field-binding previews can derive portal, page fingerprint, stable control identity, kind, label, options, and constraints from the exact current supervised observation.
+- Portal, challenge, and Reference ATS services now consume validated control contracts instead of arbitrary dictionaries.
+
+### Security
+
+- Password controls and current form values are excluded from browser observations.
+- Observed controls are returned only when the browser observation fingerprint matches the persisted supervised run. This release still performs no field fill or live-site write.
+
 ## [0.29.0-alpha.1] - Unreleased
 
 ### Added

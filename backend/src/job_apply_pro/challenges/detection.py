@@ -31,7 +31,18 @@ class ChallengeDetector:
     def detect(self, observation: BrowserObservation) -> ChallengeDetection:
         haystack = " ".join(
             [observation.page_type, observation.visible_text]
-            + [str(value) for control in observation.controls for value in control.values()]
+            + [
+                " ".join(
+                    (
+                        control.input_type,
+                        control.role,
+                        control.group_label,
+                        control.label,
+                        control.text,
+                    )
+                )
+                for control in observation.controls
+            ]
         ).casefold()
         signatures = [key for key in _CAPTCHA_PROVIDERS if key in haystack]
         if "captcha" in haystack or signatures:
@@ -71,8 +82,8 @@ class ChallengeDetector:
         questions: list[ChallengeQuestion] = []
         seen_radio_groups: set[str] = set()
         for control in observation.controls:
-            tag = str(control.get("tag", ""))
-            input_type = str(control.get("type", ""))
+            tag = control.tag
+            input_type = control.input_type
             if tag not in {"input", "select", "textarea"} or input_type in {
                 "hidden",
                 "submit",
@@ -80,34 +91,29 @@ class ChallengeDetector:
                 "file",
             }:
                 continue
-            prompt = str(control.get("label") or control.get("name") or "").strip()
+            prompt = (control.label or control.field_name).strip()
             if not prompt:
                 continue
             if input_type == "radio":
-                group = str(control.get("fieldName") or control.get("name") or prompt)
+                group = control.field_name or prompt
                 if group in seen_radio_groups:
                     continue
                 seen_radio_groups.add(group)
                 members = [
                     item
                     for item in observation.controls
-                    if str(item.get("type")) == "radio"
-                    and str(item.get("fieldName") or item.get("name")) == group
+                    if item.input_type == "radio" and item.field_name == group
                 ]
-                group_prompt = str(control.get("groupLabel") or group).strip()
+                group_prompt = (control.group_label or group).strip()
                 questions.append(
                     ChallengeQuestion(
                         id=group,
                         position=len(questions) + 1,
                         prompt=group_prompt,
                         kind=QuestionKind.MULTIPLE_CHOICE,
-                        options=[str(item.get("label") or item.get("value")) for item in members],
-                        required=any(bool(item.get("required")) for item in members),
-                        canonical_field=(
-                            str(control["canonicalField"])
-                            if control.get("canonicalField")
-                            else None
-                        ),
+                        options=[item.label or item.field_name for item in members],
+                        required=any(item.required for item in members),
+                        canonical_field=control.canonical_field or None,
                     )
                 )
                 continue
@@ -119,33 +125,20 @@ class ChallengeDetector:
                 kind = QuestionKind.CHECKBOX
             else:
                 kind = QuestionKind.TEXT
-            options_raw = control.get("options")
-            options = (
-                [
-                    str(option.get("label") or option.get("value"))
-                    for option in options_raw
-                    if isinstance(option, dict)
-                ]
-                if isinstance(options_raw, list)
-                else []
-            )
+            options = [option.label or option.value for option in control.options]
             lowered = prompt.casefold()
-            max_length = control.get("maxLength")
             questions.append(
                 ChallengeQuestion(
-                    id=str(control.get("id") or control.get("name") or uuid4()),
+                    id=control.element_id or control.field_name or str(uuid4()),
                     position=len(questions) + 1,
                     prompt=prompt,
                     kind=kind,
                     options=options,
-                    required=bool(control.get("required")),
-                    character_limit=max_length if isinstance(max_length, int) else None,
-                    canonical_field=(
-                        str(control["canonicalField"]) if control.get("canonicalField") else None
-                    ),
-                    legal_attestation=bool(
-                        re.search(r"\b(attest|certify|acknowledge|under penalty)\b", lowered)
-                    ),
+                    required=control.required,
+                    character_limit=control.character_limit,
+                    canonical_field=control.canonical_field or None,
+                    legal_attestation=control.legal_attestation
+                    or bool(re.search(r"\b(attest|certify|acknowledge|under penalty)\b", lowered)),
                     signature_required="signature" in lowered,
                 )
             )

@@ -1,10 +1,10 @@
 # Job Apply Pro user guide
 
-This guide applies to Auditable Form Field Binding `v0.29.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Observed Form Control Capture `v0.30.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
 
 ## Install and start
 
-1. Download the signed `Job-Apply-Pro-0.29.0-alpha.1-x64.exe` installer from the repository release.
+1. Download the signed `Job-Apply-Pro-0.30.0-alpha.1-x64.exe` installer from the repository release.
 2. Confirm Windows reports `GDS-G` as the verified publisher. Do not continue if the publisher is unknown or the signature is invalid.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
@@ -91,7 +91,7 @@ Edit the text and evidence list, then select **Review & save** and approve the n
 
 ## Review observed portal field bindings
 
-After an application answer reaches Reviewed or Promoted state, use **Observed portal field binding** to describe the exact control currently visible in the supervised browser. Copy the portal/ATS identifier, current page fingerprint, a stable control key, label, widget kind, options, required state, and any visible character, number, or date constraints. Mark legal attestations and signatures explicitly.
+After an application answer reaches Reviewed or Promoted state, capture the current supervised portal page and use **Observed portal field binding** to select a detected control. Job Apply Pro supplies its exact portal, page fingerprint, deterministic key, kind, label, options, required state, and visible constraints. Use manual sanitized entry only for an unsupported widget. Mark legal attestations and signatures explicitly.
 
 Select **Preview exact binding**. Review compatibility errors, confidence, answer source and revision, validation rules, and the proposed automation permission. Select **Approve reviewed binding** only when the observed control and canonical answer are the same field. The native dialog and backend fingerprint bind the approval to that exact answer revision and observation. If either changes, preview again.
 

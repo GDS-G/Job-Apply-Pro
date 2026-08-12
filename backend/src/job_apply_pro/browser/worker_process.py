@@ -16,6 +16,7 @@ from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserObservation,
+    BrowserObservedControl,
     BrowserTab,
     BrowserVerification,
     LocatorStrategy,
@@ -345,7 +346,7 @@ class BrowserWorker:
         ]
         headings = page.locator("h1,h2,h3").all_inner_texts()
         controls_raw: list[dict[str, object]] = page.locator(
-            "input,select,textarea,button,a,[role]"
+            "input:not([type='hidden']):not([type='password']),select,textarea,button,a,[role]"
         ).evaluate_all(
             """els => els.slice(0, 100).map((el, index) => {
               const id = el.getAttribute('id') || '';
@@ -374,19 +375,42 @@ class BrowserWorker:
                 href: el.getAttribute('href') || '',
                 canonicalField: el.getAttribute('data-canonical-field') || '',
                 accept: el.getAttribute('accept') || '',
-                value: 'value' in el ? String(el.value).slice(0, 1000) : '',
                 checked: 'checked' in el ? Boolean(el.checked) : false,
                 maxLength: 'maxLength' in el && el.maxLength > 0 ? el.maxLength : null,
+                min: el.getAttribute('min') || null,
+                max: el.getAttribute('max') || null,
+                minDate: el.getAttribute('type') === 'date' ? el.getAttribute('min') : null,
+                maxDate: el.getAttribute('type') === 'date' ? el.getAttribute('max') : null,
                 options: el.tagName.toLowerCase() === 'select'
                   ? Array.from(el.options).slice(0, 100).map(option => ({
                       value: option.value,
                       label: option.textContent?.trim().slice(0, 300) || option.value
                     }))
+                  : el.getAttribute('type') === 'radio' && el.getAttribute('name')
+                  ? els.filter(candidate =>
+                      candidate.getAttribute('type') === 'radio' &&
+                      candidate.getAttribute('name') === el.getAttribute('name')
+                    ).slice(0, 100).map(candidate => {
+                      const candidateId = candidate.getAttribute('id') || '';
+                      const candidateLabel = candidateId
+                        ? document.querySelector(`label[for="${CSS.escape(candidateId)}"]`)
+                        : candidate.closest('label');
+                      return {
+                        value: 'value' in candidate ? String(candidate.value).slice(0, 500) : '',
+                        label: (candidateLabel?.textContent || '').trim().slice(0, 300)
+                      };
+                    })
                   : [],
                 required: el.hasAttribute('required'),
                 disabled: el.hasAttribute('disabled')
               };
-            })"""
+            }).filter((item, index, items) =>
+              item.type !== 'radio' ||
+              items.findIndex(candidate =>
+                candidate.type === 'radio' &&
+                candidate.fieldName === item.fieldName
+              ) === index
+            )"""
         )
         form_signatures = page.locator("form").evaluate_all(
             "els => els.map(el => Array.from(el.elements).map(c => c.name || c.id || c.type))"
@@ -436,7 +460,7 @@ class BrowserWorker:
             tabs=tabs,
             accessibility_snapshot=accessibility[:20_000],
             visible_text=visible_text[:12_000],
-            controls=controls_raw,
+            controls=[BrowserObservedControl.model_validate(value) for value in controls_raw],
             validation_errors=_bounded(validation_errors),
             modals=_bounded(session.modals),
             console_errors=_bounded(session.console_errors),
