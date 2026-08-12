@@ -57,10 +57,6 @@ def downgrade() -> None:
         "ix_provider_calendar_events_binding_fingerprint",
         table_name="provider_calendar_events",
     )
-    op.drop_index(
-        "ix_provider_calendar_event_window", table_name="provider_calendar_events"
-    )
-    op.drop_index(
-        "ix_provider_calendar_events_provider", table_name="provider_calendar_events"
-    )
+    op.drop_index("ix_provider_calendar_event_window", table_name="provider_calendar_events")
+    op.drop_index("ix_provider_calendar_events_provider", table_name="provider_calendar_events")
     op.drop_table("provider_calendar_events")
