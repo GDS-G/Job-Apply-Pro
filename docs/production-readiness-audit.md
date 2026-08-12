@@ -289,6 +289,16 @@ Source validation passed all 125 backend tests at 83.16% coverage and all 16 des
 
 The unsigned validation installer `Job-Apply-Pro-0.31.0-alpha.1-x64.exe` is 169,740,058 bytes, SHA-256 `B5E81A831892C495EDA11C5FCAD20242276A5C2DC42871EC92A925ED35EF3EAC`. The bundled backend executable is 18,497,742 bytes, SHA-256 `FFFEC397036B779BCE47A6D8EDCB531FF89E176ABDDA475297B53AE52F221CA4`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `81AF240071A8FDBF179F9ED613EDD8CFD0098BC81904DB85B4F01772308808AB`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release.
 
+### Verified Radio Group Execution source validation
+
+`Verified Radio Group Execution v0.32.0-alpha.1` gives each observed native radio option an exact visible-label semantic locator. A reviewed answer selects an option only when it equals one unique visible label and every freshly observed option locator reproduces its own label. The browser uses `CHECK` with `CHECKED_EQUALS=true`; hidden option values never choose the answer. Missing, duplicate, case-variant, changed, or non-label option locators fail closed. ADR-0041 records the decision.
+
+The v0.31 native confirmation, default-off execution gate, full binding revalidation, candidate-value redaction, non-secret execution evidence, user-takeover return, human-only control boundaries, and separate final-submit path remain unchanged. No database migration is required because option locators travel only in current privacy-bounded observations.
+
+Source validation passed all 127 backend tests at 83.17% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, both dependency audits, the production Electron build, Windows packaging, and frozen-backend smoke.
+
+The unsigned validation installer `Job-Apply-Pro-0.32.0-alpha.1-x64.exe` is 169,740,339 bytes, SHA-256 `5F0858D55672120C9EDF71D8BCC21EFAB2D391F17C8DEABFD382FDEFCFEFFFF1`. The bundled backend executable is 18,498,413 bytes, SHA-256 `8F2DF13A03293FFBF9CEBB96494D88D2142E2230E06C513BC2A8C1B94B6FC93F`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `F3BEE260142C8AA94B8803DF9FCE51C9ABF8F70339A5F3F43958AC75F07C0A60`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

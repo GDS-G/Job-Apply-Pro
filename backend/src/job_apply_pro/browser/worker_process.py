@@ -397,7 +397,14 @@ class BrowserWorker:
                         : candidate.closest('label');
                       return {
                         value: 'value' in candidate ? String(candidate.value).slice(0, 500) : '',
-                        label: (candidateLabel?.textContent || '').trim().slice(0, 300)
+                        label: (candidateLabel?.textContent || '').trim().slice(0, 300),
+                        locator: (candidateLabel?.textContent || '').trim()
+                          ? {
+                              strategy: 'LABEL',
+                              value: (candidateLabel?.textContent || '').trim().slice(0, 300),
+                              exact: true
+                            }
+                          : null
                       };
                     })
                   : [],

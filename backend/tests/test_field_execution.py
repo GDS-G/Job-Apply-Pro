@@ -26,6 +26,7 @@ from job_apply_pro.domain.browser import (
     BrowserActionKind,
     BrowserActionResult,
     BrowserControlKind,
+    BrowserControlOption,
     BrowserEngine,
     BrowserObservation,
     BrowserObservedControl,
@@ -324,6 +325,77 @@ def test_rejects_disabled_policy_and_stale_live_page() -> None:
         stale.execute("run-1", approval)
     assert stale_browser.action is None
     assert stale_browser.takeovers == 1
+
+
+def test_radio_group_uses_exact_visible_option_locator() -> None:
+    control = BrowserObservedControl(
+        index=0,
+        control_key="arrangement-control",
+        kind=BrowserControlKind.RADIO_GROUP,
+        tag="input",
+        input_type="radio",
+        field_name="arrangement",
+        group_label="Preferred work arrangement",
+        options=[
+            BrowserControlOption(
+                value="remote",
+                label="Remote",
+                locator=SemanticLocator(strategy=LocatorStrategy.LABEL, value="Remote"),
+            ),
+            BrowserControlOption(
+                value="hybrid",
+                label="Hybrid",
+                locator=SemanticLocator(strategy=LocatorStrategy.LABEL, value="Hybrid"),
+            ),
+        ],
+        locator=SemanticLocator(
+            strategy=LocatorStrategy.LABEL,
+            value="Preferred work arrangement",
+        ),
+    )
+
+    action = ApplicationFieldExecutionService._action(control, "Remote")
+
+    assert action.kind is BrowserActionKind.CHECK
+    assert action.locator == SemanticLocator(
+        strategy=LocatorStrategy.LABEL,
+        value="Remote",
+    )
+    assert action.value is None
+    assert action.verification.kind is VerificationKind.CHECKED_EQUALS
+    assert action.verification.value == "true"
+    with pytest.raises(FieldExecutionConflictError, match="exactly one"):
+        ApplicationFieldExecutionService._action(control, "remote")
+    ambiguous = control.model_copy(
+        update={
+            "options": [
+                *control.options,
+                BrowserControlOption(
+                    value="remote-duplicate",
+                    label="Remote",
+                    locator=SemanticLocator(
+                        strategy=LocatorStrategy.LABEL,
+                        value="Remote",
+                    ),
+                ),
+            ]
+        }
+    )
+    with pytest.raises(FieldExecutionConflictError, match="exactly one"):
+        ApplicationFieldExecutionService._action(ambiguous, "Remote")
+    invalid_locator = control.model_copy(
+        update={
+            "options": [
+                control.options[0].model_copy(update={"locator": None}),
+                control.options[1],
+            ]
+        }
+    )
+    with pytest.raises(FieldExecutionPolicyError, match="exact visible-label"):
+        ApplicationFieldExecutionService._validate_control(
+            SimpleNamespace(control_kind=PortalFieldControlKind.RADIO_GROUP),  # type: ignore[arg-type]
+            invalid_locator,
+        )
 
 
 def test_sensitive_browser_action_is_redacted_before_persistence(session: Session) -> None:
