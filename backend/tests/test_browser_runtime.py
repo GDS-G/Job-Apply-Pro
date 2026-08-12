@@ -85,6 +85,17 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </fieldset>
                 </body>
             """,
+            "/select-preferences": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Work preferences</h1>
+                  <label for="schedule">Preferred schedule</label>
+                  <select id="schedule" name="schedule">
+                    <option value="">Choose a schedule</option>
+                    <option value="schedule-internal-1">Day shift</option>
+                    <option value="schedule-internal-2">Night shift</option>
+                  </select>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -297,6 +308,50 @@ def test_radio_group_observation_has_exact_option_locators(
                 ),
             )
             assert selected.verified
+    finally:
+        worker.close()
+
+
+def test_select_by_visible_label_ignores_hidden_option_value(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/select-preferences"),
+                    profile_name="select-visible-label",
+                )
+            )
+            assert started.observation is not None
+            select = started.observation.controls[0]
+            assert select.kind is BrowserControlKind.SELECT
+            assert [option.label for option in select.options] == [
+                "Choose a schedule",
+                "Day shift",
+                "Night shift",
+            ]
+            assert [option.value for option in select.options] == [
+                "",
+                "schedule-internal-1",
+                "schedule-internal-2",
+            ]
+            action = BrowserAction(
+                kind=BrowserActionKind.SELECT_LABEL,
+                locator=_label("Preferred schedule"),
+                value="Day shift",
+                intended_result="Select the exact visible schedule label",
+                verification=BrowserVerification(
+                    kind=VerificationKind.SELECTED_LABEL_EQUALS,
+                    locator=_label("Preferred schedule"),
+                    value="Day shift",
+                ),
+            )
+            assert service.execute_action(started.id, action).verified
     finally:
         worker.close()
 

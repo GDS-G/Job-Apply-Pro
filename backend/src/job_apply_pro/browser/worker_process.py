@@ -284,6 +284,10 @@ class BrowserWorker:
                 if action.value is None:
                     raise ValueError("SELECT requires value")
                 locator.select_option(action.value, timeout=timeout)
+            elif action.kind is BrowserActionKind.SELECT_LABEL:
+                if action.value is None:
+                    raise ValueError("SELECT_LABEL requires a visible label")
+                locator.select_option(label=action.value, timeout=timeout)
             elif action.kind is BrowserActionKind.CHECK:
                 locator.check(timeout=timeout)
             elif action.kind is BrowserActionKind.UNCHECK:
@@ -317,6 +321,11 @@ class BrowserWorker:
             return locator.is_visible()
         if rule.kind is VerificationKind.VALUE_EQUALS:
             return rule.value is not None and locator.input_value() == rule.value
+        if rule.kind is VerificationKind.SELECTED_LABEL_EQUALS:
+            selected_label = locator.evaluate(
+                "el => el.selectedOptions?.[0]?.textContent?.trim() || ''"
+            )
+            return rule.value is not None and selected_label == rule.value
         if rule.kind is VerificationKind.CHECKED_EQUALS:
             return locator.is_checked() is (rule.value != "false")
         return False

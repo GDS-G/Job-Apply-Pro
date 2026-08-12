@@ -112,6 +112,7 @@ export type BrowserActionKind =
   | "CLICK"
   | "FILL"
   | "SELECT"
+  | "SELECT_LABEL"
   | "CHECK"
   | "UNCHECK"
   | "UPLOAD"
@@ -1194,7 +1195,7 @@ export interface ApplicationFieldExecution {
   page_fingerprint_before: string;
   page_fingerprint_after: string;
   control_key: string;
-  action_kind: "FILL" | "SELECT" | "CHECK" | "UNCHECK";
+  action_kind: "FILL" | "SELECT" | "SELECT_LABEL" | "CHECK" | "UNCHECK";
   verified: boolean;
   action_fingerprint: string;
   error?: string | null;

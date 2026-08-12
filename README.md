@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Verified Radio Group Execution build
+## Verified Select Option Execution build
 
-The active milestone is **Verified Radio Group Execution `v0.32.0-alpha.1`**. In addition to the v0.31 native-field execution boundary, typed radio options now carry exact visible-label locators. A reviewed answer can select one radio option only when its label matches exactly and is unique on the freshly observed page. Custom widgets, uploads, signatures, disclosures, legal attestations, and final submission remain outside this path.
+The active milestone is **Verified Select Option Execution `v0.33.0-alpha.1`**. In addition to exact radio-option execution, reviewed native select fields now use a dedicated visible-label action and selected-label postcondition. Hidden option values, case variants, unknown labels, and duplicate visible labels cannot choose an approved answer. Custom widgets, uploads, signatures, disclosures, legal attestations, and final submission remain outside this path.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
