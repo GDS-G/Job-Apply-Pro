@@ -161,6 +161,8 @@ Only controls with positive visibility evidence from the latest capture appear i
 
 Fields declared with `aria-required=true` are included in the checklist even when the portal omits native HTML `required`. They cannot show `VALID ON PAGE` from browser validity alone because the browser may not enforce the ARIA declaration. Resolve them through the normal reviewed binding, verified execution, or visible manual path.
 
+Controls declared with `aria-disabled=true` are treated as disabled even when the DOM would technically allow a write. They are not offered for detected-field binding, appear as manual when required, and cannot run through approved execution. Capture again after the portal enables the control.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

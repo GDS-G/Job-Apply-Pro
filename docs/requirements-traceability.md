@@ -4,7 +4,7 @@
 
 This audit maps the current repository to the authoritative **Job Apply Pro Documentation** Google Doc. It supplements the phase-oriented release notes; it does not narrow the long-term product scope. Explicit current user direction, accepted ADRs, and versioned contracts remain higher priority than older implementation notes when they conflict.
 
-The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Releases through `v0.36.0-alpha.1` established the secure local runtime, supervised portal boundary, evidence-governed documents and answers, provider synchronization, reviewed typed field execution, constraint-aware required-field coverage, and positive visibility evidence. Accessible Required Field Review `v0.37.0-alpha.1` adds required-state provenance so ARIA-required controls are reported without inheriting native-validity completion. The matrix below remains authoritative for unfinished scope.
+The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Releases through `v0.37.0-alpha.1` established the secure local runtime, supervised portal boundary, evidence-governed documents and answers, provider synchronization, reviewed typed field execution, constraint-aware required-field coverage, positive visibility evidence, and accessible required-state provenance. Accessible Disabled Control Guard `v0.38.0-alpha.1` adds fail-closed native and ARIA disabled-state provenance. The matrix below remains authoritative for unfinished scope.
 
 ## Status meanings
 
@@ -52,7 +52,7 @@ These controls are source capability, not provider permission. `production_enabl
 
 ## Next source-controlled implementation order
 
-1. Use the v0.37 visibility-, accessibility-, and constraint-aware required-field review to surface page-valid, missing, stale, ambiguous, manual-only, and already-verified visible controls before submission; add only individually reviewed execution capabilities with exact postconditions.
+1. Use the v0.38 visibility-, accessibility-, constraint-, and disabled-state-aware required-field review to surface page-valid, missing, stale, ambiguous, manual-only, and already-verified visible controls before submission; add only individually reviewed execution capabilities with exact postconditions.
 2. Expand sanitized real-world document/layout/template evaluations and add advanced visual parsing only through the governed AI boundary, while preserving evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval.
 3. Add portal-specific custom-widget mappings only after explicit widget-level locator contracts and authorized supervised evidence with terms, limits, ownership, and stop conditions.
 4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.

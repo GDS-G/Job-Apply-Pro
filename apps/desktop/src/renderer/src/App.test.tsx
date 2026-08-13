@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Accessible Required Field Review v0.37.0-alpha.1"),
+      screen.getByText("Accessible Disabled Control Guard v0.38.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

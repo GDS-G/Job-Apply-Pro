@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Accessible Required Field Review build
+## Accessible Disabled Control Guard build
 
-The active milestone is **Accessible Required Field Review `v0.37.0-alpha.1`**. Privacy-bounded observations now distinguish native HTML `required` from `aria-required=true` while preserving one combined required-field signal. Accessibility-declared required controls appear in coverage, but native constraint validity can satisfy only a natively required control; this prevents ARIA-only fields from being incorrectly marked complete. Visible-control filtering, value privacy, exact execution verification, and manual safety boundaries remain unchanged.
+The active milestone is **Accessible Disabled Control Guard `v0.38.0-alpha.1`**. Privacy-bounded observations now distinguish native HTML `disabled` from `aria-disabled=true` while preserving a combined fail-closed disabled signal. Accessibility-disabled controls remain visible for diagnostics but are excluded from binding selection, classified as manual in coverage, and rejected by approved execution. Required-state provenance, visible-control filtering, value privacy, and exact execution verification remain unchanged.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
