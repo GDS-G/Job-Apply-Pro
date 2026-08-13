@@ -156,6 +156,7 @@ class ApplicationFieldCoverageService:
             or control.busy
             or control.inert
             or control.accessibility_hidden
+            or control.repeat_count > 1
         ):
             return self._item(
                 control,
@@ -163,7 +164,12 @@ class ApplicationFieldCoverageService:
                 kind,
                 ApplicationFieldCoverageStatus.MANUAL_REQUIRED,
                 None,
-                "This required control must remain under visible user handling.",
+                (
+                    "Repeated controls require a provider-specific unique locator and visible "
+                    "user handling."
+                    if control.repeat_count > 1
+                    else "This required control must remain under visible user handling."
+                ),
             )
         if (
             control.native_required

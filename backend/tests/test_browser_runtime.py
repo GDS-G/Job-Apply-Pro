@@ -112,6 +112,33 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </button>
                 </body>
             """,
+            "/structured-controls": """
+                <body data-page-type="EXPERIENCE">
+                  <h1>Structured application controls</h1>
+                  <section aria-label="Work history">
+                    <div data-repeat-group="employment">
+                      <label>First employer <input name="employer" required></label>
+                    </div>
+                    <div data-repeat-group="employment">
+                      <label>Second employer <input name="employer" required></label>
+                    </div>
+                  </section>
+                  <button type="button" aria-controls="sponsorship-details">
+                    Sponsorship details
+                  </button>
+                  <section id="sponsorship-details"
+                    data-conditional-region="sponsorship-details" aria-label="Sponsorship">
+                    <label>Visa type <input name="visa_type" required></label>
+                  </section>
+                  <label id="skills-label">Skills</label>
+                  <input name="skills" role="combobox" aria-labelledby="skills-label"
+                    aria-haspopup="listbox" aria-expanded="true" aria-controls="skills-list">
+                  <div id="skills-list" role="listbox" aria-multiselectable="true">
+                    <div role="option" data-value="python">Python</div>
+                    <div role="option" data-value="typescript">TypeScript</div>
+                  </div>
+                </body>
+            """,
             "/accessible-required": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Accessibility-aware questions</h1>
@@ -604,6 +631,49 @@ def test_observation_excludes_css_hidden_controls(session: Session, tmp_path: Pa
             }
             assert revealed_names == {"visible_question", "hidden_question"}
             assert revealed.observation.page_fingerprint != initial_fingerprint
+    finally:
+        worker.close()
+
+
+def test_observation_captures_repeated_conditional_and_searchable_widget_topology(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/structured-controls"),
+                    profile_name="structured-controls",
+                )
+            )
+            assert started.observation is not None
+            controls = started.observation.controls
+            employers = [control for control in controls if control.field_name == "employer"]
+            assert len(employers) == 2
+            assert [control.repeat_index for control in employers] == [0, 1]
+            assert all(control.repeat_group == "employment" for control in employers)
+            assert all(control.repeat_count == 2 for control in employers)
+            assert all(control.section_path == ["Work history"] for control in employers)
+
+            visa = next(control for control in controls if control.field_name == "visa_type")
+            assert visa.conditional_region == "sponsorship-details"
+            assert visa.conditional_trigger == "Sponsorship details"
+            assert visa.section_path == ["Sponsorship"]
+
+            skills = next(control for control in controls if control.field_name == "skills")
+            assert skills.kind is BrowserControlKind.CUSTOM
+            assert skills.widget_popup == "listbox"
+            assert skills.widget_expanded is True
+            assert skills.widget_multiselectable
+            assert skills.widget_searchable
+            assert [(option.value, option.label) for option in skills.options] == [
+                ("python", "Python"),
+                ("typescript", "TypeScript"),
+            ]
     finally:
         worker.close()
 

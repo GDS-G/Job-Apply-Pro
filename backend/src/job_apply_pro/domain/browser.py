@@ -174,6 +174,16 @@ class BrowserObservedControl(BaseModel):
     text: str = Field(default="", max_length=200)
     href: str = Field(default="", max_length=2_000)
     canonical_field: str = Field(default="", max_length=160)
+    section_path: list[str] = Field(default_factory=list, max_length=10)
+    repeat_group: str = Field(default="", max_length=200)
+    repeat_index: int | None = Field(default=None, ge=0, le=99)
+    repeat_count: int = Field(default=1, ge=1, le=100)
+    conditional_region: str = Field(default="", max_length=200)
+    conditional_trigger: str = Field(default="", max_length=300)
+    widget_popup: str = Field(default="", max_length=40)
+    widget_expanded: bool | None = None
+    widget_multiselectable: bool = False
+    widget_searchable: bool = False
     accept: str = Field(default="", max_length=500)
     checked: bool = False
     required: bool = False
@@ -224,6 +234,12 @@ class BrowserObservedControl(BaseModel):
         group_label = str(item.get("group_label", item.get("groupLabel", "")))[:300]
         label_source = str(item.get("label_source", item.get("labelSource", "NONE")))[:40]
         canonical_field = str(item.get("canonical_field", item.get("canonicalField", "")))[:160]
+        raw_section_path = item.get("section_path", item.get("sectionPath", []))
+        section_path = (
+            [str(value).strip()[:300] for value in raw_section_path[:10] if str(value).strip()]
+            if isinstance(raw_section_path, list)
+            else []
+        )
         raw_options = item.get("options", [])
         options = []
         if isinstance(raw_options, list):
@@ -248,6 +264,8 @@ class BrowserObservedControl(BaseModel):
             kind = BrowserControlKind.TEXT_AREA
         elif tag == "select":
             kind = BrowserControlKind.SELECT
+        elif role in {"combobox", "listbox"} and tag != "select":
+            kind = BrowserControlKind.CUSTOM
         elif tag == "button" or role == "button" or input_type in {"button", "submit"}:
             kind = BrowserControlKind.BUTTON
         elif tag == "a" or role == "link":
@@ -384,6 +402,22 @@ class BrowserObservedControl(BaseModel):
             "text": text,
             "href": href,
             "canonical_field": canonical_field,
+            "section_path": section_path,
+            "repeat_group": str(item.get("repeat_group", item.get("repeatGroup", "")))[:200],
+            "repeat_index": optional_scalar("repeat_index", "repeatIndex"),
+            "repeat_count": item.get("repeat_count", item.get("repeatCount", 1)),
+            "conditional_region": str(
+                item.get("conditional_region", item.get("conditionalRegion", ""))
+            )[:200],
+            "conditional_trigger": str(
+                item.get("conditional_trigger", item.get("conditionalTrigger", ""))
+            )[:300],
+            "widget_popup": str(item.get("widget_popup", item.get("widgetPopup", "")))[:40],
+            "widget_expanded": optional_scalar("widget_expanded", "widgetExpanded"),
+            "widget_multiselectable": bool(
+                item.get("widget_multiselectable", item.get("widgetMultiselectable"))
+            ),
+            "widget_searchable": bool(item.get("widget_searchable", item.get("widgetSearchable"))),
             "accept": str(item.get("accept", ""))[:500],
             "checked": bool(item.get("checked")),
             "required": bool(item.get("required")) or native_required or accessible_required,

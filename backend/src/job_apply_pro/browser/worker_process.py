@@ -383,6 +383,20 @@ class BrowserWorker:
                   explicit ? 'HTML_LABEL' : wrapping ? 'WRAPPING_LABEL' : 'NONE';
                 return { text: text.trim().replace(/\\s+/g, ' ').slice(0, 300), source };
               };
+              const semanticText = el => {
+                if (!el) return '';
+                const labelled = ariaLabelledByText(el);
+                const aria = el.getAttribute('aria-label') || '';
+                const legend = el.tagName?.toLowerCase() === 'fieldset'
+                  ? el.querySelector(':scope > legend')?.textContent || '' : '';
+                const heading = el.querySelector?.(
+                  ':scope > h1,:scope > h2,:scope > h3,:scope > h4'
+                )?.textContent || '';
+                const controlText = el.matches?.('button,[role="button"]')
+                  ? el.textContent || '' : '';
+                return (labelled || aria || legend || heading || controlText || '')
+                  .trim().replace(/\\s+/g, ' ').slice(0, 300);
+              };
               const visibleEls = els.filter(isVisible).slice(0, 100);
               return visibleEls.map((el, index) => {
               const id = el.getAttribute('id') || '';
@@ -390,6 +404,52 @@ class BrowserWorker:
               const label = labelInfo.text;
               const fieldset = el.closest('fieldset');
               const legend = fieldset?.querySelector(':scope > legend');
+              const ancestors = [];
+              for (
+                let node = el.parentElement;
+                node && ancestors.length < 10;
+                node = node.parentElement
+              ) {
+                if (node.matches('fieldset,section,article,[role="group"],[data-form-section]')) {
+                  const value = semanticText(node) || node.getAttribute('data-form-section') || '';
+                  if (value) ancestors.unshift(value.slice(0, 300));
+                }
+              }
+              const repeatContainer = el.closest('[data-repeat-group]');
+              const declaredRepeatGroup = repeatContainer?.getAttribute('data-repeat-group') || '';
+              const fieldIdentity = el.getAttribute('name') || '';
+              const repeatPeers = fieldIdentity && !['radio', 'checkbox'].includes(
+                (el.getAttribute('type') || '').toLowerCase()
+              ) ? visibleEls.filter(candidate =>
+                candidate.tagName === el.tagName &&
+                (candidate.getAttribute('type') || '').toLowerCase() ===
+                  (el.getAttribute('type') || '').toLowerCase() &&
+                (candidate.getAttribute('name') || '') === fieldIdentity &&
+                (!declaredRepeatGroup ||
+                  candidate.closest('[data-repeat-group]')?.getAttribute('data-repeat-group') ===
+                    declaredRepeatGroup)
+              ) : [];
+              const repeatGroup = declaredRepeatGroup ||
+                (repeatPeers.length > 1 ? fieldIdentity : '');
+              const conditionalContainer = el.closest('[data-conditional-region]');
+              const conditionalRegion =
+                conditionalContainer?.getAttribute('data-conditional-region') || '';
+              const conditionalId = conditionalContainer?.getAttribute('id') || '';
+              const conditionalController = conditionalId
+                ? document.querySelector(`[aria-controls~="${CSS.escape(conditionalId)}"]`) : null;
+              const widgetPopup = (el.getAttribute('aria-haspopup') || '').toLowerCase();
+              const controlledIds = (el.getAttribute('aria-controls') || '')
+                .trim().split(/\\s+/).filter(Boolean);
+              const controlledListbox = controlledIds
+                .map(value => document.getElementById(value))
+                .find(candidate => candidate?.getAttribute('role') === 'listbox');
+              const widgetOptions = controlledListbox
+                ? Array.from(controlledListbox.querySelectorAll('[role="option"]'))
+                    .filter(isVisible).slice(0, 100).map(option => ({
+                      value: (option.getAttribute('data-value') || option.textContent || '')
+                        .trim().slice(0, 500),
+                      label: (option.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 300)
+                    })) : [];
               return {
                 index,
                 id,
@@ -404,6 +464,20 @@ class BrowserWorker:
                 text: (el.innerText || '').trim().slice(0, 200),
                 href: el.getAttribute('href') || '',
                 canonicalField: el.getAttribute('data-canonical-field') || '',
+                sectionPath: ancestors,
+                repeatGroup: repeatGroup.slice(0, 200),
+                repeatIndex: repeatPeers.length ? repeatPeers.indexOf(el) : null,
+                repeatCount: Math.max(1, repeatPeers.length),
+                conditionalRegion: conditionalRegion.slice(0, 200),
+                conditionalTrigger: semanticText(conditionalController),
+                widgetPopup: widgetPopup.slice(0, 40),
+                widgetExpanded: el.hasAttribute('aria-expanded')
+                  ? (el.getAttribute('aria-expanded') || '').toLowerCase() === 'true' : null,
+                widgetMultiselectable:
+                  (controlledListbox?.getAttribute('aria-multiselectable') || '')
+                    .toLowerCase() === 'true',
+                widgetSearchable: el.getAttribute('role') === 'combobox' &&
+                  (el.tagName.toLowerCase() === 'input' || el.hasAttribute('contenteditable')),
                 accept: el.getAttribute('accept') || '',
                 checked: 'checked' in el ? Boolean(el.checked) : false,
                 maxLength: 'maxLength' in el && el.maxLength > 0 ? el.maxLength : null,
@@ -411,7 +485,8 @@ class BrowserWorker:
                 max: el.getAttribute('max') || null,
                 minDate: el.getAttribute('type') === 'date' ? el.getAttribute('min') : null,
                 maxDate: el.getAttribute('type') === 'date' ? el.getAttribute('max') : null,
-                options: el.tagName.toLowerCase() === 'select'
+                options: widgetOptions.length
+                  ? widgetOptions : el.tagName.toLowerCase() === 'select'
                   ? Array.from(el.options).slice(0, 100).map(option => ({
                       value: option.value,
                       label: option.textContent?.trim().slice(0, 300) || option.value

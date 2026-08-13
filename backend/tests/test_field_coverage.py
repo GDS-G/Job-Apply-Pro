@@ -413,6 +413,21 @@ def test_accessibility_hidden_required_control_remains_manual_despite_native_val
     assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
 
 
+def test_repeated_required_control_requires_provider_specific_locator() -> None:
+    control = _control(
+        "repeated-employer",
+        repeat_group="employment",
+        repeat_index=0,
+        repeat_count=2,
+    )
+    review = _service([control], bindings=[_binding()], answers=[_answer()]).review(
+        "run-1", "application-1"
+    )
+
+    assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
+    assert "Repeated controls" in review.items[0].reason
+
+
 def test_accessibly_invalid_control_does_not_inherit_native_validity() -> None:
     control = _control(
         "provider-invalid-control",

@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Accessibility Hidden-State Guard v0.45.0-alpha.1</strong>
+              <strong>Structured Form Topology v0.46.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2533,6 +2533,13 @@ export function App() {
                             control.kind}{" "}
                           · {control.kind.replaceAll("_", " ")}
                           {control.required ? " · required" : ""}
+                          {control.repeat_count > 1
+                            ? ` / repeated ${Number(control.repeat_index ?? 0) + 1}/${control.repeat_count}`
+                            : ""}
+                          {control.conditional_region ? " / conditional" : ""}
+                          {control.widget_searchable
+                            ? " / searchable widget"
+                            : ""}
                         </option>
                       ))}
                   </select>
