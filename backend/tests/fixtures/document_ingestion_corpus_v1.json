@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0.0",
+  "corpus_version": "1.0.0",
+  "classification": "SANITIZED_SYNTHETIC",
+  "cases": [
+    {
+      "id": "utf8-text-sections",
+      "fixture_kind": "PLAIN_TEXT",
+      "file_name": "synthetic-resume.txt",
+      "fixture_values": {"lines": ["SUMMARY", "Platform engineering experience"]},
+      "expected_media_type": "text/plain",
+      "expected_parser": "plain-text/1",
+      "expected_block_text": ["SUMMARY", "Platform engineering experience"],
+      "expected_block_kinds": ["LINE", "LINE"]
+    },
+    {
+      "id": "markdown-sections",
+      "fixture_kind": "MARKDOWN",
+      "file_name": "synthetic-resume.md",
+      "fixture_values": {"lines": ["# Skills", "- Python"]},
+      "expected_media_type": "text/plain",
+      "expected_parser": "plain-text/1",
+      "expected_block_text": ["# Skills", "- Python"],
+      "expected_block_kinds": ["LINE", "LINE"]
+    },
+    {
+      "id": "rtf-paragraphs",
+      "fixture_kind": "RTF",
+      "file_name": "synthetic-resume.rtf",
+      "fixture_values": {"paragraphs": ["Summary", "Systems engineering"]},
+      "expected_media_type": "application/rtf",
+      "expected_parser": "rtf-text/1",
+      "expected_block_text": ["Summary", "Systems engineering"],
+      "expected_block_kinds": ["PARAGRAPH", "PARAGRAPH"]
+    },
+    {
+      "id": "docx-section-and-table",
+      "fixture_kind": "DOCX_SECTION_TABLE",
+      "file_name": "synthetic-resume.docx",
+      "fixture_values": {"heading": "Skills", "cells": ["Language", "Python"], "ending": "Experience"},
+      "expected_media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "expected_parser": "python-docx-layout/3",
+      "expected_block_text": ["Skills", "Language | Python", "Experience"],
+      "expected_block_kinds": ["PARAGRAPH", "TABLE_ROW", "PARAGRAPH"]
+    },
+    {
+      "id": "docx-nested-table-and-floating-text",
+      "fixture_kind": "DOCX_NESTED_FLOATING",
+      "file_name": "synthetic-complex-resume.docx",
+      "fixture_values": {"outer": "Experience", "nested": ["Employer", "Synthetic Systems"], "floating": "Certification: Synthetic Cloud"},
+      "expected_media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "expected_parser": "python-docx-layout/3",
+      "expected_block_text": ["Experience", "Employer | Synthetic Systems", "Certification: Synthetic Cloud"],
+      "expected_block_kinds": ["TABLE_ROW", "TABLE_ROW", "DRAWING_TEXT"],
+      "expected_warnings": ["Nested DOCX table content was flattened in document order", "DOCX floating text was recovered without reliable visual placement"]
+    },
+    {
+      "id": "pdf-single-column",
+      "fixture_kind": "PDF_SINGLE_COLUMN",
+      "file_name": "synthetic-resume.pdf",
+      "fixture_values": {"lines": ["Summary", "Platform Engineer"]},
+      "expected_media_type": "application/pdf",
+      "expected_parser": "pypdf-layout/2",
+      "expected_block_text": ["Summary", "Platform Engineer"],
+      "expected_block_kinds": ["PDF_LAYOUT_LINE", "PDF_LAYOUT_LINE"]
+    },
+    {
+      "id": "pdf-two-column",
+      "fixture_kind": "PDF_TWO_COLUMN",
+      "file_name": "synthetic-two-column.pdf",
+      "fixture_values": {"heading": "Candidate Profile", "left": ["Experience", "Platform Engineer"], "right": ["Skills", "Python"]},
+      "expected_media_type": "application/pdf",
+      "expected_parser": "pypdf-layout/2",
+      "expected_block_text": ["Candidate Profile", "Experience", "Platform Engineer", "Skills", "Python"],
+      "expected_block_kinds": ["PDF_LAYOUT_LINE", "PDF_LAYOUT_LINE", "PDF_LAYOUT_LINE", "PDF_LAYOUT_LINE", "PDF_LAYOUT_LINE"],
+      "expected_warnings": ["Layout-aware column ordering was applied to PDF page(s): 1; review complex graphics or spanning content"]
+    },
+    {
+      "id": "pdf-partial-blank-warning",
+      "fixture_kind": "PDF_PARTIAL_BLANK",
+      "file_name": "synthetic-partial.pdf",
+      "fixture_values": {"text": "Synthetic candidate profile"},
+      "expected_media_type": "application/pdf",
+      "expected_parser": "pypdf-layout/2",
+      "expected_block_text": ["Synthetic candidate profile", ""],
+      "expected_block_kinds": ["PDF_LAYOUT_LINE", "PDF_LAYOUT_LINE"],
+      "expected_warnings": ["1 PDF page(s) had no meaningful text; OCR was not enabled"]
+    }
+  ]
+}

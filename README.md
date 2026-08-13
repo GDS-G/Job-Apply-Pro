@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Complex DOCX Layout Evidence build
+## Sanitized Regression Corpora build
 
-The active milestone is **Complex DOCX Layout Evidence `v0.48.0-alpha.1`**. DOCX ingestion now recovers bounded floating text-box content, flattens nested tables in document order, and warns when visual placement is unverified or a drawing has no recoverable text. Extracted evidence still requires human review before it can become a verified claim.
+The active milestone is **Sanitized Regression Corpora `v0.49.0-alpha.1`**. Versioned, schema-validated synthetic corpora now exercise all six governed AI agent roles through independent repeat runs and representative TXT, Markdown, RTF, DOCX, nested/floating DOCX, and PDF ingestion layouts. Corpus loading rejects duplicate identities, malformed expectations, credential-shaped fields, email addresses, oversized files, and invalid JSON.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
