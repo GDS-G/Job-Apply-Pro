@@ -167,6 +167,8 @@ Controls labelled through `aria-labelledby` use the same normalized accessible n
 
 If a portal marks a control `aria-invalid`, that field cannot show `VALID ON PAGE` even when its basic HTML constraints pass. Job Apply Pro records only a boolean invalid signal, not the value or validation message. Correct the field in the visible browser and capture again.
 
+Native `readonly` and `aria-readonly=true` controls remain visible in the current observation but are not offered for detected-field binding. When required, they remain manual in coverage and cannot run through approved field execution. Review provider-managed content directly and capture again only after the portal makes the control editable.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

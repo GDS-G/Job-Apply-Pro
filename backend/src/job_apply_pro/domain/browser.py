@@ -182,6 +182,9 @@ class BrowserObservedControl(BaseModel):
     disabled: bool = False
     native_disabled: bool = False
     accessible_disabled: bool = False
+    read_only: bool = False
+    native_read_only: bool = False
+    accessible_read_only: bool = False
     visible: bool = False
     will_validate: bool = False
     constraint_satisfied: bool = False
@@ -339,6 +342,12 @@ class BrowserObservedControl(BaseModel):
             item.get("native_disabled", item.get("nativeDisabled", item.get("disabled")))
         )
         accessible_disabled = bool(item.get("accessible_disabled", item.get("accessibleDisabled")))
+        native_read_only = bool(
+            item.get("native_read_only", item.get("nativeReadOnly", item.get("read_only")))
+        )
+        accessible_read_only = bool(
+            item.get("accessible_read_only", item.get("accessibleReadOnly"))
+        )
         return {
             "index": index,
             "control_key": control_key,
@@ -362,6 +371,11 @@ class BrowserObservedControl(BaseModel):
             "disabled": bool(item.get("disabled")) or native_disabled or accessible_disabled,
             "native_disabled": native_disabled,
             "accessible_disabled": accessible_disabled,
+            "read_only": bool(item.get("read_only", item.get("readOnly")))
+            or native_read_only
+            or accessible_read_only,
+            "native_read_only": native_read_only,
+            "accessible_read_only": accessible_read_only,
             "visible": bool(item.get("visible")),
             "will_validate": bool(item.get("will_validate", item.get("willValidate"))),
             "constraint_satisfied": bool(

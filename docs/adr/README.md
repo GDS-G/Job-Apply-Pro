@@ -51,3 +51,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0047: Accessible disabled-control provenance](0047-accessible-disabled-control-provenance.md)
 - [ADR-0048: Exact accessible-name control locators](0048-exact-accessible-name-control-locators.md)
 - [ADR-0049: Accessible invalid-state guard](0049-accessible-invalid-state-guard.md)
+- [ADR-0050: Readonly control guard](0050-readonly-control-guard.md)
