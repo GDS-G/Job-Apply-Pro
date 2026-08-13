@@ -165,6 +165,8 @@ Controls declared with `aria-disabled=true` are treated as disabled even when th
 
 Controls labelled through `aria-labelledby` use the same normalized accessible name exposed to assistive technology. Job Apply Pro records whether a name came from ARIA or an HTML label and uses an exact role-and-name locator for the ARIA case. If referenced label text changes, the current observation or binding fingerprint changes and the field must be reviewed again.
 
+If a portal marks a control `aria-invalid`, that field cannot show `VALID ON PAGE` even when its basic HTML constraints pass. Job Apply Pro records only a boolean invalid signal, not the value or validation message. Correct the field in the visible browser and capture again.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

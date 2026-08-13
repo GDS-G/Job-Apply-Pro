@@ -157,7 +157,12 @@ class ApplicationFieldCoverageService:
                 None,
                 "This required control must remain under visible user handling.",
             )
-        if control.native_required and control.will_validate and control.constraint_satisfied:
+        if (
+            control.native_required
+            and control.will_validate
+            and control.constraint_satisfied
+            and not control.accessible_invalid
+        ):
             return self._item(
                 control,
                 label,

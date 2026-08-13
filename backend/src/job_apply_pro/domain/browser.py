@@ -185,6 +185,7 @@ class BrowserObservedControl(BaseModel):
     visible: bool = False
     will_validate: bool = False
     constraint_satisfied: bool = False
+    accessible_invalid: bool = False
     legal_attestation: bool = False
     character_limit: int | None = Field(default=None, ge=1, le=20_000)
     minimum_number: float | None = None
@@ -365,6 +366,9 @@ class BrowserObservedControl(BaseModel):
             "will_validate": bool(item.get("will_validate", item.get("willValidate"))),
             "constraint_satisfied": bool(
                 item.get("constraint_satisfied", item.get("constraintSatisfied"))
+            ),
+            "accessible_invalid": bool(
+                item.get("accessible_invalid", item.get("accessibleInvalid"))
             ),
             "legal_attestation": legal_attestation,
             "character_limit": optional_scalar("character_limit", "maxLength"),

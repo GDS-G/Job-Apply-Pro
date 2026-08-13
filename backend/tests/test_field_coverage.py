@@ -335,3 +335,16 @@ def test_accessibly_disabled_required_control_remains_manual() -> None:
 
     assert control.disabled
     assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
+
+
+def test_accessibly_invalid_control_does_not_inherit_native_validity() -> None:
+    control = _control(
+        "provider-invalid-control",
+        will_validate=True,
+        constraint_satisfied=True,
+        accessible_invalid=True,
+    )
+    review = _service([control]).review("run-1", "application-1")
+
+    assert review.satisfied_on_page_count == 0
+    assert review.items[0].status is ApplicationFieldCoverageStatus.UNBOUND

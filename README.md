@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Accessible Control Labels build
+## Accessible Invalid State Guard build
 
-The active milestone is **Accessible Control Labels `v0.39.0-alpha.1`**. Privacy-bounded observations resolve `aria-labelledby` references into a normalized accessible name and record label provenance. Such controls use exact role-and-name locators that Playwright can execute and verify; native HTML labels continue using exact label locators. Missing references are ignored without exposing full HTML, and radio execution accepts only exact native-label or accessible-role locators.
+The active milestone is **Accessible Invalid State Guard `v0.40.0-alpha.1`**. Privacy-bounded observations now carry a boolean `accessible_invalid` signal from `aria-invalid`. Any non-empty value other than case-insensitive `false` prevents native HTML validity from classifying a required control as satisfied. Current values and validation messages remain excluded, and the signal grants no action or provider-acceptance claim.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 
