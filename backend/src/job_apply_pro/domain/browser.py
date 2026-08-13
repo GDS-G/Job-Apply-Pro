@@ -176,6 +176,8 @@ class BrowserObservedControl(BaseModel):
     accept: str = Field(default="", max_length=500)
     checked: bool = False
     required: bool = False
+    native_required: bool = False
+    accessible_required: bool = False
     disabled: bool = False
     visible: bool = False
     will_validate: bool = False
@@ -307,6 +309,10 @@ class BrowserObservedControl(BaseModel):
             href = urlunsplit((parsed_href.scheme, parsed_href.netloc, parsed_href.path, "", ""))[
                 :2_000
             ]
+        native_required = bool(
+            item.get("native_required", item.get("nativeRequired", item.get("required")))
+        )
+        accessible_required = bool(item.get("accessible_required", item.get("accessibleRequired")))
         return {
             "index": index,
             "control_key": control_key,
@@ -323,7 +329,9 @@ class BrowserObservedControl(BaseModel):
             "canonical_field": canonical_field,
             "accept": str(item.get("accept", ""))[:500],
             "checked": bool(item.get("checked")),
-            "required": bool(item.get("required")),
+            "required": bool(item.get("required")) or native_required or accessible_required,
+            "native_required": native_required,
+            "accessible_required": accessible_required,
             "disabled": bool(item.get("disabled")),
             "visible": bool(item.get("visible")),
             "will_validate": bool(item.get("will_validate", item.get("willValidate"))),

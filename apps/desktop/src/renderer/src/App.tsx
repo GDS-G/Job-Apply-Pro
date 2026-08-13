@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Visible-Control Form Readiness v0.36.0-alpha.1</strong>
+              <strong>Accessible Required Field Review v0.37.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

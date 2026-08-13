@@ -425,7 +425,11 @@ class BrowserWorker:
                       };
                     })
                   : [],
-                required: el.hasAttribute('required'),
+                required: el.hasAttribute('required') ||
+                  (el.getAttribute('aria-required') || '').toLowerCase() === 'true',
+                nativeRequired: el.hasAttribute('required'),
+                accessibleRequired:
+                  (el.getAttribute('aria-required') || '').toLowerCase() === 'true',
                 disabled: el.hasAttribute('disabled'),
                 visible: true,
                 willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,

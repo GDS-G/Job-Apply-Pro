@@ -306,3 +306,19 @@ def test_review_ignores_legacy_or_hidden_required_controls() -> None:
 
     assert review.required_control_count == 1
     assert [item.control_key for item in review.items] == ["visible-control"]
+
+
+def test_accessible_required_does_not_inherit_native_validity() -> None:
+    control = _control(
+        "accessible-control",
+        required=True,
+        native_required=False,
+        accessible_required=True,
+        will_validate=True,
+        constraint_satisfied=True,
+    )
+    review = _service([control]).review("run-1", "application-1")
+
+    assert review.required_control_count == 1
+    assert review.satisfied_on_page_count == 0
+    assert review.items[0].status is ApplicationFieldCoverageStatus.UNBOUND

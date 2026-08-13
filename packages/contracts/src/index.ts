@@ -159,6 +159,8 @@ export interface BrowserObservedControl {
   accept: string;
   checked: boolean;
   required: boolean;
+  native_required: boolean;
+  accessible_required: boolean;
   disabled: boolean;
   visible: boolean;
   will_validate: boolean;

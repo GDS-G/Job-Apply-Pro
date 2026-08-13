@@ -112,6 +112,16 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </button>
                 </body>
             """,
+            "/accessible-required": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Accessibility-aware questions</h1>
+                  <label>Native required <input name="native_required" required></label>
+                  <label>Accessible required
+                    <input name="accessible_required" aria-required="TRUE">
+                  </label>
+                  <label>Optional field <input name="optional_field"></label>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -492,6 +502,45 @@ def test_observation_excludes_css_hidden_controls(session: Session, tmp_path: Pa
             }
             assert revealed_names == {"visible_question", "hidden_question"}
             assert revealed.observation.page_fingerprint != initial_fingerprint
+    finally:
+        worker.close()
+
+
+def test_observation_distinguishes_native_and_accessible_required_fields(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/accessible-required"),
+                    profile_name="accessible-required-fields",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+            native = controls["native_required"]
+            assert native.required
+            assert native.native_required
+            assert not native.accessible_required
+            assert native.will_validate
+            assert not native.constraint_satisfied
+
+            accessible = controls["accessible_required"]
+            assert accessible.required
+            assert not accessible.native_required
+            assert accessible.accessible_required
+            assert accessible.will_validate
+            assert accessible.constraint_satisfied
+
+            optional = controls["optional_field"]
+            assert not optional.required
+            assert not optional.native_required
+            assert not optional.accessible_required
     finally:
         worker.close()
 
