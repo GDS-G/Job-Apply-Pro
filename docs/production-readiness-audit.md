@@ -437,6 +437,14 @@ No database migration is required. Existing observations remain compatible throu
 
 Runtime source commit `e47959aff092942f5257d34f0fb7491b9b279c6b` passed all 163 backend tests at 83.41% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.46.0-alpha.1-x64.exe` is 169,753,793 bytes, SHA-256 `7D140A83C841287F926A624D95C9E5EA58EF4EE6FBFB225BA82E58D027D73523`. The bundled backend is 18,509,273 bytes, SHA-256 `8F648B27F5C893A037AEDFE61607C750969B11AB2BEDC7FC725D6BDCD6C637A3`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `AA99C810D293DA8E5865B20FA3AC2843E26F1D4365DE68EABDDDA21D0C646A9E`. All report `NotSigned`, as expected without owner signing credentials. Testing uses local sanitized fixtures only and does not consume portal-account passwords.
 
+### Governed AI Evaluation Suite source validation
+
+`Governed AI Evaluation Suite v0.47.0-alpha.1` expands sanitized agent evaluation from one top-level assertion pass to nested JSON-pointer requirements and expected values, evidence-list allowlists, non-disclosing forbidden-term checks, and up to five independent cache-bypassed repeat runs. Canonical output fingerprints detect inconsistent structured results without retaining plaintext output in the report. ADR-0056 records the decision.
+
+Evaluation repeats remain ordinary audited gateway invocations and preserve routing, classification, consent, redaction, schema, timeout, retry, and budget enforcement. A passing fixture does not prove truth, fairness, live-provider permission, or production readiness. No database migration is required.
+
+Runtime source commit `eb6a201` passed all 165 backend tests at 83.46% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.47.0-alpha.1-x64.exe` is 169,754,620 bytes, SHA-256 `F4F83467E818DC7781033F69D6E5CF4867599698A8C1F059AB423581D8EE48BF`. The bundled backend is 18,511,679 bytes, SHA-256 `4E0377949219A18F0509CB4672A85F78DE84EB57C74A472BD3BC51175ACD769C`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `452BEFD5AF753EE07BDFE1D839CB50D2DF37820D70AB868E677AF7BBB4838ACA`. All report `NotSigned`, as expected without owner signing credentials. Testing uses local sanitized fixtures only and does not consume portal-account passwords.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

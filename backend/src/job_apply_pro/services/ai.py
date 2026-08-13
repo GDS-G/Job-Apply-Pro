@@ -487,7 +487,7 @@ class AgentService:
     def __init__(self, gateway: AIGatewayService) -> None:
         self._gateway = gateway
 
-    def run(self, request: AgentRunRequest) -> AgentRunResult:
+    def run(self, request: AgentRunRequest, *, bypass_cache: bool = False) -> AgentRunResult:
         task = AGENT_TASKS[request.role]
         response = self._gateway.invoke(
             AIGatewayRequest(
@@ -499,6 +499,7 @@ class AgentService:
                 source_version=request.source_version,
                 classification=request.classification,
                 external_consent=request.external_consent,
+                cache_mode="BYPASS" if bypass_cache else "USE",
             )
         )
         if not isinstance(response.content, dict):
@@ -514,30 +515,94 @@ class AIEvaluationHarness:
         results: list[EvaluationCaseResult] = []
         for case in cases:
             failures: list[str] = []
-            invocation_id: str | None = None
-            try:
-                result = self._agents.run(case.agent_request)
-                invocation_id = result.gateway.invocation_id
+            invocation_ids: list[str] = []
+            outputs: list[dict[str, object]] = []
+            for _ in range(case.repeat_count):
+                try:
+                    result = self._agents.run(
+                        case.agent_request,
+                        bypass_cache=case.repeat_count > 1,
+                    )
+                except AIGatewayError as error:
+                    failures.append(type(error).__name__)
+                    continue
+                invocation_ids.append(result.gateway.invocation_id)
+                outputs.append(result.output)
+
+            output_fingerprint: str | None = None
+            if outputs:
+                output = outputs[0]
+                output_fingerprint = self._output_fingerprint(output)
                 failures.extend(
-                    f"missing key: {key}"
-                    for key in sorted(case.required_keys - result.output.keys())
+                    f"missing key: {key}" for key in sorted(case.required_keys - output.keys())
                 )
                 failures.extend(
                     f"unexpected {key}"
                     for key, expected in case.expected_values.items()
-                    if result.output.get(key) != expected
+                    if output.get(key) != expected
                 )
-            except AIGatewayError as error:
-                failures.append(type(error).__name__)
+                for pointer in sorted(case.required_json_pointers):
+                    found, _ = self._resolve_json_pointer(output, pointer)
+                    if not found:
+                        failures.append(f"missing JSON pointer: {pointer}")
+                for pointer, expected in sorted(case.expected_json_pointer_values.items()):
+                    found, actual = self._resolve_json_pointer(output, pointer)
+                    if not found or actual != expected:
+                        failures.append(f"unexpected JSON pointer: {pointer}")
+                if case.allowed_evidence_ids:
+                    found, evidence = self._resolve_json_pointer(output, case.evidence_json_pointer)
+                    if not found or not isinstance(evidence, list):
+                        failures.append(f"missing evidence list: {case.evidence_json_pointer}")
+                    elif any(
+                        not isinstance(value, str) or value not in case.allowed_evidence_ids
+                        for value in evidence
+                    ):
+                        failures.append(f"evidence outside allowlist: {case.evidence_json_pointer}")
+                serialized = json.dumps(
+                    output, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                ).casefold()
+                failures.extend(
+                    f"forbidden output term matched: {index}"
+                    for index, term in enumerate(case.forbidden_output_terms)
+                    if term.casefold() in serialized
+                )
+                fingerprints = {self._output_fingerprint(value) for value in outputs}
+                if len(fingerprints) > 1:
+                    failures.append("output changed across independent evaluation runs")
             results.append(
                 EvaluationCaseResult(
                     case_id=case.id,
                     passed=not failures,
                     failures=failures,
-                    invocation_id=invocation_id,
+                    invocation_id=invocation_ids[0] if invocation_ids else None,
+                    invocation_ids=invocation_ids,
+                    output_fingerprint=output_fingerprint,
                 )
             )
         passed = sum(item.passed for item in results)
         return EvaluationReport(
             total=len(results), passed=passed, failed=len(results) - passed, cases=results
         )
+
+    @staticmethod
+    def _output_fingerprint(output: dict[str, object]) -> str:
+        return hashlib.sha256(
+            json.dumps(output, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    @staticmethod
+    def _resolve_json_pointer(value: object, pointer: str) -> tuple[bool, object | None]:
+        if pointer == "":
+            return True, value
+        if not pointer.startswith("/"):
+            return False, None
+        current = value
+        for raw_token in pointer[1:].split("/"):
+            token = raw_token.replace("~1", "/").replace("~0", "~")
+            if isinstance(current, dict) and token in current:
+                current = current[token]
+            elif isinstance(current, list) and token.isdigit() and int(token) < len(current):
+                current = current[int(token)]
+            else:
+                return False, None
+        return True, current

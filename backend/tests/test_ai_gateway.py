@@ -279,6 +279,113 @@ def test_agent_evaluation_harness_uses_schema_valid_results(session: Session) ->
     assert report.failed == 0
 
 
+def test_evaluation_harness_checks_nested_grounding_leakage_and_repeat_stability(
+    session: Session,
+) -> None:
+    output = json.dumps(
+        {
+            "fields": [
+                {
+                    "name": "eligibility",
+                    "answer": "Reviewed evidence only",
+                    "evidence_claim_ids": ["claim-1"],
+                }
+            ],
+            "needs_user": False,
+        }
+    )
+    provider = FakeProvider("local", [output, output])
+    models = _models("local")
+    policy = _policy(models[0].id).model_copy(update={"task_type": AITaskType.FORM_INTERPRETATION})
+    service = _service(session, [provider], models, [policy])
+
+    report = AIEvaluationHarness(AgentService(service)).run(
+        [
+            EvaluationCase(
+                id="bounded-repeat-evaluation",
+                agent_request=AgentRunRequest(
+                    role=AgentRole.FORM_INTERPRETATION,
+                    input_data={"question": "Why?", "evidence_claim_ids": ["claim-1"]},
+                ),
+                required_json_pointers={"/fields/0/name"},
+                expected_json_pointer_values={"/fields/0/name": "eligibility"},
+                allowed_evidence_ids={"claim-1"},
+                evidence_json_pointer="/fields/0/evidence_claim_ids",
+                forbidden_output_terms=["candidate@example.com", "fixture-secret"],
+                repeat_count=2,
+            )
+        ]
+    )
+
+    assert report.total == report.passed == 1
+    assert report.cases[0].invocation_id == report.cases[0].invocation_ids[0]
+    assert len(report.cases[0].invocation_ids) == 2
+    assert len(set(report.cases[0].invocation_ids)) == 2
+    assert report.cases[0].output_fingerprint is not None
+    assert len(provider.requests) == 2
+
+
+def test_evaluation_harness_reports_nested_grounding_leakage_and_instability(
+    session: Session,
+) -> None:
+    provider = FakeProvider(
+        "local",
+        [
+            json.dumps(
+                {
+                    "fields": [
+                        {
+                            "answer": "Contact candidate@example.com",
+                            "evidence_claim_ids": ["invented-claim"],
+                        }
+                    ],
+                    "needs_user": False,
+                }
+            ),
+            json.dumps(
+                {
+                    "fields": [
+                        {
+                            "answer": "Different response",
+                            "evidence_claim_ids": ["claim-1"],
+                        }
+                    ],
+                    "needs_user": False,
+                }
+            ),
+        ],
+    )
+    models = _models("local")
+    policy = _policy(models[0].id).model_copy(update={"task_type": AITaskType.FORM_INTERPRETATION})
+    service = _service(session, [provider], models, [policy])
+
+    report = AIEvaluationHarness(AgentService(service)).run(
+        [
+            EvaluationCase(
+                id="failing-evaluation",
+                agent_request=AgentRunRequest(
+                    role=AgentRole.FORM_INTERPRETATION,
+                    input_data={"question": "Why?", "evidence_claim_ids": ["claim-1"]},
+                ),
+                required_json_pointers={"/fields/0/name"},
+                expected_json_pointer_values={"/fields/0/name": "eligibility"},
+                allowed_evidence_ids={"claim-1"},
+                evidence_json_pointer="/fields/0/evidence_claim_ids",
+                forbidden_output_terms=["candidate@example.com"],
+                repeat_count=2,
+            )
+        ]
+    )
+
+    failures = report.cases[0].failures
+    assert report.failed == 1
+    assert "missing JSON pointer: /fields/0/name" in failures
+    assert "unexpected JSON pointer: /fields/0/name" in failures
+    assert "evidence outside allowlist: /fields/0/evidence_claim_ids" in failures
+    assert "forbidden output term matched: 0" in failures
+    assert "output changed across independent evaluation runs" in failures
+
+
 def test_openai_compatible_adapter_supports_chat_and_embeddings() -> None:
     requests: list[httpx.Request] = []
 

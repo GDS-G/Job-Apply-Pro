@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Structured Form Topology v0.46.0-alpha.1"),
+      screen.getByText("Governed AI Evaluation Suite v0.47.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
