@@ -175,6 +175,8 @@ Controls disabled by an ancestor `<fieldset disabled>` are treated as natively d
 
 Controls inside an HTML `inert` subtree remain visible for review but are not offered for binding, cannot show `VALID ON PAGE`, and cannot run through approved execution. Capture again after the provider makes the section interactive.
 
+Controls inside an `aria-hidden=true` subtree remain visible in bounded review evidence but are not offered for binding, cannot show `VALID ON PAGE`, and cannot run through approved execution. Capture again after the provider exposes the section to accessibility tools.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

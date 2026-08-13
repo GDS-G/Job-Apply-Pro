@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Inert Control Guard v0.44.0-alpha.1</strong>
+              <strong>Accessibility Hidden-State Guard v0.45.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2519,7 +2519,8 @@ export function App() {
                           !control.disabled &&
                           !control.read_only &&
                           !control.busy &&
-                          !control.inert,
+                          !control.inert &&
+                          !control.accessibility_hidden,
                       )
                       .map((control) => (
                         <option

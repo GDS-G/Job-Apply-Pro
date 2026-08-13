@@ -55,3 +55,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0051: Busy state guard](0051-busy-state-guard.md)
 - [ADR-0052: Inherited native disabled state](0052-inherited-native-disabled-state.md)
 - [ADR-0053: Inert control guard](0053-inert-control-guard.md)
+- [ADR-0054: Accessibility hidden-state guard](0054-accessibility-hidden-state-guard.md)

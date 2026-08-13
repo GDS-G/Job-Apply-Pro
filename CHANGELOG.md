@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.45.0-alpha.1] - Unreleased
+
+### Added
+
+- Added combined accessibility-hidden state plus direct and ancestor provenance to observed controls and shared desktop contracts.
+- Added real-Chromium and policy regressions for direct, inherited, case-insensitive, and explicit-false `aria-hidden` state.
+
+### Security
+
+- Accessibility-hidden controls are excluded from detected-field binding, cannot inherit native-valid completion, remain manual when required, and are rejected before approved browser execution.
+- Only bounded booleans are recorded; current values, ancestor identifiers, raw attributes, full HTML, credentials, and session material remain excluded.
+
 ## [0.44.0-alpha.1] - Unreleased
 
 ### Added

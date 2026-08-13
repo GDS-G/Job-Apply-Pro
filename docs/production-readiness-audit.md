@@ -415,9 +415,19 @@ Exact committed-head artifact hashes and signature state are recorded after the 
 
 No database migration is required. Existing observations remain compatible, and the three booleans travel through bounded observation JSON and shared contracts. Validation and packaging evidence will be recorded after the complete release candidate passes.
 
+Source validation passed all 160 backend tests at 83.39% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, and the production Electron build.
+
+Runtime source commit `14b57f6f4f87b00f4e5322c226031fd46d6b4730` passed exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.45.0-alpha.1-x64.exe` is 169,752,102 bytes, SHA-256 `040935834DAA743D2420327B96FBEA9343122B8349BFCD2B5DD32B32A6591D6D`. The bundled backend is 18,507,999 bytes, SHA-256 `EBA5C91E70A728CDC466BE231B7086A59886F71EAEC542C9D61F191CF2BABCA8`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `57E1B3D95575CD88D47FD6A8547123F2E86066937BFA09EB793A31E281313E4F`. All report `NotSigned`, as expected without owner signing credentials. Testing uses local sanitized fixtures only and does not consume portal-account passwords.
+
 Source validation passed all 157 backend tests at 83.38% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, and the production Electron build.
 
 Runtime source commit `10ee78adda70edb39eac2722213085ad85ec8acd` passed exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.44.0-alpha.1-x64.exe` is 169,752,094 bytes, SHA-256 `DBF5413854B8F143F3E52A47FED44B65B4DF2BE99CB0C70288BC0C5F6AA81CF0`. The bundled backend is 18,507,718 bytes, SHA-256 `01024CE9ED9A7A3E80635D23CFDFD42736DDAFA37260768E5F094EBAF1337B1D`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `55FE949C9F09EF24B84A3E415881AF8CC92A0D0CE5D5B1859F6EBAF1212B7AF3`. All report `NotSigned`, as expected without owner signing credentials. Testing uses local sanitized fixtures only and does not consume portal-account passwords.
+
+### Accessibility Hidden-State Guard source validation
+
+`Accessibility Hidden-State Guard v0.45.0-alpha.1` records combined accessibility-hidden state plus direct and ancestor provenance. CSS-visible controls inside case-insensitive `aria-hidden=true` subtrees remain visible for operator review but are excluded from detected binding, cannot inherit native-valid completion, remain manual when required, and are rejected before approved execution. ADR-0054 records the decision.
+
+No database migration is required. Existing observations remain compatible, and the three booleans travel through bounded observation JSON and shared contracts. Validation and packaging evidence will be recorded after the complete release candidate passes.
 
 ## External launch evidence still required
 

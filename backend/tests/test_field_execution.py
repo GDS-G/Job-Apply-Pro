@@ -504,6 +504,37 @@ def test_rejects_inert_control() -> None:
     assert browser.takeovers == 1
 
 
+def test_rejects_accessibility_hidden_control() -> None:
+    service, browser, _ = _fixture_service()
+    assert browser.observation is not None
+    browser.observation = browser.observation.model_copy(
+        update={
+            "controls": [
+                BrowserObservedControl.model_validate(
+                    {
+                        **browser.observation.controls[0].model_dump(),
+                        "accessibility_hidden": False,
+                        "direct_accessibility_hidden": False,
+                        "inherited_accessibility_hidden": True,
+                    }
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(FieldExecutionPolicyError, match="Accessibility-hidden fields"):
+        service.execute(
+            "run-1",
+            ApplicationFieldExecutionApproval(
+                binding_id="binding-1",
+                review_page_fingerprint="page-v1",
+                confirmation_phrase="EXECUTE APPROVED FIELD",
+            ),
+        )
+    assert browser.action is None
+    assert browser.takeovers == 1
+
+
 def test_radio_group_uses_exact_visible_option_locator() -> None:
     control = BrowserObservedControl(
         index=0,
