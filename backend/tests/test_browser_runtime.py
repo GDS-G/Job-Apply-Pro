@@ -132,6 +132,21 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <label>Enabled field <input name="enabled_field"></label>
                 </body>
             """,
+            "/inherited-disabled": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Inherited disabled controls</h1>
+                  <fieldset disabled>
+                    <legend>
+                      Account
+                      <label>Legend exception <input name="legend_enabled"></label>
+                    </legend>
+                    <label>Inherited disabled
+                      <input name="inherited_disabled" required>
+                    </label>
+                  </fieldset>
+                  <label>Direct disabled <input name="direct_disabled" disabled></label>
+                </body>
+            """,
             "/readonly-controls": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Readonly controls</h1>
@@ -643,6 +658,43 @@ def test_observation_distinguishes_native_and_accessible_disabled_controls(
             assert not enabled.disabled
             assert not enabled.native_disabled
             assert not enabled.accessible_disabled
+    finally:
+        worker.close()
+
+
+def test_observation_captures_inherited_native_disabled_state(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/inherited-disabled"),
+                    profile_name="inherited-disabled-controls",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+
+            inherited = controls["inherited_disabled"]
+            assert inherited.disabled
+            assert inherited.native_disabled
+            assert inherited.inherited_disabled
+            assert not inherited.accessible_disabled
+
+            direct = controls["direct_disabled"]
+            assert direct.disabled
+            assert direct.native_disabled
+            assert not direct.inherited_disabled
+
+            legend = controls["legend_enabled"]
+            assert not legend.disabled
+            assert not legend.native_disabled
+            assert not legend.inherited_disabled
     finally:
         worker.close()
 

@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Busy State Guard v0.42.0-alpha.1</strong>
+              <strong>Inherited Disabled State Guard v0.43.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

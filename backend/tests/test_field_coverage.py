@@ -337,6 +337,21 @@ def test_accessibly_disabled_required_control_remains_manual() -> None:
     assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
 
 
+def test_inherited_disabled_required_control_remains_manual() -> None:
+    control = _control(
+        "inherited-disabled-control",
+        disabled=False,
+        native_disabled=False,
+        inherited_disabled=True,
+        accessible_disabled=False,
+    )
+    review = _service([control]).review("run-1", "application-1")
+
+    assert control.disabled
+    assert control.native_disabled
+    assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
+
+
 def test_accessibly_readonly_required_control_remains_manual() -> None:
     control = _control(
         "accessible-readonly-control",

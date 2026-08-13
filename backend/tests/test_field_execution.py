@@ -379,6 +379,38 @@ def test_rejects_accessibly_disabled_control() -> None:
     assert browser.takeovers == 1
 
 
+def test_rejects_inherited_disabled_control() -> None:
+    service, browser, _ = _fixture_service()
+    assert browser.observation is not None
+    browser.observation = browser.observation.model_copy(
+        update={
+            "controls": [
+                BrowserObservedControl.model_validate(
+                    {
+                        **browser.observation.controls[0].model_dump(),
+                        "disabled": False,
+                        "native_disabled": False,
+                        "inherited_disabled": True,
+                        "accessible_disabled": False,
+                    }
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(FieldExecutionPolicyError, match="Disabled fields"):
+        service.execute(
+            "run-1",
+            ApplicationFieldExecutionApproval(
+                binding_id="binding-1",
+                review_page_fingerprint="page-v1",
+                confirmation_phrase="EXECUTE APPROVED FIELD",
+            ),
+        )
+    assert browser.action is None
+    assert browser.takeovers == 1
+
+
 def test_rejects_accessibly_readonly_control() -> None:
     service, browser, _ = _fixture_service()
     assert browser.observation is not None

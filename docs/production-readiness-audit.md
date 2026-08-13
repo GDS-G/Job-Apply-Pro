@@ -399,6 +399,16 @@ Source validation passed all 151 backend tests at 83.36% coverage and all 16 des
 
 The unsigned validation installer `Job-Apply-Pro-0.42.0-alpha.1-x64.exe` is 169,751,618 bytes, SHA-256 `DA5F0D455D58CFD92EEC0ACF0BA20B8D6FF28A5103F521255EC9FE546FA2600C`. The bundled backend executable is 18,507,388 bytes, SHA-256 `8C28C21E46ADD9433F6253FFE7C5EC348F002613EBAC9A4E370984DFFF9E6146`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `E21F691229C010EFF5D2ABCB0934063F0177FA915D5995B13ED2821053509EEA`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
 
+### Inherited Disabled State Guard source validation
+
+`Inherited Disabled State Guard v0.43.0-alpha.1` makes native disabled observation follow browser `:disabled` semantics and records whether the state is inherited rather than directly attributed. Fieldset-disabled descendants enter the existing fail-closed binding, coverage, and execution paths, while the first-legend exception remains enabled. ADR-0052 records the decision.
+
+No database migration is required. Existing observations remain compatible, and the boolean travels through bounded observation JSON and shared contracts. Validation and packaging evidence will be recorded after the complete release candidate passes.
+
+Source validation passed all 154 backend tests at 83.37% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, Windows packaging, and frozen-backend smoke.
+
+Exact committed-head artifact hashes and signature state are recorded after the runtime source commit is fixed. Testing uses local sanitized fixtures only; portal and email credentials are never placed in source, documentation, CI, logs, or unattended automation.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
