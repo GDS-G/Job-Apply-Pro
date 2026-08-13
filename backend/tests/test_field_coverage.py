@@ -381,6 +381,22 @@ def test_busy_required_control_remains_manual_despite_native_validity() -> None:
     assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
 
 
+def test_inert_required_control_remains_manual_despite_native_validity() -> None:
+    control = _control(
+        "inert-control",
+        will_validate=True,
+        constraint_satisfied=True,
+        inert=False,
+        direct_inert=False,
+        inherited_inert=True,
+    )
+    review = _service([control]).review("run-1", "application-1")
+
+    assert control.inert
+    assert review.satisfied_on_page_count == 0
+    assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
+
+
 def test_accessibly_invalid_control_does_not_inherit_native_validity() -> None:
     control = _control(
         "provider-invalid-control",

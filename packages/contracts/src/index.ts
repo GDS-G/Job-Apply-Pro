@@ -172,6 +172,9 @@ export interface BrowserObservedControl {
   busy: boolean;
   control_busy: boolean;
   form_busy: boolean;
+  inert: boolean;
+  direct_inert: boolean;
+  inherited_inert: boolean;
   visible: boolean;
   will_validate: boolean;
   constraint_satisfied: boolean;

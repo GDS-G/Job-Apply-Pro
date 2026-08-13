@@ -234,6 +234,8 @@ class ApplicationFieldExecutionService:
             raise FieldExecutionPolicyError("Readonly fields cannot be executed")
         if control.busy:
             raise FieldExecutionPolicyError("Busy fields cannot be executed")
+        if control.inert:
+            raise FieldExecutionPolicyError("Inert fields cannot be executed")
         if not control.visible:
             raise FieldExecutionPolicyError("Hidden fields cannot be executed")
         if control.legal_attestation:

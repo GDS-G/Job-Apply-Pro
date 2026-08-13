@@ -189,6 +189,9 @@ class BrowserObservedControl(BaseModel):
     busy: bool = False
     control_busy: bool = False
     form_busy: bool = False
+    inert: bool = False
+    direct_inert: bool = False
+    inherited_inert: bool = False
     visible: bool = False
     will_validate: bool = False
     constraint_satisfied: bool = False
@@ -355,6 +358,8 @@ class BrowserObservedControl(BaseModel):
         )
         control_busy = bool(item.get("control_busy", item.get("controlBusy")))
         form_busy = bool(item.get("form_busy", item.get("formBusy")))
+        direct_inert = bool(item.get("direct_inert", item.get("directInert")))
+        inherited_inert = bool(item.get("inherited_inert", item.get("inheritedInert")))
         return {
             "index": index,
             "control_key": control_key,
@@ -390,6 +395,9 @@ class BrowserObservedControl(BaseModel):
             "busy": bool(item.get("busy")) or control_busy or form_busy,
             "control_busy": control_busy,
             "form_busy": form_busy,
+            "inert": bool(item.get("inert")) or direct_inert or inherited_inert,
+            "direct_inert": direct_inert,
+            "inherited_inert": inherited_inert,
             "visible": bool(item.get("visible")),
             "will_validate": bool(item.get("will_validate", item.get("willValidate"))),
             "constraint_satisfied": bool(

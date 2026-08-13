@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.44.0-alpha.1] - Unreleased
+
+### Added
+
+- Added combined inert state plus direct and ancestor provenance to observed controls and shared desktop contracts.
+- Added real-Chromium and policy regressions for direct inert controls, inert-subtree descendants, and active peer controls.
+
+### Security
+
+- Inert controls are excluded from detected-field binding, cannot inherit native-valid completion, remain manual when required, and are rejected before approved browser execution.
+- Inert metadata consists only of booleans; current values, ancestor identifiers, full HTML, credentials, and session material remain excluded.
+
 ## [0.43.0-alpha.1] - Unreleased
 
 ### Added

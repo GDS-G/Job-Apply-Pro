@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Inherited Disabled State Guard v0.43.0-alpha.1"),
+      screen.getByText("Inert Control Guard v0.44.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

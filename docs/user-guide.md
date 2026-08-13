@@ -173,6 +173,8 @@ If a control or its containing form declares `aria-busy=true`, Job Apply Pro tre
 
 Controls disabled by an ancestor `<fieldset disabled>` are treated as natively disabled even when the control itself has no `disabled` attribute. The standard first-legend exception remains enabled. Capture again after the provider enables the section.
 
+Controls inside an HTML `inert` subtree remain visible for review but are not offered for binding, cannot show `VALID ON PAGE`, and cannot run through approved execution. Capture again after the provider makes the section interactive.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

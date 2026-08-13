@@ -147,6 +147,16 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <label>Direct disabled <input name="direct_disabled" disabled></label>
                 </body>
             """,
+            "/inert-controls": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Inert controls</h1>
+                  <section inert>
+                    <label>Inherited inert <input name="inherited_inert" required></label>
+                  </section>
+                  <input name="direct_inert" aria-label="Direct inert" inert>
+                  <label>Active field <input name="active_field"></label>
+                </body>
+            """,
             "/readonly-controls": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Readonly controls</h1>
@@ -695,6 +705,42 @@ def test_observation_captures_inherited_native_disabled_state(
             assert not legend.disabled
             assert not legend.native_disabled
             assert not legend.inherited_disabled
+    finally:
+        worker.close()
+
+
+def test_observation_captures_direct_and_inherited_inert_state(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/inert-controls"),
+                    profile_name="inert-controls",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+
+            inherited = controls["inherited_inert"]
+            assert inherited.inert
+            assert not inherited.direct_inert
+            assert inherited.inherited_inert
+
+            direct = controls["direct_inert"]
+            assert direct.inert
+            assert direct.direct_inert
+            assert not direct.inherited_inert
+
+            active = controls["active_field"]
+            assert not active.inert
+            assert not active.direct_inert
+            assert not active.inherited_inert
     finally:
         worker.close()
 
