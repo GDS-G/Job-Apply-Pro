@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.40.0-alpha.1] - Unreleased
+
+### Added
+
+- Added privacy-bounded `accessible_invalid` observation metadata derived from `aria-invalid`.
+- Added real-Chromium and coverage regressions for non-false and case-insensitive false accessible validation state.
+
+### Security
+
+- A control cannot become `SATISFIED_ON_PAGE` while the portal declares it accessibility-invalid, even if native HTML validity passes.
+- Current values and validation messages remain excluded; accessible invalidity does not grant action or imply provider acceptance.
+
 ## [0.39.0-alpha.1] - Unreleased
 
 ### Added

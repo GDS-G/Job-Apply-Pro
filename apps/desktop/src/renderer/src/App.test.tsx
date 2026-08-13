@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Accessible Control Labels v0.39.0-alpha.1"),
+      screen.getByText("Accessible Invalid State Guard v0.40.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

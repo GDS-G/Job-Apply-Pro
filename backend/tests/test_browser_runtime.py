@@ -148,6 +148,17 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </fieldset>
                 </body>
             """,
+            "/accessible-invalid": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Accessible validation</h1>
+                  <label>Provider rejected
+                    <input name="provider_rejected" required value="present" aria-invalid="grammar">
+                  </label>
+                  <label>Provider accepted
+                    <input name="provider_accepted" required value="present" aria-invalid="FALSE">
+                  </label>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -653,6 +664,35 @@ def test_observation_resolves_aria_labelledby_to_exact_locators(
                 value="radio",
                 name="Day shift",
             )
+    finally:
+        worker.close()
+
+
+def test_observation_captures_accessible_invalid_without_value(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/accessible-invalid"),
+                    profile_name="accessible-invalid-state",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+            rejected = controls["provider_rejected"]
+            assert rejected.constraint_satisfied
+            assert rejected.accessible_invalid
+            assert "present" not in rejected.model_dump_json()
+
+            accepted = controls["provider_accepted"]
+            assert accepted.constraint_satisfied
+            assert not accepted.accessible_invalid
     finally:
         worker.close()
 

@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Accessible Control Labels v0.39.0-alpha.1</strong>
+              <strong>Accessible Invalid State Guard v0.40.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

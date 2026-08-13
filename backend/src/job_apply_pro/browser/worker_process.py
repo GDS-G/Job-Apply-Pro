@@ -452,7 +452,10 @@ class BrowserWorker:
                 visible: true,
                 willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,
                 constraintSatisfied: 'willValidate' in el && el.willValidate && el.validity
-                  ? Boolean(el.validity.valid) : false
+                  ? Boolean(el.validity.valid) : false,
+                accessibleInvalid:
+                  (el.getAttribute('aria-invalid') || '').toLowerCase() !== '' &&
+                  (el.getAttribute('aria-invalid') || '').toLowerCase() !== 'false'
               };
             }).filter((item, index, items) =>
               item.type !== 'radio' ||

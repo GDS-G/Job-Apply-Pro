@@ -168,6 +168,7 @@ export interface BrowserObservedControl {
   visible: boolean;
   will_validate: boolean;
   constraint_satisfied: boolean;
+  accessible_invalid: boolean;
   legal_attestation: boolean;
   character_limit?: number | null;
   minimum_number?: number | null;
