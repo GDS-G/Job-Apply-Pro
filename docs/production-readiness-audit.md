@@ -359,6 +359,16 @@ Source validation passed all 142 backend tests at 83.32% coverage and all 16 des
 
 The unsigned validation installer `Job-Apply-Pro-0.38.0-alpha.1-x64.exe` is 169,750,516 bytes, SHA-256 `89C9D860DC8CC4D6FBD5F0BAB51F1B72AE1BA0BF3FB0656AACD2B9F675710B88`. The bundled backend executable is 18,506,205 bytes, SHA-256 `73A580859645304574B9E37A6B9C99D8FCDE254DC0A5C0D272F3C78DB772ADD9`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `B4B41A5F580BD160DBBAEA0A2B95D99BDAD646908F755C9048A458D6BF3DE2D8`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
 
+### Accessible Control Labels source validation
+
+`Accessible Control Labels v0.39.0-alpha.1` resolves bounded `aria-labelledby` text, records label provenance, and emits exact role-and-accessible-name locators for ARIA-labelled native controls and radio options. Native HTML labels retain exact LABEL locators. Required-field coverage and approved radio execution accept only these explicit exact forms. ADR-0048 records the decision.
+
+No database migration is required. `label_source` and exact semantic locators travel through existing bounded observation JSON and shared contracts.
+
+Source validation passed all 143 backend tests at 83.34% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, Windows packaging, and frozen-backend smoke.
+
+The unsigned validation installer `Job-Apply-Pro-0.39.0-alpha.1-x64.exe` is 169,751,165 bytes, SHA-256 `4DE63831C7A4755A20CBFBCD149E7C02703B3CFE0595BF5EB6DACFF046AAFF22`. The bundled backend executable is 18,506,764 bytes, SHA-256 `1FDC97D518D19492932A8AF6EA8451360BEEA7949D386B5349B377B8C320B1D1`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `38B2FBB6EC65E762914C504C8E9EDE7279FB62560A6351C5E622FC98DF45D803`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

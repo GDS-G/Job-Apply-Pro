@@ -132,6 +132,22 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <label>Enabled field <input name="enabled_field"></label>
                 </body>
             """,
+            "/accessible-labels": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Accessible labels</h1>
+                  <span id="work-prefix">Preferred</span>
+                  <span id="work-suffix">work location</span>
+                  <input name="work_location"
+                    aria-labelledby="work-prefix work-suffix" required>
+                  <fieldset>
+                    <legend>Schedule</legend>
+                    <span id="day-label">Day shift</span>
+                    <label><input name="shift" type="radio" value="day"
+                      aria-labelledby="day-label"></label>
+                    <label><input name="shift" type="radio" value="night">Night shift</label>
+                  </fieldset>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -586,6 +602,57 @@ def test_observation_distinguishes_native_and_accessible_disabled_controls(
             assert not enabled.disabled
             assert not enabled.native_disabled
             assert not enabled.accessible_disabled
+    finally:
+        worker.close()
+
+
+def test_observation_resolves_aria_labelledby_to_exact_locators(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/accessible-labels"),
+                    profile_name="accessible-control-labels",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+            location = controls["work_location"]
+            assert location.label == "Preferred work location"
+            assert location.label_source == "ARIA_LABELLEDBY"
+            assert location.locator == SemanticLocator(
+                strategy=LocatorStrategy.ROLE,
+                value="textbox",
+                name="Preferred work location",
+            )
+            assert service.execute_action(
+                started.id,
+                BrowserAction(
+                    kind=BrowserActionKind.FILL,
+                    locator=location.locator,
+                    value="Remote",
+                    intended_result="Set accessible work location",
+                    verification=BrowserVerification(
+                        kind=VerificationKind.VALUE_EQUALS,
+                        locator=location.locator,
+                        value="Remote",
+                    ),
+                ),
+            ).verified
+
+            shift = controls["shift"]
+            assert [option.label for option in shift.options] == ["Day shift", "Night shift"]
+            assert shift.options[0].locator == SemanticLocator(
+                strategy=LocatorStrategy.ROLE,
+                value="radio",
+                name="Day shift",
+            )
     finally:
         worker.close()
 

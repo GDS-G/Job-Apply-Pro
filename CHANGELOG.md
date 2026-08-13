@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.39.0-alpha.1] - Unreleased
+
+### Added
+
+- Added bounded `aria-labelledby` name resolution and `label_source` provenance for observed controls.
+- Added exact role-and-accessible-name locators for ARIA-labelled native controls and radio options.
+- Added real-Chromium execution coverage for a multi-node accessible name and ARIA-labelled radio option.
+
+### Security
+
+- Accessible names are derived only from referenced text, normalized, and bounded; full HTML and current values remain excluded.
+- Approved radio execution accepts only exact visible-label or exact role-and-accessible-name locators and remains postcondition verified.
+
 ## [0.38.0-alpha.1] - Unreleased
 
 ### Added

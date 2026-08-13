@@ -170,6 +170,7 @@ class BrowserObservedControl(BaseModel):
     field_name: str = Field(default="", max_length=300)
     group_label: str = Field(default="", max_length=300)
     label: str = Field(default="", max_length=300)
+    label_source: str = Field(default="NONE", max_length=40)
     text: str = Field(default="", max_length=200)
     href: str = Field(default="", max_length=2_000)
     canonical_field: str = Field(default="", max_length=160)
@@ -207,6 +208,7 @@ class BrowserObservedControl(BaseModel):
         field_name = str(item.get("field_name", item.get("fieldName", "")))[:300]
         element_id = str(item.get("element_id", item.get("id", "")))[:300]
         group_label = str(item.get("group_label", item.get("groupLabel", "")))[:300]
+        label_source = str(item.get("label_source", item.get("labelSource", "NONE")))[:40]
         canonical_field = str(item.get("canonical_field", item.get("canonicalField", "")))[:160]
         raw_options = item.get("options", [])
         options = []
@@ -258,7 +260,24 @@ class BrowserObservedControl(BaseModel):
             item.get("name", "")
         ).strip()[:300]
         locator: dict[str, object] | None = None
-        if semantic_name:
+        role_by_kind = {
+            BrowserControlKind.TEXT: "textbox",
+            BrowserControlKind.TEXT_AREA: "textbox",
+            BrowserControlKind.EMAIL: "textbox",
+            BrowserControlKind.TELEPHONE: "textbox",
+            BrowserControlKind.NUMBER: "spinbutton",
+            BrowserControlKind.DATE: "textbox",
+            BrowserControlKind.SELECT: "combobox",
+            BrowserControlKind.CHECKBOX: "checkbox",
+        }
+        if semantic_name and label_source == "ARIA_LABELLEDBY" and kind in role_by_kind:
+            locator = {
+                "strategy": LocatorStrategy.ROLE,
+                "value": role_by_kind[kind],
+                "name": semantic_name,
+                "exact": True,
+            }
+        elif semantic_name:
             locator = {
                 "strategy": LocatorStrategy.LABEL,
                 "value": semantic_name,
@@ -330,6 +349,7 @@ class BrowserObservedControl(BaseModel):
             "field_name": field_name,
             "group_label": group_label,
             "label": label,
+            "label_source": label_source,
             "text": text,
             "href": href,
             "canonical_field": canonical_field,

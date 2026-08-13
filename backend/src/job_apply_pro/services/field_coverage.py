@@ -171,11 +171,19 @@ class ApplicationFieldCoverageService:
             control.kind is BrowserControlKind.RADIO_GROUP
             and any(
                 option.locator
-                != SemanticLocator(
-                    strategy=LocatorStrategy.LABEL,
-                    value=option.label,
-                    exact=True,
-                )
+                not in {
+                    SemanticLocator(
+                        strategy=LocatorStrategy.LABEL,
+                        value=option.label,
+                        exact=True,
+                    ),
+                    SemanticLocator(
+                        strategy=LocatorStrategy.ROLE,
+                        value="radio",
+                        name=option.label,
+                        exact=True,
+                    ),
+                }
                 for option in control.options
             )
         ):

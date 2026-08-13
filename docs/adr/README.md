@@ -49,3 +49,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0045: Positive visibility evidence for observed controls](0045-positive-visibility-evidence-for-observed-controls.md)
 - [ADR-0046: Accessible required-field provenance](0046-accessible-required-field-provenance.md)
 - [ADR-0047: Accessible disabled-control provenance](0047-accessible-disabled-control-provenance.md)
+- [ADR-0048: Exact accessible-name control locators](0048-exact-accessible-name-control-locators.md)
