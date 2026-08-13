@@ -132,6 +132,18 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <label>Enabled field <input name="enabled_field"></label>
                 </body>
             """,
+            "/readonly-controls": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Readonly controls</h1>
+                  <label>Native readonly
+                    <input name="native_readonly" readonly value="provider managed">
+                  </label>
+                  <label>Accessible readonly
+                    <input name="accessible_readonly" aria-readonly="TRUE">
+                  </label>
+                  <label>Editable field <input name="editable_field"></label>
+                </body>
+            """,
             "/accessible-labels": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Accessible labels</h1>
@@ -613,6 +625,42 @@ def test_observation_distinguishes_native_and_accessible_disabled_controls(
             assert not enabled.disabled
             assert not enabled.native_disabled
             assert not enabled.accessible_disabled
+    finally:
+        worker.close()
+
+
+def test_observation_distinguishes_native_and_accessible_readonly_controls(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/readonly-controls"),
+                    profile_name="readonly-controls",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+            native = controls["native_readonly"]
+            assert native.read_only
+            assert native.native_read_only
+            assert not native.accessible_read_only
+            assert "provider managed" not in native.model_dump_json()
+
+            accessible = controls["accessible_readonly"]
+            assert accessible.read_only
+            assert not accessible.native_read_only
+            assert accessible.accessible_read_only
+
+            editable = controls["editable_field"]
+            assert not editable.read_only
+            assert not editable.native_read_only
+            assert not editable.accessible_read_only
     finally:
         worker.close()
 

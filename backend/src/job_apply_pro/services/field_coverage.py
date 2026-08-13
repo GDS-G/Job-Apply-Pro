@@ -148,7 +148,12 @@ class ApplicationFieldCoverageService:
             and binding.portal == run.portal.value
             and binding.control_kind == kind
         ]
-        if control.kind not in _EXECUTABLE_KINDS or control.legal_attestation or control.disabled:
+        if (
+            control.kind not in _EXECUTABLE_KINDS
+            or control.legal_attestation
+            or control.disabled
+            or control.read_only
+        ):
             return self._item(
                 control,
                 label,

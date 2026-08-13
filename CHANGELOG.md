@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.41.0-alpha.1] - Unreleased
+
+### Added
+
+- Added combined readonly state plus native and accessibility provenance to observed controls and shared desktop contracts.
+- Added real-Chromium, coverage, and approved-execution regressions for native `readonly`, case-insensitive `aria-readonly=true`, and editable controls.
+
+### Security
+
+- Readonly controls are excluded from detected-field binding, remain manual when required, and are rejected before approved browser execution.
+- Readonly metadata consists only of booleans; current values, full HTML, credentials, and session material remain excluded.
+
 ## [0.40.0-alpha.1] - Unreleased
 
 ### Added
