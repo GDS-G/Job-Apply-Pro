@@ -168,6 +168,9 @@ export interface BrowserObservedControl {
   read_only: boolean;
   native_read_only: boolean;
   accessible_read_only: boolean;
+  busy: boolean;
+  control_busy: boolean;
+  form_busy: boolean;
   visible: boolean;
   will_validate: boolean;
   constraint_satisfied: boolean;

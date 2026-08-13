@@ -1540,7 +1540,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Readonly Control Guard v0.41.0-alpha.1</strong>
+              <strong>Busy State Guard v0.42.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -2517,7 +2517,8 @@ export function App() {
                           !["BUTTON", "LINK"].includes(control.kind) &&
                           control.visible &&
                           !control.disabled &&
-                          !control.read_only,
+                          !control.read_only &&
+                          !control.busy,
                       )
                       .map((control) => (
                         <option

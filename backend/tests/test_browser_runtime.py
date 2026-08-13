@@ -144,6 +144,24 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <label>Editable field <input name="editable_field"></label>
                 </body>
             """,
+            "/busy-controls": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Pending validation</h1>
+                  <form aria-busy="TRUE">
+                    <label>Form pending
+                      <input name="form_pending" required value="present">
+                    </label>
+                  </form>
+                  <form>
+                    <label>Control pending
+                      <input name="control_pending" required value="present" aria-busy="true">
+                    </label>
+                    <label>Ready field
+                      <input name="ready_field" required value="present" aria-busy="FALSE">
+                    </label>
+                  </form>
+                </body>
+            """,
             "/accessible-labels": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Accessible labels</h1>
@@ -661,6 +679,44 @@ def test_observation_distinguishes_native_and_accessible_readonly_controls(
             assert not editable.read_only
             assert not editable.native_read_only
             assert not editable.accessible_read_only
+    finally:
+        worker.close()
+
+
+def test_observation_captures_control_and_form_busy_provenance(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/busy-controls"),
+                    profile_name="busy-controls",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+
+            form_pending = controls["form_pending"]
+            assert form_pending.busy
+            assert not form_pending.control_busy
+            assert form_pending.form_busy
+            assert form_pending.constraint_satisfied
+            assert "present" not in form_pending.model_dump_json()
+
+            control_pending = controls["control_pending"]
+            assert control_pending.busy
+            assert control_pending.control_busy
+            assert not control_pending.form_busy
+
+            ready = controls["ready_field"]
+            assert not ready.busy
+            assert not ready.control_busy
+            assert not ready.form_busy
     finally:
         worker.close()
 

@@ -153,6 +153,7 @@ class ApplicationFieldCoverageService:
             or control.legal_attestation
             or control.disabled
             or control.read_only
+            or control.busy
         ):
             return self._item(
                 control,
