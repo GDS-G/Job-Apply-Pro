@@ -169,6 +169,8 @@ If a portal marks a control `aria-invalid`, that field cannot show `VALID ON PAG
 
 Native `readonly` and `aria-readonly=true` controls remain visible in the current observation but are not offered for detected-field binding. When required, they remain manual in coverage and cannot run through approved field execution. Review provider-managed content directly and capture again only after the portal makes the control editable.
 
+If a control or its containing form declares `aria-busy=true`, Job Apply Pro treats the field as pending. It is not offered for binding, cannot show `VALID ON PAGE`, and cannot run through approved execution. Wait for the provider to finish validation and capture the page again.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

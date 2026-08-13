@@ -454,6 +454,12 @@ class BrowserWorker:
                 nativeReadOnly: el.hasAttribute('readonly'),
                 accessibleReadOnly:
                   (el.getAttribute('aria-readonly') || '').toLowerCase() === 'true',
+                busy: (el.getAttribute('aria-busy') || '').toLowerCase() === 'true' ||
+                  (el.closest('form')?.getAttribute('aria-busy') || '').toLowerCase() === 'true',
+                controlBusy:
+                  (el.getAttribute('aria-busy') || '').toLowerCase() === 'true',
+                formBusy:
+                  (el.closest('form')?.getAttribute('aria-busy') || '').toLowerCase() === 'true',
                 visible: true,
                 willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,
                 constraintSatisfied: 'willValidate' in el && el.willValidate && el.validity

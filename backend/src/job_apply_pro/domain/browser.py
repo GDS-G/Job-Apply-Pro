@@ -185,6 +185,9 @@ class BrowserObservedControl(BaseModel):
     read_only: bool = False
     native_read_only: bool = False
     accessible_read_only: bool = False
+    busy: bool = False
+    control_busy: bool = False
+    form_busy: bool = False
     visible: bool = False
     will_validate: bool = False
     constraint_satisfied: bool = False
@@ -348,6 +351,8 @@ class BrowserObservedControl(BaseModel):
         accessible_read_only = bool(
             item.get("accessible_read_only", item.get("accessibleReadOnly"))
         )
+        control_busy = bool(item.get("control_busy", item.get("controlBusy")))
+        form_busy = bool(item.get("form_busy", item.get("formBusy")))
         return {
             "index": index,
             "control_key": control_key,
@@ -376,6 +381,9 @@ class BrowserObservedControl(BaseModel):
             or accessible_read_only,
             "native_read_only": native_read_only,
             "accessible_read_only": accessible_read_only,
+            "busy": bool(item.get("busy")) or control_busy or form_busy,
+            "control_busy": control_busy,
+            "form_busy": form_busy,
             "visible": bool(item.get("visible")),
             "will_validate": bool(item.get("will_validate", item.get("willValidate"))),
             "constraint_satisfied": bool(

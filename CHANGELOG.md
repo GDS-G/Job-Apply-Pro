@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.42.0-alpha.1] - Unreleased
+
+### Added
+
+- Added combined busy state plus control and containing-form provenance to observed controls and shared desktop contracts.
+- Added real-Chromium, coverage, and approved-execution regressions for case-insensitive `aria-busy=true` and false states.
+
+### Security
+
+- Busy controls are excluded from detected-field binding, cannot inherit native-valid completion, remain manual when required, and are rejected before approved browser execution.
+- Busy metadata consists only of booleans; current values, raw attributes, full HTML, credentials, and session material remain excluded.
+
 ## [0.41.0-alpha.1] - Unreleased
 
 ### Added

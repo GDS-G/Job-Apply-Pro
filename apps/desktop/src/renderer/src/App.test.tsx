@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Readonly Control Guard v0.41.0-alpha.1"),
+      screen.getByText("Busy State Guard v0.42.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
