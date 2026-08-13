@@ -349,6 +349,16 @@ Source validation passed all 139 backend tests at 83.31% coverage and all 16 des
 
 The unsigned validation installer `Job-Apply-Pro-0.37.0-alpha.1-x64.exe` is 169,750,112 bytes, SHA-256 `C5C94C11E46C202C3908A87AF4913FBD3F90D509EF331E4CAB449A05B0B225BE`. The bundled backend executable is 18,506,112 bytes, SHA-256 `66545156752FE99727BDF9D39D97B47086D57370CBFBC1FA08013A0A79C99C40`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `3110A8025DA4F09E001B3BA2042A6AAD482CC5E3178ECB8F9F649AC69D723591`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
 
+### Accessible Disabled Control Guard source validation
+
+`Accessible Disabled Control Guard v0.38.0-alpha.1` separates combined disabledness into `native_disabled` and `accessible_disabled` provenance. Case-insensitive `aria-disabled=true` becomes part of the fail-closed combined signal, excluding a control from binding selection, making a required control manual in coverage, and blocking approved execution even when the DOM would technically permit a write. ADR-0047 records the decision.
+
+No database migration is required. Existing disabled observations remain compatible, and the new booleans travel through bounded observation JSON and shared contracts.
+
+Source validation passed all 142 backend tests at 83.32% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, Windows packaging, and frozen-backend smoke.
+
+The unsigned validation installer `Job-Apply-Pro-0.38.0-alpha.1-x64.exe` is 169,750,516 bytes, SHA-256 `89C9D860DC8CC4D6FBD5F0BAB51F1B72AE1BA0BF3FB0656AACD2B9F675710B88`. The bundled backend executable is 18,506,205 bytes, SHA-256 `73A580859645304574B9E37A6B9C99D8FCDE254DC0A5C0D272F3C78DB772ADD9`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `B4B41A5F580BD160DBBAEA0A2B95D99BDAD646908F755C9048A458D6BF3DE2D8`. All report `NotSigned`, as expected without owner signing credentials. These are local validation artifacts, not a production release. Protected GitHub evidence is recorded after integration.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

@@ -122,6 +122,16 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <label>Optional field <input name="optional_field"></label>
                 </body>
             """,
+            "/accessible-disabled": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Accessibility-aware controls</h1>
+                  <label>Native disabled <input name="native_disabled" disabled></label>
+                  <label>Accessible disabled
+                    <input name="accessible_disabled" aria-disabled="TRUE">
+                  </label>
+                  <label>Enabled field <input name="enabled_field"></label>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -541,6 +551,41 @@ def test_observation_distinguishes_native_and_accessible_required_fields(
             assert not optional.required
             assert not optional.native_required
             assert not optional.accessible_required
+    finally:
+        worker.close()
+
+
+def test_observation_distinguishes_native_and_accessible_disabled_controls(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/accessible-disabled"),
+                    profile_name="accessible-disabled-controls",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+            native = controls["native_disabled"]
+            assert native.disabled
+            assert native.native_disabled
+            assert not native.accessible_disabled
+
+            accessible = controls["accessible_disabled"]
+            assert accessible.disabled
+            assert not accessible.native_disabled
+            assert accessible.accessible_disabled
+
+            enabled = controls["enabled_field"]
+            assert not enabled.disabled
+            assert not enabled.native_disabled
+            assert not enabled.accessible_disabled
     finally:
         worker.close()
 

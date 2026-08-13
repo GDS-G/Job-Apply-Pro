@@ -2,6 +2,22 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.38.0-alpha.1] - Unreleased
+
+### Added
+
+- Added separate `native_disabled` and `accessible_disabled` evidence to privacy-bounded observed controls and shared desktop contracts.
+- Added real-Chromium and service regressions for native-disabled, case-insensitive `aria-disabled=true`, and enabled controls.
+
+### Changed
+
+- The combined `disabled` signal now includes either native HTML or accessibility-declared disabled state.
+
+### Security
+
+- Accessibility-disabled controls are excluded from binding selection, remain manual in coverage, and are rejected before approved browser execution.
+- Current values, validation messages, full HTML, and credentials remain excluded from observation.
+
 ## [0.37.0-alpha.1] - Unreleased
 
 ### Added

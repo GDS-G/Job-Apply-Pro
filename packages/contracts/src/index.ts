@@ -162,6 +162,8 @@ export interface BrowserObservedControl {
   native_required: boolean;
   accessible_required: boolean;
   disabled: boolean;
+  native_disabled: boolean;
+  accessible_disabled: boolean;
   visible: boolean;
   will_validate: boolean;
   constraint_satisfied: boolean;

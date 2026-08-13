@@ -430,7 +430,11 @@ class BrowserWorker:
                 nativeRequired: el.hasAttribute('required'),
                 accessibleRequired:
                   (el.getAttribute('aria-required') || '').toLowerCase() === 'true',
-                disabled: el.hasAttribute('disabled'),
+                disabled: el.hasAttribute('disabled') ||
+                  (el.getAttribute('aria-disabled') || '').toLowerCase() === 'true',
+                nativeDisabled: el.hasAttribute('disabled'),
+                accessibleDisabled:
+                  (el.getAttribute('aria-disabled') || '').toLowerCase() === 'true',
                 visible: true,
                 willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,
                 constraintSatisfied: 'willValidate' in el && el.willValidate && el.validity
