@@ -238,6 +238,10 @@ class ApplicationFieldExecutionService:
             raise FieldExecutionPolicyError("Inert fields cannot be executed")
         if control.accessibility_hidden:
             raise FieldExecutionPolicyError("Accessibility-hidden fields cannot be executed")
+        if control.repeat_count > 1:
+            raise FieldExecutionPolicyError(
+                "Repeated fields require a provider-specific unique locator"
+            )
         if not control.visible:
             raise FieldExecutionPolicyError("Hidden fields cannot be executed")
         if control.legal_attestation:

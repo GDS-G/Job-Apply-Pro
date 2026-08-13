@@ -429,6 +429,14 @@ Runtime source commit `10ee78adda70edb39eac2722213085ad85ec8acd` passed exact-he
 
 No database migration is required. Existing observations remain compatible, and the three booleans travel through bounded observation JSON and shared contracts. Validation and packaging evidence will be recorded after the complete release candidate passes.
 
+### Structured Form Topology source validation
+
+`Structured Form Topology v0.46.0-alpha.1` records bounded semantic section paths, repeated-field group/index/count, conditional-region and visible-trigger context, and ARIA searchable/listbox widget state and visible options. Native and ARIA custom choice controls are distinguished. Repeated fields remain manual unless a provider-specific adapter supplies a unique reviewed locator; custom widgets remain manual until their transitions and exact postconditions are independently validated. ADR-0055 records the decision.
+
+No database migration is required. Existing observations remain compatible through conservative defaults, and the new metadata travels through bounded observation JSON and shared contracts. Values, raw markup, and browser profile data remain excluded.
+
+Runtime source commit `e47959aff092942f5257d34f0fb7491b9b279c6b` passed all 163 backend tests at 83.41% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.46.0-alpha.1-x64.exe` is 169,753,793 bytes, SHA-256 `7D140A83C841287F926A624D95C9E5EA58EF4EE6FBFB225BA82E58D027D73523`. The bundled backend is 18,509,273 bytes, SHA-256 `8F648B27F5C893A037AEDFE61607C750969B11AB2BEDC7FC725D6BDCD6C637A3`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `AA99C810D293DA8E5865B20FA3AC2843E26F1D4365DE68EABDDDA21D0C646A9E`. All report `NotSigned`, as expected without owner signing credentials. Testing uses local sanitized fixtures only and does not consume portal-account passwords.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

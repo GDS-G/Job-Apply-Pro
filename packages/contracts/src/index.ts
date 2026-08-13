@@ -157,6 +157,16 @@ export interface BrowserObservedControl {
   text: string;
   href: string;
   canonical_field: string;
+  section_path: string[];
+  repeat_group: string;
+  repeat_index?: number | null;
+  repeat_count: number;
+  conditional_region: string;
+  conditional_trigger: string;
+  widget_popup: string;
+  widget_expanded?: boolean | null;
+  widget_multiselectable: boolean;
+  widget_searchable: boolean;
   accept: string;
   checked: boolean;
   required: boolean;
