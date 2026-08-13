@@ -4,7 +4,7 @@
 
 This audit maps the current repository to the authoritative **Job Apply Pro Documentation** Google Doc. It supplements the phase-oriented release notes; it does not narrow the long-term product scope. Explicit current user direction, accepted ADRs, and versioned contracts remain higher priority than older implementation notes when they conflict.
 
-The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Releases through `v0.43.0-alpha.1` established the secure local runtime, supervised portal boundary, evidence-governed documents and answers, provider synchronization, reviewed typed field execution, visibility/constraint-aware coverage, accessible state provenance, exact accessible-name locators, invalid/readonly/busy guards, and native inherited-disabled semantics. Inert Control Guard `v0.44.0-alpha.1` adds direct and ancestor inert provenance to the same fail-closed readiness path. The matrix below remains authoritative for unfinished scope.
+The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical slices existed in source form. It did **not** prove that every long-term functional requirement, named live integration, target operating system, or release-acceptance gate was complete. Releases through `v0.44.0-alpha.1` established the secure local runtime, supervised portal boundary, evidence-governed documents and answers, provider synchronization, reviewed typed field execution, visibility/constraint-aware coverage, accessible state provenance, exact accessible-name locators, invalid/readonly/busy/inert guards, and native inherited-disabled semantics. Accessibility Hidden-State Guard `v0.45.0-alpha.1` adds direct and ancestor accessibility-hidden provenance to the same fail-closed readiness path. The matrix below remains authoritative for unfinished scope.
 
 ## Status meanings
 
@@ -52,7 +52,7 @@ These controls are source capability, not provider permission. `production_enabl
 
 ## Next source-controlled implementation order
 
-1. Use the v0.44 visibility-, accessibility-, constraint-, native/inherited-disabled-, invalid-, readonly-, busy-, and inert-state-aware required-field review to surface page-valid, missing, stale, ambiguous, manual-only, and already-verified visible controls before submission; add only individually reviewed execution capabilities with exact postconditions.
+1. Use the v0.45 visibility-, accessibility-, constraint-, native/inherited-disabled-, invalid-, readonly-, busy-, inert-, and accessibility-hidden-state-aware required-field review to surface page-valid, missing, stale, ambiguous, manual-only, and already-verified visible controls before submission; add only individually reviewed execution capabilities with exact postconditions.
 2. Expand sanitized real-world document/layout/template evaluations and add advanced visual parsing only through the governed AI boundary, while preserving evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval.
 3. Add portal-specific custom-widget mappings only after explicit widget-level locator contracts and authorized supervised evidence with terms, limits, ownership, and stop conditions.
 4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.

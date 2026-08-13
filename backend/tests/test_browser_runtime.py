@@ -157,6 +157,16 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   <label>Active field <input name="active_field"></label>
                 </body>
             """,
+            "/accessibility-hidden-controls": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Accessibility hidden controls</h1>
+                  <section aria-hidden="TRUE">
+                    <label>Inherited hidden <input name="inherited_hidden" required></label>
+                  </section>
+                  <input name="direct_hidden" aria-label="Direct hidden" aria-hidden="true">
+                  <input name="explicit_visible" aria-label="Explicit visible" aria-hidden="false">
+                </body>
+            """,
             "/readonly-controls": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Readonly controls</h1>
@@ -741,6 +751,42 @@ def test_observation_captures_direct_and_inherited_inert_state(
             assert not active.inert
             assert not active.direct_inert
             assert not active.inherited_inert
+    finally:
+        worker.close()
+
+
+def test_observation_captures_direct_and_inherited_accessibility_hidden_state(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/accessibility-hidden-controls"),
+                    profile_name="accessibility-hidden-controls",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.field_name: control for control in started.observation.controls}
+
+            inherited = controls["inherited_hidden"]
+            assert inherited.accessibility_hidden
+            assert not inherited.direct_accessibility_hidden
+            assert inherited.inherited_accessibility_hidden
+
+            direct = controls["direct_hidden"]
+            assert direct.accessibility_hidden
+            assert direct.direct_accessibility_hidden
+            assert not direct.inherited_accessibility_hidden
+
+            visible = controls["explicit_visible"]
+            assert not visible.accessibility_hidden
+            assert not visible.direct_accessibility_hidden
+            assert not visible.inherited_accessibility_hidden
     finally:
         worker.close()
 

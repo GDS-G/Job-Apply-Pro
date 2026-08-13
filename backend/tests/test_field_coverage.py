@@ -397,6 +397,22 @@ def test_inert_required_control_remains_manual_despite_native_validity() -> None
     assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
 
 
+def test_accessibility_hidden_required_control_remains_manual_despite_native_validity() -> None:
+    control = _control(
+        "accessibility-hidden-control",
+        will_validate=True,
+        constraint_satisfied=True,
+        accessibility_hidden=False,
+        direct_accessibility_hidden=False,
+        inherited_accessibility_hidden=True,
+    )
+    review = _service([control]).review("run-1", "application-1")
+
+    assert control.accessibility_hidden
+    assert review.satisfied_on_page_count == 0
+    assert review.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
+
+
 def test_accessibly_invalid_control_does_not_inherit_native_validity() -> None:
     control = _control(
         "provider-invalid-control",

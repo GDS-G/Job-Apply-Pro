@@ -175,6 +175,9 @@ export interface BrowserObservedControl {
   inert: boolean;
   direct_inert: boolean;
   inherited_inert: boolean;
+  accessibility_hidden: boolean;
+  direct_accessibility_hidden: boolean;
+  inherited_accessibility_hidden: boolean;
   visible: boolean;
   will_validate: boolean;
   constraint_satisfied: boolean;

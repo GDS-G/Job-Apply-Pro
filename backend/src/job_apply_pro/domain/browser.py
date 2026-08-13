@@ -192,6 +192,9 @@ class BrowserObservedControl(BaseModel):
     inert: bool = False
     direct_inert: bool = False
     inherited_inert: bool = False
+    accessibility_hidden: bool = False
+    direct_accessibility_hidden: bool = False
+    inherited_accessibility_hidden: bool = False
     visible: bool = False
     will_validate: bool = False
     constraint_satisfied: bool = False
@@ -360,6 +363,12 @@ class BrowserObservedControl(BaseModel):
         form_busy = bool(item.get("form_busy", item.get("formBusy")))
         direct_inert = bool(item.get("direct_inert", item.get("directInert")))
         inherited_inert = bool(item.get("inherited_inert", item.get("inheritedInert")))
+        direct_accessibility_hidden = bool(
+            item.get("direct_accessibility_hidden", item.get("directAccessibilityHidden"))
+        )
+        inherited_accessibility_hidden = bool(
+            item.get("inherited_accessibility_hidden", item.get("inheritedAccessibilityHidden"))
+        )
         return {
             "index": index,
             "control_key": control_key,
@@ -398,6 +407,13 @@ class BrowserObservedControl(BaseModel):
             "inert": bool(item.get("inert")) or direct_inert or inherited_inert,
             "direct_inert": direct_inert,
             "inherited_inert": inherited_inert,
+            "accessibility_hidden": bool(
+                item.get("accessibility_hidden", item.get("accessibilityHidden"))
+            )
+            or direct_accessibility_hidden
+            or inherited_accessibility_hidden,
+            "direct_accessibility_hidden": direct_accessibility_hidden,
+            "inherited_accessibility_hidden": inherited_accessibility_hidden,
             "visible": bool(item.get("visible")),
             "will_validate": bool(item.get("will_validate", item.get("willValidate"))),
             "constraint_satisfied": bool(

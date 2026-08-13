@@ -155,6 +155,7 @@ class ApplicationFieldCoverageService:
             or control.read_only
             or control.busy
             or control.inert
+            or control.accessibility_hidden
         ):
             return self._item(
                 control,

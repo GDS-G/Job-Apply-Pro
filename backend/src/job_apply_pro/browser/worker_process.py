@@ -464,6 +464,12 @@ class BrowserWorker:
                 inert: Boolean(el.closest('[inert]')),
                 directInert: el.hasAttribute('inert'),
                 inheritedInert: !el.hasAttribute('inert') && Boolean(el.closest('[inert]')),
+                accessibilityHidden: Boolean(el.closest('[aria-hidden="true" i]')),
+                directAccessibilityHidden:
+                  (el.getAttribute('aria-hidden') || '').toLowerCase() === 'true',
+                inheritedAccessibilityHidden:
+                  (el.getAttribute('aria-hidden') || '').toLowerCase() !== 'true' &&
+                  Boolean(el.closest('[aria-hidden="true" i]')),
                 visible: true,
                 willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,
                 constraintSatisfied: 'willValidate' in el && el.willValidate && el.validity
