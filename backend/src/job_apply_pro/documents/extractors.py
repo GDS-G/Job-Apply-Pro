@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 
 from docx import Document as DocxDocument
 from docx.table import Table
+from docx.text.paragraph import Paragraph
 from pypdf import PdfReader
 
 from job_apply_pro.domain.knowledge import DocumentExtraction, LayoutBlock
@@ -405,35 +406,92 @@ def _extract_docx(data: bytes) -> DocumentExtraction:
     except Exception as error:
         raise DocumentExtractionError("DOCX parsing failed") from error
     blocks: list[LayoutBlock] = []
-    table_index = 0
-    for item in document.iter_inner_content():
-        if isinstance(item, Table):
-            for row_index, row in enumerate(item.rows):
-                text = " | ".join(cell.text.strip() for cell in row.cells).strip(" |")
-                if text:
-                    blocks.append(
-                        LayoutBlock(
-                            index=len(blocks),
-                            row=row_index,
-                            table=table_index,
-                            kind="TABLE_ROW",
-                            style=f"table:{table_index}:row:{row_index}",
-                            text=text[:20_000],
-                        )
-                    )
-            table_index += 1
-            continue
-        text = item.text.strip()
+    warnings: list[str] = []
+    table_counter = [0]
+
+    def append_paragraph(paragraph: Paragraph) -> None:
+        text = paragraph.text.strip()
         if text:
             blocks.append(
                 LayoutBlock(
                     index=len(blocks),
                     kind="PARAGRAPH",
-                    style=item.style.name[:100] if item.style else None,
+                    style=paragraph.style.name[:100] if paragraph.style else None,
                     text=text[:20_000],
                 )
             )
-    return _bounded(blocks, "python-docx-layout/2", 1)
+        textboxes = paragraph._p.xpath(".//w:txbxContent")
+        for textbox in textboxes:
+            textbox_text = " ".join(
+                str(node.text).strip()
+                for node in textbox.iter()
+                if node.tag.endswith("}t") and node.text and node.text.strip()
+            )
+            if textbox_text:
+                blocks.append(
+                    LayoutBlock(
+                        index=len(blocks),
+                        kind="DRAWING_TEXT",
+                        style="ooxml:textbox:visual-position-unverified",
+                        text=textbox_text[:20_000],
+                    )
+                )
+                if (
+                    "DOCX floating text was recovered without reliable visual placement"
+                    not in warnings
+                ):
+                    warnings.append(
+                        "DOCX floating text was recovered without reliable visual placement"
+                    )
+        drawing_count = len(paragraph._p.xpath(".//w:drawing | .//w:pict"))
+        if drawing_count > len(textboxes) and (
+            "DOCX drawing content without recoverable text requires visual review" not in warnings
+        ):
+            warnings.append("DOCX drawing content without recoverable text requires visual review")
+
+    def append_table(table: Table, *, nested: bool = False) -> None:
+        table_index = table_counter[0]
+        table_counter[0] += 1
+        if nested and "Nested DOCX table content was flattened in document order" not in warnings:
+            warnings.append("Nested DOCX table content was flattened in document order")
+        seen_cells: set[int] = set()
+        for row_index, row in enumerate(table.rows):
+            cell_texts: list[str] = []
+            nested_tables: list[Table] = []
+            for cell in row.cells:
+                cell_identity = id(cell._tc)
+                if cell_identity in seen_cells:
+                    continue
+                seen_cells.add(cell_identity)
+                direct_text = " ".join(
+                    paragraph.text.strip()
+                    for paragraph in cell.paragraphs
+                    if paragraph.text.strip()
+                )
+                if direct_text:
+                    cell_texts.append(direct_text)
+                nested_tables.extend(cell.tables)
+            text = " | ".join(cell_texts).strip(" |")
+            if text:
+                blocks.append(
+                    LayoutBlock(
+                        index=len(blocks),
+                        row=row_index,
+                        table=table_index,
+                        kind="TABLE_ROW",
+                        style=f"table:{table_index}:row:{row_index}",
+                        text=text[:20_000],
+                    )
+                )
+            for nested_table in nested_tables:
+                append_table(nested_table, nested=True)
+
+    for item in document.iter_inner_content():
+        if isinstance(item, Table):
+            append_table(item)
+            continue
+        append_paragraph(item)
+    return _bounded(blocks, "python-docx-layout/3", 1, warnings)
 
 
 def _extract_rtf(data: bytes) -> DocumentExtraction:

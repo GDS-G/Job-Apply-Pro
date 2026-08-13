@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Governed AI Evaluation Suite build
+## Complex DOCX Layout Evidence build
 
-The active milestone is **Governed AI Evaluation Suite `v0.47.0-alpha.1`**. Sanitized evaluation cases now support nested JSON-pointer assertions, evidence-ID allowlists, non-disclosing forbidden-term checks, and up to five independent cache-bypassed repeat runs with deterministic output fingerprints. Evaluation remains a local/source quality gate and does not authorize live provider traffic.
+The active milestone is **Complex DOCX Layout Evidence `v0.48.0-alpha.1`**. DOCX ingestion now recovers bounded floating text-box content, flattens nested tables in document order, and warns when visual placement is unverified or a drawing has no recoverable text. Extracted evidence still requires human review before it can become a verified claim.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

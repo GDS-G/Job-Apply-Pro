@@ -8,6 +8,8 @@ from typing import cast
 
 import pytest
 from docx import Document as DocxDocument
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 from PIL import Image, ImageDraw
 from pypdf import PdfWriter
 from reportlab.lib.utils import ImageReader
@@ -73,7 +75,7 @@ def test_legacy_doc_conversion_uses_fixed_shell_free_command(
 
     assert media_type == "application/msword"
     assert extraction.plain_text == "Converted legacy resume"
-    assert extraction.parser == "libreoffice-doc-to-docx/1+python-docx-layout/2"
+    assert extraction.parser == "libreoffice-doc-to-docx/1+python-docx-layout/3"
     assert extraction.warnings
     assert captured[0] == str(executable.resolve())
     assert "--headless" in captured
@@ -216,7 +218,7 @@ def test_docx_preserves_paragraph_and_table_document_order() -> None:
 
     _, extraction = extract_document("mixed-layout.docx", output.getvalue())
 
-    assert extraction.parser == "python-docx-layout/2"
+    assert extraction.parser == "python-docx-layout/3"
     assert [block.text for block in extraction.blocks] == [
         "Summary",
         "Skill | Python",
@@ -224,6 +226,56 @@ def test_docx_preserves_paragraph_and_table_document_order() -> None:
     ]
     assert extraction.blocks[1].table == 0
     assert extraction.blocks[1].row == 0
+
+
+def test_docx_extracts_floating_text_and_flags_non_text_drawing() -> None:
+    output = BytesIO()
+    document = DocxDocument()
+    document.add_paragraph("Summary")
+    floating = document.add_paragraph()
+    floating._p.append(
+        parse_xml(
+            f"""<w:pict {nsdecls("w")}><w:txbxContent><w:p><w:r>
+            <w:t>Floating certification: CCNP</w:t></w:r></w:p>
+            </w:txbxContent></w:pict>"""
+        )
+    )
+    drawing = document.add_paragraph()
+    drawing._p.append(parse_xml(f"<w:drawing {nsdecls('w')} />"))
+    document.save(output)
+
+    _, extraction = extract_document("floating.docx", output.getvalue())
+
+    assert [block.text for block in extraction.blocks] == [
+        "Summary",
+        "Floating certification: CCNP",
+    ]
+    assert extraction.blocks[1].kind == "DRAWING_TEXT"
+    assert extraction.blocks[1].style == "ooxml:textbox:visual-position-unverified"
+    assert extraction.warnings == [
+        "DOCX floating text was recovered without reliable visual placement",
+        "DOCX drawing content without recoverable text requires visual review",
+    ]
+
+
+def test_docx_flattens_nested_table_without_duplicating_nested_text() -> None:
+    output = BytesIO()
+    document = DocxDocument()
+    outer = document.add_table(rows=1, cols=1)
+    outer.cell(0, 0).paragraphs[0].add_run("Experience")
+    nested = outer.cell(0, 0).add_table(rows=1, cols=2)
+    nested.cell(0, 0).text = "Employer"
+    nested.cell(0, 1).text = "Example Systems"
+    document.save(output)
+
+    _, extraction = extract_document("nested.docx", output.getvalue())
+
+    assert [block.text for block in extraction.blocks] == [
+        "Experience",
+        "Employer | Example Systems",
+    ]
+    assert [block.table for block in extraction.blocks] == [0, 1]
+    assert extraction.warnings == ["Nested DOCX table content was flattened in document order"]
 
 
 def test_ocr_rejects_unapproved_executable_name(tmp_path: Path) -> None:

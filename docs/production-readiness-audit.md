@@ -445,6 +445,14 @@ Evaluation repeats remain ordinary audited gateway invocations and preserve rout
 
 Runtime source commit `eb6a201` passed all 165 backend tests at 83.46% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.47.0-alpha.1-x64.exe` is 169,754,620 bytes, SHA-256 `F4F83467E818DC7781033F69D6E5CF4867599698A8C1F059AB423581D8EE48BF`. The bundled backend is 18,511,679 bytes, SHA-256 `4E0377949219A18F0509CB4672A85F78DE84EB57C74A472BD3BC51175ACD769C`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `452BEFD5AF753EE07BDFE1D839CB50D2DF37820D70AB868E677AF7BBB4838ACA`. All report `NotSigned`, as expected without owner signing credentials. Testing uses local sanitized fixtures only and does not consume portal-account passwords.
 
+### Complex DOCX Layout Evidence source validation
+
+`Complex DOCX Layout Evidence v0.48.0-alpha.1` advances DOCX parser provenance to version 3, recursively flattens nested tables without duplicating their text, recovers bounded OOXML text-box content as `DRAWING_TEXT`, and emits explicit warnings for unverified floating placement and drawings without recoverable text. ADR-0057 records the decision.
+
+No database migration is required. Existing extraction JSON remains valid, and downstream evidence still requires candidate claim review before application use.
+
+Runtime source commit `74fddc7c419f8fc46e0097b3cabf30e388f83928` passed all 167 backend tests at 83.50% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.48.0-alpha.1-x64.exe` is 169,757,686 bytes, SHA-256 `D081831BB4A89C0C2E6EA3913A8087EF1B66615453516C1211956F7B8225BFC8`. The bundled backend is 18,513,088 bytes, SHA-256 `555A6F235076113A120798F03F91F126BF0F36EB81D347D3ECADF44553D7BEF0`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `18F0478E982F4E6A9FC5309DB59590DDC049B4D2A3A649F875E3AE751A7C9D54`. All report `NotSigned`, as expected without owner signing credentials. Testing uses generated sanitized fixtures only and does not consume portal-account passwords.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.

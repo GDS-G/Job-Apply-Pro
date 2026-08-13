@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Governed AI Evaluation Suite v0.47.0-alpha.1"),
+      screen.getByText("Complex DOCX Layout Evidence v0.48.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
