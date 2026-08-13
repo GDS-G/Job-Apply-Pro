@@ -23,6 +23,7 @@ from job_apply_pro.domain.ai import (
     AgentRunRequest,
     AgentRunResult,
     AICacheRecord,
+    AICapability,
     AIEmbeddingRequest,
     AIEmbeddingResponse,
     AIGatewayRequest,
@@ -91,11 +92,21 @@ class AIGatewayService:
     def invoke(self, request: AIGatewayRequest) -> AIGatewayResponse:
         prompt = self._prompt(request)
         self._validate_request_tools(request, prompt)
-        routes = self._registry.routes(request.task_type)
+        routes = self._registry.routes(
+            request.task_type,
+            {AICapability.MULTIMODAL}
+            if any(part.kind in {"image_url", "media"} for part in request.input_parts)
+            else None,
+        )
         route_ids = [model.id for _, model in routes]
         started_at = datetime.now(UTC)
         started_clock = time.monotonic()
-        input_hash = self._hash(request.input_data)
+        input_hash = self._hash(
+            {
+                "input": request.input_data,
+                "parts": self._input_part_fingerprints(request.input_parts),
+            }
+        )
         attempts = 0
         last_error: Exception | None = None
         last_provider = routes[-1][0].definition.id
@@ -104,6 +115,18 @@ class AIGatewayService:
         for provider, model in routes:
             last_provider, last_model = provider.definition.id, model.id
             cache_key = self._cache_key(request, prompt, model.id)
+            prepared_input = self._authorize_input(
+                request.input_data,
+                request.classification,
+                request.external_consent,
+                provider.definition.external,
+            )
+            prepared_parts = self._authorized_parts(
+                request.input_parts,
+                request.classification,
+                request.external_consent,
+                provider.definition.external,
+            )
             if request.cache_mode == "USE":
                 cached = self._read_cache(cache_key)
                 if cached is not None:
@@ -122,18 +145,6 @@ class AIGatewayService:
                     )
                     return response
 
-            prepared_input = self._authorize_input(
-                request.input_data,
-                request.classification,
-                request.external_consent,
-                provider.definition.external,
-            )
-            prepared_parts = self._authorized_parts(
-                request.input_parts,
-                request.classification,
-                request.external_consent,
-                provider.definition.external,
-            )
             system, user = render_prompt(prompt, prepared_input)
             policy = self._registry.policy(request.task_type)
             timeout = min(request.timeout_seconds or policy.timeout_seconds, policy.timeout_seconds)
@@ -153,6 +164,7 @@ class AIGatewayService:
                             input_parts=prepared_parts,
                             tools=request.tools,
                             output_schema=request.output_schema,
+                            media_upload_consent=request.media_upload_consent,
                             timeout_seconds=timeout,
                         )
                     )
@@ -412,9 +424,28 @@ class AIGatewayService:
                 "privacy": request.classification.value,
                 "task": request.task_type.value,
                 "input": request.input_data,
+                "parts": self._input_part_fingerprints(request.input_parts),
                 "output_schema": request.output_schema,
             }
         )
+
+    @staticmethod
+    def _input_part_fingerprints(parts: list[AIInputPart]) -> list[dict[str, object]]:
+        return [
+            {
+                "kind": part.kind,
+                "mime_type": part.mime_type,
+                "display_name": part.display_name,
+                "value_hash": hashlib.sha256((part.value or "").encode()).hexdigest()
+                if part.value is not None
+                else None,
+                "data_hash": hashlib.sha256(part.data).hexdigest()
+                if part.data is not None
+                else None,
+                "data_bytes": len(part.data) if part.data is not None else 0,
+            }
+            for part in parts
+        ]
 
     def _read_cache(self, key: str) -> AIGatewayResponse | None:
         record = self._repository.get_cache(key)

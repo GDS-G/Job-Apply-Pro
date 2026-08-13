@@ -2,6 +2,20 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.50.0-alpha.1] - Unreleased
+
+### Added
+
+- Added explicitly consented JPEG, PNG, and WebP media parts with signature validation, a 5 MiB per-image limit, and a four-image request limit.
+- Added official Gemini resumable Files API upload, stateless interaction use, and immediate deletion on both success and interaction failure.
+- Added multimodal capability routing and media SHA-256/byte-count cache and invocation identity without retaining media bytes.
+
+### Security
+
+- Gemini rejects arbitrary user-supplied media URLs, non-Google upload sessions, untrusted returned file URIs, MIME mismatches, redirects, and text-only model routes.
+- External-AI consent is rechecked before encrypted cache reuse, and image transfer requires separate media-upload consent.
+- Failure to confirm immediate provider-file deletion fails the invocation; live use remains externally gated on reviewed provider terms, privacy, and retention settings.
+
 ## [0.45.0-alpha.1] - Unreleased
 
 ### Added
