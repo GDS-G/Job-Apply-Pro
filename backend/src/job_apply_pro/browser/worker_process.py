@@ -364,13 +364,30 @@ class BrowserWorker:
                 return style.visibility !== 'hidden' && style.display !== 'none' &&
                   rect.width > 0 && rect.height > 0;
               };
+              const ariaLabelledByText = el => (el.getAttribute('aria-labelledby') || '')
+                .trim().split(/\\s+/).filter(Boolean)
+                .map(id => document.getElementById(id)?.textContent || '')
+                .join(' ').trim();
+              const accessibleLabel = el => {
+                const id = el.getAttribute('id') || '';
+                const explicitLabel = id
+                  ? document.querySelector(`label[for="${CSS.escape(id)}"]`)
+                  : null;
+                const wrappingLabel = el.closest('label');
+                const labelledBy = ariaLabelledByText(el);
+                const ariaLabel = el.getAttribute('aria-label') || '';
+                const explicit = explicitLabel?.innerText || '';
+                const wrapping = wrappingLabel?.innerText || '';
+                const text = labelledBy || ariaLabel || explicit || wrapping || '';
+                const source = labelledBy ? 'ARIA_LABELLEDBY' : ariaLabel ? 'ARIA_LABEL' :
+                  explicit ? 'HTML_LABEL' : wrapping ? 'WRAPPING_LABEL' : 'NONE';
+                return { text: text.trim().replace(/\\s+/g, ' ').slice(0, 300), source };
+              };
               const visibleEls = els.filter(isVisible).slice(0, 100);
               return visibleEls.map((el, index) => {
               const id = el.getAttribute('id') || '';
-              const explicitLabel = id
-                ? document.querySelector(`label[for="${CSS.escape(id)}"]`)
-                : null;
-              const wrappingLabel = el.closest('label');
+              const labelInfo = accessibleLabel(el);
+              const label = labelInfo.text;
               const fieldset = el.closest('fieldset');
               const legend = fieldset?.querySelector(':scope > legend');
               return {
@@ -379,15 +396,11 @@ class BrowserWorker:
                 tag: el.tagName.toLowerCase(),
                 type: el.getAttribute('type') || '',
                 role: el.getAttribute('role') || '',
-                name: el.getAttribute('aria-label') || el.getAttribute('name') || '',
+                name: label || el.getAttribute('name') || '',
                 fieldName: el.getAttribute('name') || '',
                 groupLabel: (legend?.textContent || '').trim().slice(0, 300),
-                label: (
-                  el.getAttribute('aria-label') ||
-                  explicitLabel?.innerText ||
-                  wrappingLabel?.innerText ||
-                  ''
-                ).trim().slice(0, 300),
+                label,
+                labelSource: labelInfo.source,
                 text: (el.innerText || '').trim().slice(0, 200),
                 href: el.getAttribute('href') || '',
                 canonicalField: el.getAttribute('data-canonical-field') || '',
@@ -408,17 +421,18 @@ class BrowserWorker:
                       candidate.getAttribute('type') === 'radio' &&
                       candidate.getAttribute('name') === el.getAttribute('name')
                     ).slice(0, 100).map(candidate => {
-                      const candidateId = candidate.getAttribute('id') || '';
-                      const candidateLabel = candidateId
-                        ? document.querySelector(`label[for="${CSS.escape(candidateId)}"]`)
-                        : candidate.closest('label');
+                      const candidateLabel = accessibleLabel(candidate);
                       return {
                         value: 'value' in candidate ? String(candidate.value).slice(0, 500) : '',
-                        label: (candidateLabel?.textContent || '').trim().slice(0, 300),
-                        locator: (candidateLabel?.textContent || '').trim()
+                        label: candidateLabel.text,
+                        locator: candidateLabel.text
                           ? {
-                              strategy: 'LABEL',
-                              value: (candidateLabel?.textContent || '').trim().slice(0, 300),
+                              strategy: candidateLabel.source === 'ARIA_LABELLEDBY'
+                                ? 'ROLE' : 'LABEL',
+                              value: candidateLabel.source === 'ARIA_LABELLEDBY'
+                                ? 'radio' : candidateLabel.text,
+                              name: candidateLabel.source === 'ARIA_LABELLEDBY'
+                                ? candidateLabel.text : null,
                               exact: true
                             }
                           : null

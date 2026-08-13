@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "job-apply-pro-backend"
-version = "0.38.0a1"
+version = "0.39.0a1"
 description = "Local Job Apply Pro API and workflow service"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"

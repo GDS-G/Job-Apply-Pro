@@ -153,6 +153,7 @@ export interface BrowserObservedControl {
   field_name: string;
   group_label: string;
   label: string;
+  label_source: string;
   text: string;
   href: string;
   canonical_field: string;

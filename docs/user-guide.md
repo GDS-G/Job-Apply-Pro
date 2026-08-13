@@ -163,6 +163,8 @@ Fields declared with `aria-required=true` are included in the checklist even whe
 
 Controls declared with `aria-disabled=true` are treated as disabled even when the DOM would technically allow a write. They are not offered for detected-field binding, appear as manual when required, and cannot run through approved execution. Capture again after the portal enables the control.
 
+Controls labelled through `aria-labelledby` use the same normalized accessible name exposed to assistive technology. Job Apply Pro records whether a name came from ARIA or an HTML label and uses an exact role-and-name locator for the ARIA case. If referenced label text changes, the current observation or binding fingerprint changes and the field must be reviewed again.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.
