@@ -159,6 +159,8 @@ Only controls with positive visibility evidence from the latest capture appear i
 
 `VALID ON PAGE` means only that the browser's native HTML constraints currently pass for that control. Job Apply Pro does not read the current value. Review the visible value yourself because native validity does not establish truthfulness, semantic correctness, provider-side acceptance, or submission.
 
+Fields declared with `aria-required=true` are included in the checklist even when the portal omits native HTML `required`. They cannot show `VALID ON PAGE` from browser validity alone because the browser may not enforce the ARIA declaration. Resolve them through the normal reviewed binding, verified execution, or visible manual path.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

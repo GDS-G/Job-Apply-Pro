@@ -2,6 +2,23 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.37.0-alpha.1] - Unreleased
+
+### Added
+
+- Added separate `native_required` and `accessible_required` evidence to privacy-bounded observed controls and shared desktop contracts.
+- Added real-Chromium coverage for native-required, case-insensitive `aria-required=true`, and optional controls.
+
+### Changed
+
+- The combined `required` signal now includes either native HTML or accessibility-declared required state.
+- `SATISFIED_ON_PAGE` now requires native-required evidence in addition to native constraint participation and validity.
+
+### Security
+
+- ARIA-required controls cannot inherit an unrelated passing HTML validity state and disappear from the unresolved checklist.
+- Current values, validation messages, full HTML, and credentials remain excluded from observation.
+
 ## [0.36.0-alpha.1] - Unreleased
 
 ### Added
