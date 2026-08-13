@@ -444,9 +444,10 @@ class BrowserWorker:
                 nativeRequired: el.hasAttribute('required'),
                 accessibleRequired:
                   (el.getAttribute('aria-required') || '').toLowerCase() === 'true',
-                disabled: el.hasAttribute('disabled') ||
+                disabled: el.matches(':disabled') ||
                   (el.getAttribute('aria-disabled') || '').toLowerCase() === 'true',
-                nativeDisabled: el.hasAttribute('disabled'),
+                nativeDisabled: el.matches(':disabled'),
+                inheritedDisabled: !el.hasAttribute('disabled') && el.matches(':disabled'),
                 accessibleDisabled:
                   (el.getAttribute('aria-disabled') || '').toLowerCase() === 'true',
                 readOnly: el.hasAttribute('readonly') ||

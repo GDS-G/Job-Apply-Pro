@@ -2,6 +2,21 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.43.0-alpha.1] - Unreleased
+
+### Added
+
+- Added `inherited_disabled` provenance for controls disabled through native HTML fieldset semantics.
+- Added real-Chromium and policy regressions for disabled-fieldset descendants, direct disabled controls, and the first-legend exception.
+
+### Changed
+
+- Native disabled observation now uses the browser's `:disabled` semantics instead of only checking the element's own attribute.
+
+### Security
+
+- Inherited-disabled controls enter the existing binding exclusion, manual required-field classification, and pre-action execution refusal.
+
 ## [0.42.0-alpha.1] - Unreleased
 
 ### Added

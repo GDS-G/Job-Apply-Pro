@@ -164,6 +164,7 @@ export interface BrowserObservedControl {
   accessible_required: boolean;
   disabled: boolean;
   native_disabled: boolean;
+  inherited_disabled: boolean;
   accessible_disabled: boolean;
   read_only: boolean;
   native_read_only: boolean;

@@ -171,6 +171,8 @@ Native `readonly` and `aria-readonly=true` controls remain visible in the curren
 
 If a control or its containing form declares `aria-busy=true`, Job Apply Pro treats the field as pending. It is not offered for binding, cannot show `VALID ON PAGE`, and cannot run through approved execution. Wait for the provider to finish validation and capture the page again.
 
+Controls disabled by an ancestor `<fieldset disabled>` are treated as natively disabled even when the control itself has no `disabled` attribute. The standard first-legend exception remains enabled. Capture again after the provider enables the section.
+
 ## Safety model
 
 - The desktop keeps profile and workflow data locally and encrypts sensitive values.

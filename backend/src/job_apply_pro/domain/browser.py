@@ -181,6 +181,7 @@ class BrowserObservedControl(BaseModel):
     accessible_required: bool = False
     disabled: bool = False
     native_disabled: bool = False
+    inherited_disabled: bool = False
     accessible_disabled: bool = False
     read_only: bool = False
     native_read_only: bool = False
@@ -344,6 +345,7 @@ class BrowserObservedControl(BaseModel):
         native_disabled = bool(
             item.get("native_disabled", item.get("nativeDisabled", item.get("disabled")))
         )
+        inherited_disabled = bool(item.get("inherited_disabled", item.get("inheritedDisabled")))
         accessible_disabled = bool(item.get("accessible_disabled", item.get("accessibleDisabled")))
         native_read_only = bool(
             item.get("native_read_only", item.get("nativeReadOnly", item.get("read_only")))
@@ -373,8 +375,12 @@ class BrowserObservedControl(BaseModel):
             "required": bool(item.get("required")) or native_required or accessible_required,
             "native_required": native_required,
             "accessible_required": accessible_required,
-            "disabled": bool(item.get("disabled")) or native_disabled or accessible_disabled,
-            "native_disabled": native_disabled,
+            "disabled": bool(item.get("disabled"))
+            or native_disabled
+            or inherited_disabled
+            or accessible_disabled,
+            "native_disabled": native_disabled or inherited_disabled,
+            "inherited_disabled": inherited_disabled,
             "accessible_disabled": accessible_disabled,
             "read_only": bool(item.get("read_only", item.get("readOnly")))
             or native_read_only
