@@ -461,6 +461,9 @@ class BrowserWorker:
                   (el.getAttribute('aria-busy') || '').toLowerCase() === 'true',
                 formBusy:
                   (el.closest('form')?.getAttribute('aria-busy') || '').toLowerCase() === 'true',
+                inert: Boolean(el.closest('[inert]')),
+                directInert: el.hasAttribute('inert'),
+                inheritedInert: !el.hasAttribute('inert') && Boolean(el.closest('[inert]')),
                 visible: true,
                 willValidate: 'willValidate' in el ? Boolean(el.willValidate) : false,
                 constraintSatisfied: 'willValidate' in el && el.willValidate && el.validity
