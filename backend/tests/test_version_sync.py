@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 
 from job_apply_pro import __version__
@@ -13,13 +14,15 @@ def test_release_metadata_is_synchronized() -> None:
     contracts = json.loads(
         (root / "packages" / "contracts" / "package.json").read_text(encoding="utf-8")
     )
+    backend = tomllib.loads((root / "backend" / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert version == __version__ == "0.48.0-alpha.1"
+    assert version == __version__ == "0.49.0-alpha.1"
     assert build == {
-        "name": "Complex DOCX Layout Evidence",
+        "name": "Sanitized Regression Corpora",
         "version": version,
         "channel": "alpha",
         "roadmap_phases": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "production_automation_enabled": False,
     }
     assert workspace["version"] == desktop["version"] == contracts["version"] == version
+    assert backend["project"]["version"] == "0.49.0a1"

@@ -59,3 +59,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0055: Structured form topology](0055-structured-form-topology.md)
 - [ADR-0056: Governed AI evaluation suite](0056-governed-ai-evaluation-suite.md)
 - [ADR-0057: Complex DOCX layout evidence](0057-complex-docx-layout-evidence.md)
+- [ADR-0058: Sanitized regression corpora](0058-sanitized-regression-corpora.md)
