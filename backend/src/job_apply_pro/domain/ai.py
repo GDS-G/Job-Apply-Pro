@@ -248,10 +248,16 @@ class AgentRunResult(BaseModel):
 class EvaluationCase(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    id: str
+    id: str = Field(min_length=1, max_length=100)
     agent_request: AgentRunRequest
     required_keys: set[str] = Field(default_factory=set)
     expected_values: dict[str, object] = Field(default_factory=dict)
+    required_json_pointers: set[str] = Field(default_factory=set, max_length=50)
+    expected_json_pointer_values: dict[str, object] = Field(default_factory=dict)
+    allowed_evidence_ids: set[str] = Field(default_factory=set, max_length=200)
+    evidence_json_pointer: str = Field(default="/evidence_claim_ids", max_length=500)
+    forbidden_output_terms: list[str] = Field(default_factory=list, max_length=50)
+    repeat_count: int = Field(default=1, ge=1, le=5)
 
 
 class EvaluationCaseResult(BaseModel):
@@ -261,6 +267,8 @@ class EvaluationCaseResult(BaseModel):
     passed: bool
     failures: list[str]
     invocation_id: str | None = None
+    invocation_ids: list[str] = Field(default_factory=list, max_length=5)
+    output_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class EvaluationReport(BaseModel):
