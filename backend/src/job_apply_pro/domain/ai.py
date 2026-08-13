@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 
 class ProviderKind(StrEnum):
@@ -93,10 +93,42 @@ class PromptTemplate(BaseModel):
 
 
 class AIInputPart(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        ser_json_bytes="base64",
+        val_json_bytes="base64",
+    )
 
-    kind: Literal["text", "image_url"]
-    value: str = Field(min_length=1, max_length=5_000_000)
+    kind: Literal["text", "image_url", "media"]
+    value: str | None = Field(default=None, min_length=1, max_length=5_000_000)
+    data: bytes | None = Field(default=None, min_length=1, max_length=5_242_880)
+    mime_type: Literal["image/jpeg", "image/png", "image/webp"] | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_part(self) -> Self:
+        if self.kind in {"text", "image_url"}:
+            if (
+                self.value is None
+                or self.data is not None
+                or self.mime_type is not None
+                or self.display_name is not None
+            ):
+                raise ValueError("Text and image URL parts require only a value")
+        elif self.data is None or self.mime_type is None or self.value is not None:
+            raise ValueError("Media parts require bytes and an approved MIME type")
+        elif not self._matches_media_signature(self.data, self.mime_type):
+            raise ValueError("Media bytes do not match the declared MIME type")
+        return self
+
+    @staticmethod
+    def _matches_media_signature(data: bytes, mime_type: str) -> bool:
+        if mime_type == "image/png":
+            return data.startswith(b"\x89PNG\r\n\x1a\n")
+        if mime_type == "image/jpeg":
+            return data.startswith(b"\xff\xd8\xff")
+        return len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP"
 
 
 class AIToolDefinition(BaseModel):
@@ -128,9 +160,19 @@ class AIGatewayRequest(BaseModel):
     source_version: str = Field(default="none", max_length=100)
     classification: DataClassification = DataClassification.ROUTINE
     external_consent: bool = False
+    media_upload_consent: bool = False
     max_cost_micros: int | None = Field(default=None, ge=0)
     timeout_seconds: float | None = Field(default=None, ge=1, le=300)
     cache_mode: Literal["USE", "BYPASS", "REFRESH"] = "USE"
+
+    @model_validator(mode="after")
+    def validate_media_policy(self) -> Self:
+        media_count = sum(part.kind == "media" for part in self.input_parts)
+        if media_count > 4:
+            raise ValueError("At most four uploaded media parts are allowed")
+        if media_count and not self.media_upload_consent:
+            raise ValueError("Media parts require explicit media-upload consent")
+        return self
 
 
 class AIUsage(BaseModel):
@@ -169,6 +211,7 @@ class AIProviderRequest(BaseModel):
     input_parts: list[AIInputPart] = Field(default_factory=list, max_length=20)
     tools: list[AIToolDefinition] = Field(default_factory=list, max_length=20)
     output_schema: dict[str, object] | None = None
+    media_upload_consent: bool = False
     timeout_seconds: float = Field(ge=1, le=300)
 
 

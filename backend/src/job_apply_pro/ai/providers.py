@@ -5,6 +5,7 @@ import math
 import re
 from collections.abc import Callable
 from typing import Protocol, cast
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -64,8 +65,12 @@ class OpenAICompatibleProvider:
             for part in request.input_parts:
                 if part.kind == "text":
                     user_content.append({"type": "text", "text": part.value})
-                else:
+                elif part.kind == "image_url":
                     user_content.append({"type": "image_url", "image_url": {"url": part.value}})
+                else:
+                    raise AIProviderError(
+                        "OpenAI-compatible media bytes require a provider-specific upload adapter"
+                    )
         payload: dict[str, object] = {
             "model": request.model,
             "messages": [
@@ -187,7 +192,9 @@ class GeminiProvider:
     _API_PATH = "/v1beta"
     _API_REVISION = "2026-05-20"
     _MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+    _MAX_MEDIA_BYTES = 5 * 1024 * 1024
     _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,160}$")
+    _FILE_NAME_PATTERN = re.compile(r"^files/[a-z0-9-]{1,40}$")
 
     def __init__(
         self,
@@ -204,40 +211,50 @@ class GeminiProvider:
 
     def complete(self, request: AIProviderRequest) -> AIProviderResponse:
         input_blocks: list[dict[str, object]] = [{"type": "text", "text": request.user_content}]
-        for part in request.input_parts:
-            if part.kind == "text":
-                input_blocks.append({"type": "text", "text": part.value})
-            else:
-                raise AIProviderError(
-                    "Gemini image URLs require a separately uploaded trusted file and MIME type"
-                )
-
-        payload: dict[str, object] = {
-            "model": self._model_name(request.model),
-            "input": input_blocks,
-            "system_instruction": request.system_instruction,
-            "store": False,
-            "generation_config": {"temperature": 0},
-        }
-        if request.tools:
-            payload["tools"] = [
-                {
-                    "type": "function",
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.input_schema,
-                }
-                for tool in request.tools
-            ]
-        if request.output_schema is not None:
-            payload["response_format"] = {
-                "type": "text",
-                "mime_type": "application/json",
-                "schema": request.output_schema,
-            }
-
-        response = self._post("interactions", payload, request.timeout_seconds)
+        uploaded_names: list[str] = []
         try:
+            for part in request.input_parts:
+                if part.kind == "text":
+                    input_blocks.append({"type": "text", "text": part.value})
+                elif part.kind == "image_url":
+                    raise AIProviderError("Gemini does not fetch user-supplied media URLs")
+                else:
+                    if not request.media_upload_consent:
+                        raise AIProviderError("Gemini media upload requires explicit consent")
+                    name, uri = self._upload_media(
+                        cast(bytes, part.data),
+                        cast(str, part.mime_type),
+                        part.display_name or "Job Apply Pro review image",
+                        request.timeout_seconds,
+                    )
+                    uploaded_names.append(name)
+                    input_blocks.append({"type": "image", "uri": uri, "mime_type": part.mime_type})
+
+            payload: dict[str, object] = {
+                "model": self._model_name(request.model),
+                "input": input_blocks,
+                "system_instruction": request.system_instruction,
+                "store": False,
+                "generation_config": {"temperature": 0},
+            }
+            if request.tools:
+                payload["tools"] = [
+                    {
+                        "type": "function",
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema,
+                    }
+                    for tool in request.tools
+                ]
+            if request.output_schema is not None:
+                payload["response_format"] = {
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": request.output_schema,
+                }
+
+            response = self._post("interactions", payload, request.timeout_seconds)
             status = cast(str, response["status"])
             if status not in {"completed", "requires_action"}:
                 raise AIProviderError("Gemini interaction did not complete")
@@ -268,7 +285,7 @@ class GeminiProvider:
             if not content_parts and not tool_calls:
                 raise AIProviderError("Gemini returned no usable output")
             usage = cast(dict[str, object], response.get("usage", {}))
-            return AIProviderResponse(
+            result = AIProviderResponse(
                 content="".join(content_parts),
                 tool_calls=tool_calls,
                 input_tokens=int(cast(int, usage.get("total_input_tokens", 0))),
@@ -278,6 +295,113 @@ class GeminiProvider:
             raise
         except (KeyError, TypeError, ValueError) as error:
             raise AIProviderError("Gemini returned an invalid interaction envelope") from error
+        finally:
+            delete_failed = False
+            for name in reversed(uploaded_names):
+                try:
+                    self._delete_media(name, request.timeout_seconds)
+                except AIProviderError:
+                    delete_failed = True
+            if delete_failed:
+                raise AIProviderError("Gemini uploaded media could not be deleted immediately")
+        return result
+
+    def _upload_media(
+        self,
+        data: bytes,
+        mime_type: str,
+        display_name: str,
+        timeout: float,
+    ) -> tuple[str, str]:
+        if not data or len(data) > self._MAX_MEDIA_BYTES:
+            raise AIProviderError("Gemini media exceeds the 5 MiB upload limit")
+        base = str(self.definition.base_url).rstrip("/").removesuffix("/v1beta")
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": str(len(data)),
+            "X-Goog-Upload-Header-Content-Type": mime_type,
+            "X-Goog-Upload-Protocol": "resumable",
+            "x-goog-api-key": cast(SecretStr, self._api_key).get_secret_value(),
+        }
+        try:
+            with self._client_factory(
+                timeout=timeout, transport=self._transport, follow_redirects=False
+            ) as client:
+                start = client.post(
+                    f"{base}/upload/v1beta/files",
+                    headers=headers,
+                    json={"file": {"display_name": display_name}},
+                )
+                start.raise_for_status()
+                upload_url = start.headers.get("x-goog-upload-url", "")
+                self._validate_upload_url(upload_url)
+                uploaded = client.post(
+                    upload_url,
+                    headers={
+                        "Content-Length": str(len(data)),
+                        "Content-Type": mime_type,
+                        "X-Goog-Upload-Command": "upload, finalize",
+                        "X-Goog-Upload-Offset": "0",
+                    },
+                    content=data,
+                )
+                uploaded.raise_for_status()
+                payload = uploaded.json()
+        except AIProviderError:
+            raise
+        except (httpx.HTTPError, ValueError) as error:
+            raise AIProviderUnavailableError("Gemini media upload failed") from error
+        try:
+            file = cast(dict[str, object], payload["file"])
+            name = cast(str, file["name"])
+            uri = cast(str, file["uri"])
+            returned_mime = cast(str, file["mimeType"])
+        except (KeyError, TypeError) as error:
+            raise AIProviderError("Gemini returned invalid uploaded-file metadata") from error
+        if not self._FILE_NAME_PATTERN.fullmatch(name):
+            raise AIProviderError("Gemini returned invalid uploaded-file metadata")
+        parsed = urlparse(uri)
+        if (
+            returned_mime != mime_type
+            or parsed.scheme != "https"
+            or parsed.hostname != self._API_HOST
+            or parsed.port not in {None, 443}
+            or parsed.username
+            or not parsed.path.startswith("/v1beta/files/")
+        ):
+            self._delete_media(name, timeout)
+            raise AIProviderError("Gemini returned an untrusted uploaded-file URI")
+        return name, uri
+
+    def _delete_media(self, name: str, timeout: float) -> None:
+        if not self._FILE_NAME_PATTERN.fullmatch(name):
+            raise AIProviderError("Gemini file name is invalid")
+        url = f"{str(self.definition.base_url).rstrip('/')}/{name}"
+        try:
+            with self._client_factory(
+                timeout=timeout, transport=self._transport, follow_redirects=False
+            ) as client:
+                response = client.delete(
+                    url,
+                    headers={"x-goog-api-key": cast(SecretStr, self._api_key).get_secret_value()},
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise AIProviderUnavailableError("Gemini media deletion failed") from error
+
+    @classmethod
+    def _validate_upload_url(cls, value: str) -> None:
+        parsed = urlparse(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != cls._API_HOST
+            or parsed.port not in {None, 443}
+            or parsed.username is not None
+            or parsed.password is not None
+            or not parsed.path.startswith("/upload/")
+        ):
+            raise AIProviderError("Gemini returned an untrusted upload URL")
 
     def embed(self, model: str, texts: list[str], timeout_seconds: float) -> list[list[float]]:
         model_name = self._model_name(model)

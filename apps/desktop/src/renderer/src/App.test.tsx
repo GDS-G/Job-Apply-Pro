@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Sanitized Regression Corpora v0.49.0-alpha.1"),
+      screen.getByText("Governed Gemini Media v0.50.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

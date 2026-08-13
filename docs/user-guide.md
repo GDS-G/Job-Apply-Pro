@@ -1,6 +1,8 @@
 # Job Apply Pro user guide
 
-This guide applies to Sanitized Regression Corpora `v0.49.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, and a local uncommitted gateway configuration.
+This guide applies to Governed Gemini Media `v0.50.0-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are source-complete but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, explicit media-upload consent for images, and a local uncommitted gateway configuration.
+
+Gemini image review accepts only JPEG, PNG, or WebP bytes whose signatures match their declared type. Each image is limited to 5 MiB and each request to four images. Media is uploaded only after separate consent, used in a stateless interaction, and immediately deleted from the provider Files API. If deletion cannot be confirmed, the invocation fails. Treat every visual result as a proposal and compare it with the source image before promoting any candidate claim.
 
 ## Install and start
 

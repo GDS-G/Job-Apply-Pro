@@ -41,15 +41,20 @@ class AIRegistry:
         except KeyError as error:
             raise AIRegistryError(f"No routing policy exists for {task_type}") from error
 
-    def routes(self, task_type: AITaskType) -> list[tuple[AIProviderProtocol, AIModelDefinition]]:
+    def routes(
+        self,
+        task_type: AITaskType,
+        additional_capabilities: set[AICapability] | None = None,
+    ) -> list[tuple[AIProviderProtocol, AIModelDefinition]]:
         policy = self.policy(task_type)
+        required_capabilities = policy.required_capabilities | (additional_capabilities or set())
         routes: list[tuple[AIProviderProtocol, AIModelDefinition]] = []
         for model_id in policy.model_order:
             model = self._models[model_id]
             provider = self._providers[model.provider_id]
             if not model.enabled or not provider.definition.enabled:
                 continue
-            if not policy.required_capabilities <= model.capabilities:
+            if not required_capabilities <= model.capabilities:
                 continue
             if provider.definition.external and not policy.allow_external:
                 continue

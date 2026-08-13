@@ -15,10 +15,11 @@ from job_apply_pro.ai.prompts import AGENT_SCHEMAS
 from job_apply_pro.ai.providers import (
     AIProviderError,
     AIProviderRuntime,
+    AIProviderUnavailableError,
     GeminiProvider,
     OpenAICompatibleProvider,
 )
-from job_apply_pro.ai.registry import AIRegistry
+from job_apply_pro.ai.registry import AIRegistry, AIRegistryError
 from job_apply_pro.api.routes.ai import get_ai_gateway
 from job_apply_pro.domain.ai import (
     AgentRole,
@@ -217,6 +218,22 @@ def test_external_privacy_requires_consent_blocks_restricted_and_redacts(
     service.invoke(_request(input_data={"email": "candidate@example.com"}, external_consent=True))
     assert "candidate@example.com" not in provider.requests[0].user_content
     assert "[EMAIL_REDACTED]" in provider.requests[0].user_content
+
+
+def test_cached_external_result_still_requires_current_consent(session: Session) -> None:
+    provider = FakeProvider(
+        "cloud",
+        [json.dumps({"answer": "Safe", "evidence_claim_ids": [], "needs_user": False})],
+        external=True,
+    )
+    models = _models("cloud")
+    service = _service(session, [provider], models, [_policy(models[0].id)])
+    consented = _request(external_consent=True)
+    assert service.invoke(consented).cached is False
+
+    with pytest.raises(AIGatewayPolicyError, match="consent"):
+        service.invoke(consented.model_copy(update={"external_consent": False}))
+    assert len(provider.requests) == 1
 
 
 def test_invalid_structured_output_is_retried_then_rejected(session: Session) -> None:
@@ -547,6 +564,159 @@ def test_gemini_adapter_supports_stateless_interactions_tools_and_embeddings() -
     assert embedding["requests"][0]["model"] == "models/gemini-embedding-fixture"
 
 
+def test_gemini_adapter_uploads_uses_and_deletes_consented_media() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        if (
+            request.url.path == "/upload/v1beta/files"
+            and request.headers.get("x-goog-upload-command") == "start"
+        ):
+            return httpx.Response(
+                200,
+                headers={
+                    "x-goog-upload-url": (
+                        "https://generativelanguage.googleapis.com/upload/session-fixture"
+                    )
+                },
+            )
+        if request.url.path == "/upload/session-fixture":
+            return httpx.Response(
+                200,
+                json={
+                    "file": {
+                        "name": "files/synthetic-image",
+                        "uri": (
+                            "https://generativelanguage.googleapis.com/v1beta/files/synthetic-image"
+                        ),
+                        "mimeType": "image/png",
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "steps": [
+                    {
+                        "type": "model_output",
+                        "content": [{"type": "text", "text": "Reviewed"}],
+                    }
+                ],
+            },
+        )
+
+    provider = GeminiProvider(
+        AIProviderRuntime.model_validate(
+            {
+                "definition": {
+                    "id": "gemini",
+                    "kind": ProviderKind.GEMINI,
+                    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                    "external": True,
+                },
+                "api_key": "test-secret",
+            }
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    result = provider.complete(
+        AIProviderRequest(
+            model="gemini-fixture",
+            system_instruction="Describe",
+            user_content="Review the image",
+            input_parts=[
+                AIInputPart(
+                    kind="media",
+                    data=b"\x89PNG\r\n\x1a\nsynthetic-bytes",
+                    mime_type="image/png",
+                    display_name="Sanitized fixture",
+                )
+            ],
+            media_upload_consent=True,
+            timeout_seconds=5,
+        )
+    )
+
+    assert result.content == "Reviewed"
+    assert [request.method for request in requests] == ["POST", "POST", "POST", "DELETE"]
+    assert requests[1].read() == b"\x89PNG\r\n\x1a\nsynthetic-bytes"
+    interaction = json.loads(requests[2].read())
+    assert interaction["store"] is False
+    assert interaction["input"][1] == {
+        "type": "image",
+        "uri": "https://generativelanguage.googleapis.com/v1beta/files/synthetic-image",
+        "mime_type": "image/png",
+    }
+    assert requests[3].url.path == "/v1beta/files/synthetic-image"
+
+
+def test_gemini_adapter_deletes_media_when_interaction_fails() -> None:
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        if request.url.path == "/upload/v1beta/files":
+            return httpx.Response(
+                200,
+                headers={
+                    "x-goog-upload-url": (
+                        "https://generativelanguage.googleapis.com/upload/session-fixture"
+                    )
+                },
+            )
+        if request.url.path == "/upload/session-fixture":
+            return httpx.Response(
+                200,
+                json={
+                    "file": {
+                        "name": "files/synthetic-image",
+                        "uri": (
+                            "https://generativelanguage.googleapis.com/v1beta/files/synthetic-image"
+                        ),
+                        "mimeType": "image/png",
+                    }
+                },
+            )
+        return httpx.Response(500)
+
+    provider = GeminiProvider(
+        AIProviderRuntime.model_validate(
+            {
+                "definition": {
+                    "id": "gemini",
+                    "kind": ProviderKind.GEMINI,
+                    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                    "external": True,
+                },
+                "api_key": "test-secret",
+            }
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(AIProviderUnavailableError, match="request failed"):
+        provider.complete(
+            AIProviderRequest(
+                model="gemini-fixture",
+                system_instruction="Describe",
+                user_content="Review",
+                input_parts=[
+                    AIInputPart(
+                        kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png"
+                    )
+                ],
+                media_upload_consent=True,
+                timeout_seconds=5,
+            )
+        )
+    assert methods[-1] == "DELETE"
+
+
 def test_gemini_adapter_rejects_key_exfiltration_and_untrusted_image_urls() -> None:
     runtime = AIProviderRuntime.model_validate(
         {
@@ -567,7 +737,7 @@ def test_gemini_adapter_rejects_key_exfiltration_and_untrusted_image_urls() -> N
         input_parts=[AIInputPart(kind="image_url", value="https://example.test/private.png")],
         timeout_seconds=5,
     )
-    with pytest.raises(AIProviderError, match="separately uploaded"):
+    with pytest.raises(AIProviderError, match="does not fetch"):
         provider.complete(request)
 
     for base_url in (
@@ -590,6 +760,85 @@ def test_gemini_adapter_rejects_key_exfiltration_and_untrusted_image_urls() -> N
                     }
                 )
             )
+
+
+def test_gateway_requires_media_consent_multimodal_route_and_hashes_media(
+    session: Session,
+) -> None:
+    media = b"\x89PNG\r\n\x1a\nfixture"
+    with pytest.raises(ValueError, match="media-upload consent"):
+        _request(input_parts=[AIInputPart(kind="media", data=media, mime_type="image/png")])
+
+    provider = FakeProvider(
+        "local",
+        [json.dumps({"answer": "Reviewed", "evidence_claim_ids": [], "needs_user": False})],
+    )
+    models = _models("local")
+    service = _service(session, [provider], models, [_policy(models[0].id)])
+    command = _request(
+        input_parts=[AIInputPart(kind="media", data=media, mime_type="image/png")],
+        media_upload_consent=True,
+    )
+    with pytest.raises(AIRegistryError, match="No enabled model route"):
+        service.invoke(command)
+
+    multimodal_model = models[0].model_copy(
+        update={"capabilities": models[0].capabilities | {AICapability.MULTIMODAL}}
+    )
+    service = _service(session, [provider], [multimodal_model], [_policy(multimodal_model.id)])
+    result = service.invoke(command)
+    assert cast(dict[str, object], result.content)["answer"] == "Reviewed"
+    invocation = session.scalars(select(ModelInvocationRow)).all()[-1]
+    assert len(invocation.input_hash) == 64 and len(invocation.cache_key) == 64
+
+
+def test_media_part_rejects_mismatched_signature_and_too_many_parts() -> None:
+    with pytest.raises(ValueError, match="do not match"):
+        AIInputPart(kind="media", data=b"not-png", mime_type="image/png")
+    part = AIInputPart(kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png")
+    with pytest.raises(ValueError, match="At most four"):
+        _request(input_parts=[part] * 5, media_upload_consent=True)
+
+    round_trip = AIInputPart.model_validate_json(part.model_dump_json())
+    assert round_trip.data == part.data
+
+
+def test_gemini_rejects_untrusted_upload_session_url() -> None:
+    provider = GeminiProvider(
+        AIProviderRuntime.model_validate(
+            {
+                "definition": {
+                    "id": "gemini",
+                    "kind": ProviderKind.GEMINI,
+                    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+                    "external": True,
+                },
+                "api_key": "test-secret",
+            }
+        ),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200, headers={"x-goog-upload-url": "https://attacker.example/upload/session"}
+            )
+        ),
+    )
+    with pytest.raises(AIProviderError, match="untrusted upload URL"):
+        provider.complete(
+            AIProviderRequest(
+                model="gemini-fixture",
+                system_instruction="Describe",
+                user_content="Review",
+                input_parts=[
+                    AIInputPart(
+                        kind="media",
+                        data=b"\x89PNG\r\n\x1a\nfixture",
+                        mime_type="image/png",
+                    )
+                ],
+                media_upload_consent=True,
+                timeout_seconds=5,
+            )
+        )
 
 
 def test_gemini_adapter_bounds_and_validates_provider_responses() -> None:

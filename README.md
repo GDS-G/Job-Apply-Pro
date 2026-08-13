@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Sanitized Regression Corpora build
+## Governed Gemini Media build
 
-The active milestone is **Sanitized Regression Corpora `v0.49.0-alpha.1`**. Versioned, schema-validated synthetic corpora now exercise all six governed AI agent roles through independent repeat runs and representative TXT, Markdown, RTF, DOCX, nested/floating DOCX, and PDF ingestion layouts. Corpus loading rejects duplicate identities, malformed expectations, credential-shaped fields, email addresses, oversized files, and invalid JSON.
+The active milestone is **Governed Gemini Media `v0.50.0-alpha.1`**. Explicitly consented JPEG, PNG, and WebP review images can now use Gemini's official resumable Files API through a 5 MiB, four-image, multimodal-capability-gated boundary. Upload URLs and returned file metadata are validated, interactions stay stateless, uploaded files are deleted immediately even after an interaction failure, and cache/audit identities retain hashes rather than media bytes.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

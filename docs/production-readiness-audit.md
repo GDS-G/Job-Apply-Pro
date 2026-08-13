@@ -461,6 +461,14 @@ Corpus loading rejects unknown fields, duplicate IDs, malformed expected block c
 
 Runtime source commit `e2bf575a7f07330adb34231597678edfec2152c0` passed all 174 backend tests at 83.65% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.49.0-alpha.1-x64.exe` is 169,755,994 bytes, SHA-256 `536652BF621551B4A725F81C0A3A38C3D32F702E0D5F3C37C8A3F2AE56333034`. The bundled backend is 18,513,088 bytes, SHA-256 `FB5A071C663F5BCA1A1D1904C0CE24DEA1B3165941565B8ED095CE90357EC5E9`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `C88884C61FE96DBAD1F739B08B7D96289006A995E37C3A578F73A083711C3B4F`. All report `NotSigned`, as expected without owner signing credentials. The Python distribution metadata is now synchronized at `0.49.0a1` and guarded by the release-metadata test.
 
+### Governed Gemini Media source validation
+
+`Governed Gemini Media v0.50.0-alpha.1` adds an image-only Files API boundary for current Gemini Interactions. JPEG, PNG, and WebP signatures are verified, each image is capped at 5 MiB, a request is capped at four images, and both external-AI consent and separate media-upload consent are required. Media requests require a `MULTIMODAL` model route. ADR-0059 records the decision.
+
+The adapter accepts only exact HTTPS Google upload-session URLs and returned file metadata, disables redirects, keeps interaction storage false, and deletes every uploaded file immediately on success or interaction failure. Arbitrary remote URLs remain rejected. Cache and invocation identities contain hashes and byte counts rather than media bytes. No database migration is required.
+
+Runtime source commit `7b0cd7b3f2fb05e2fee8ca1ff043416ad77ec8b1` passed all 180 backend tests at 83.65% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.50.0-alpha.1-x64.exe` is 169,761,115 bytes, SHA-256 `23A5AF5D774838F8A0E0230A491A529D6D1DD34F90C07D123482445CFD106925`. The bundled backend is 18,518,255 bytes, SHA-256 `85ADB1A563FDF77374C70C5690CAA3D985B0296389E8CAE6FC4FC2AEEBD41CDC`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `37536071B993E90C1A474C3CA184D5FC420C7428F5CBC7C2F7DB9231811E6E9D`. All report `NotSigned`, as expected without owner signing credentials.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
