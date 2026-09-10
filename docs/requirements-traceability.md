@@ -8,6 +8,8 @@ The earlier phrase "source-complete" meant that the planned Phase 0-12 vertical 
 
 ## Status meanings
 
+Media Lifecycle Hardening `v0.50.1-alpha.1` closes retry/fallback amplification after uncertain Gemini finalization or cleanup, adds bounded response handling and known-file cleanup before metadata validation, and refreshes vulnerable dependencies. ADR-0060 records remaining media gaps: no durable cleanup queue or cross-invocation quarantine, crash recovery, processing-state polling, full image validation/EXIF removal, or aggregate request deadline. Automated coverage is not live-provider or production acceptance.
+
 - **Implemented and automated** - production source exists and deterministic tests cover the stated boundary.
 - **Implemented for controlled fixtures** - executable source exists, but validation is restricted to local or sanitized fixtures.
 - **Implemented, externally gated** - source exists, but completion requires provider authorization, terms approval, live evidence, a signing certificate, or physical release-lab evidence.
@@ -53,7 +55,7 @@ These controls are source capability, not provider permission. `production_enabl
 ## Next source-controlled implementation order
 
 1. Use the v0.46 visibility-, accessibility-, constraint-, structured-topology-, native/inherited-disabled-, invalid-, readonly-, busy-, inert-, and accessibility-hidden-state-aware required-field review to surface page-valid, missing, stale, ambiguous, repeated, custom-widget, manual-only, and already-verified visible controls before submission; add only individually reviewed provider adapters with exact postconditions.
-2. Validate governed visual review with consented real-world acceptance evidence only under an approved provider, privacy, and retention plan; preserve evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval.
+2. Add durable, privacy-safe media cleanup/reconciliation and restart recovery before expanding live visual review; then validate with consented real-world acceptance evidence under an approved provider, privacy, and retention plan. Preserve evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval.
 3. Add portal-specific custom-widget mappings only after explicit widget-level locator contracts and authorized supervised evidence with terms, limits, ownership, and stop conditions.
 4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.
 

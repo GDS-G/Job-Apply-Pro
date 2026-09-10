@@ -17,7 +17,7 @@ from job_apply_pro.ai.prompts import (
     redact_external_data,
     render_prompt,
 )
-from job_apply_pro.ai.providers import AIProviderError
+from job_apply_pro.ai.providers import AIProviderError, AIProviderMediaRetentionError
 from job_apply_pro.ai.registry import AIRegistry
 from job_apply_pro.domain.ai import (
     AgentRunRequest,
@@ -63,6 +63,10 @@ class AIGatewayUnavailableError(AIGatewayError):
     pass
 
 
+class AIGatewayMediaRetentionError(AIGatewayUnavailableError):
+    """A remote media outcome is unresolved; never retry this invocation automatically."""
+
+
 AuthorizedInput = TypeVar("AuthorizedInput")
 
 
@@ -90,6 +94,11 @@ class AIGatewayService:
         return [item.model_dump(mode="json") for item in self._registry.model_definitions()]
 
     def invoke(self, request: AIGatewayRequest) -> AIGatewayResponse:
+        if (
+            any(part.kind == "media" for part in request.input_parts)
+            and not request.media_upload_consent
+        ):
+            raise AIGatewayPolicyError("Media upload requires explicit current consent")
         prompt = self._prompt(request)
         self._validate_request_tools(request, prompt)
         routes = self._registry.routes(
@@ -212,8 +221,14 @@ class AIGatewayService:
                     if request.cache_mode != "BYPASS" and policy.cache_ttl_seconds:
                         self._write_cache(response, request, cache_key, policy.cache_ttl_seconds)
                     return response
+                except AIProviderMediaRetentionError as error:
+                    last_error = error
+                    break
                 except (AIProviderError, AIGatewayValidationError, AIGatewayPolicyError) as error:
                     last_error = error
+
+            if isinstance(last_error, AIProviderMediaRetentionError):
+                break
 
         failed = AIGatewayResponse(
             invocation_id=str(uuid4()),
@@ -243,6 +258,11 @@ class AIGatewayService:
         )
         if isinstance(last_error, AIGatewayPolicyError):
             raise last_error
+        if isinstance(last_error, AIProviderMediaRetentionError):
+            raise AIGatewayMediaRetentionError(
+                "AI media retention is unresolved; automatic retries and fallback stopped. "
+                "Review provider file retention before another request."
+            ) from last_error
         raise AIGatewayUnavailableError("Every configured AI route failed safely") from last_error
 
     def embed(self, request: AIEmbeddingRequest) -> AIEmbeddingResponse:

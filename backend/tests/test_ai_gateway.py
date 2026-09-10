@@ -14,6 +14,7 @@ from job_apply_pro.ai.configuration import build_ai_registry
 from job_apply_pro.ai.prompts import AGENT_SCHEMAS
 from job_apply_pro.ai.providers import (
     AIProviderError,
+    AIProviderMediaRetentionError,
     AIProviderRuntime,
     AIProviderUnavailableError,
     GeminiProvider,
@@ -45,6 +46,7 @@ from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.ai import (
     AgentService,
     AIEvaluationHarness,
+    AIGatewayMediaRetentionError,
     AIGatewayPolicyError,
     AIGatewayService,
     AIGatewayUnavailableError,
@@ -192,6 +194,72 @@ def test_cache_reuse_avoids_second_provider_call(session: Session) -> None:
     assert second.invocation_id != first.invocation_id
     assert len(provider.requests) == 1
     assert len(session.scalars(select(ModelInvocationRow)).all()) == 2
+
+
+def test_media_retention_failure_stops_retries_fallback_and_cache(session: Session) -> None:
+    primary = FakeProvider("primary", [AIProviderMediaRetentionError("private provider detail")])
+    fallback = FakeProvider("fallback", [])
+    models = _models("primary", "fallback")
+    service = _service(
+        session,
+        [primary, fallback],
+        models,
+        [_policy(*(model.id for model in models), retries=2)],
+    )
+
+    with pytest.raises(
+        AIGatewayMediaRetentionError, match="automatic retries and fallback stopped"
+    ) as raised:
+        service.invoke(_request())
+
+    assert "private provider detail" not in str(raised.value)
+    assert len(primary.requests) == 1
+    assert not fallback.requests
+    assert session.scalar(select(AICacheRow)) is None
+    invocation = session.scalar(select(ModelInvocationRow))
+    assert invocation is not None
+    assert invocation.status == "FAILED" and invocation.attempts == 1
+    assert invocation.provider == "primary"
+    assert invocation.error_code == "AIProviderMediaRetentionError"
+    assert len(invocation.input_hash) == 64 and len(invocation.cache_key) == 64
+
+
+def test_cached_media_still_requires_current_upload_consent(session: Session) -> None:
+    provider = FakeProvider(
+        "local", [json.dumps({"answer": "Cached", "evidence_claim_ids": [], "needs_user": False})]
+    )
+    models = [
+        model.model_copy(update={"capabilities": model.capabilities | {AICapability.MULTIMODAL}})
+        for model in _models("local")
+    ]
+    service = _service(session, [provider], models, [_policy(models[0].id)])
+    request = _request(
+        input_parts=[
+            AIInputPart(kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png")
+        ],
+        media_upload_consent=True,
+    )
+    assert service.invoke(request).cached is False
+    with pytest.raises(AIGatewayPolicyError, match="current consent"):
+        service.invoke(request.model_copy(update={"media_upload_consent": False}))
+    assert len(provider.requests) == 1
+
+
+def test_media_retention_api_returns_sanitized_terminal_failure(session: Session) -> None:
+    provider = FakeProvider("local", [AIProviderMediaRetentionError("private file identifier")])
+    models = _models("local")
+    service = _service(session, [provider], models, [_policy(models[0].id, retries=2)])
+    app.dependency_overrides[get_ai_gateway] = lambda: service
+    try:
+        response = TestClient(app).post(
+            "/api/v1/ai/invoke", json=_request().model_dump(mode="json")
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 503
+    assert "automatic retries and fallback stopped" in response.json()["detail"]
+    assert "private file identifier" not in response.text
+    assert len(provider.requests) == 1
 
 
 def test_external_privacy_requires_consent_blocks_restricted_and_redacts(
@@ -579,11 +647,11 @@ def test_gemini_adapter_uploads_uses_and_deletes_consented_media() -> None:
                 200,
                 headers={
                     "x-goog-upload-url": (
-                        "https://generativelanguage.googleapis.com/upload/session-fixture"
+                        "https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=session-fixture"
                     )
                 },
             )
-        if request.url.path == "/upload/session-fixture":
+        if request.url.params.get("upload_id") == "session-fixture":
             return httpx.Response(
                 200,
                 json={
@@ -593,6 +661,7 @@ def test_gemini_adapter_uploads_uses_and_deletes_consented_media() -> None:
                             "https://generativelanguage.googleapis.com/v1beta/files/synthetic-image"
                         ),
                         "mimeType": "image/png",
+                        "state": "ACTIVE",
                     }
                 },
             )
@@ -661,16 +730,19 @@ def test_gemini_adapter_deletes_media_when_interaction_fails() -> None:
         methods.append(request.method)
         if request.method == "DELETE":
             return httpx.Response(204)
-        if request.url.path == "/upload/v1beta/files":
+        if (
+            request.url.path == "/upload/v1beta/files"
+            and request.headers.get("x-goog-upload-command") == "start"
+        ):
             return httpx.Response(
                 200,
                 headers={
                     "x-goog-upload-url": (
-                        "https://generativelanguage.googleapis.com/upload/session-fixture"
+                        "https://generativelanguage.googleapis.com/upload/v1beta/files?upload_id=session-fixture"
                     )
                 },
             )
-        if request.url.path == "/upload/session-fixture":
+        if request.url.params.get("upload_id") == "session-fixture":
             return httpx.Response(
                 200,
                 json={
@@ -680,6 +752,7 @@ def test_gemini_adapter_deletes_media_when_interaction_fails() -> None:
                             "https://generativelanguage.googleapis.com/v1beta/files/synthetic-image"
                         ),
                         "mimeType": "image/png",
+                        "state": "ACTIVE",
                     }
                 },
             )

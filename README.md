@@ -2,9 +2,9 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Governed Gemini Media build
+## Media Lifecycle Hardening build
 
-The active milestone is **Governed Gemini Media `v0.50.0-alpha.1`**. Explicitly consented JPEG, PNG, and WebP review images can now use Gemini's official resumable Files API through a 5 MiB, four-image, multimodal-capability-gated boundary. Upload URLs and returned file metadata are validated, interactions stay stateless, uploaded files are deleted immediately even after an interaction failure, and cache/audit identities retain hashes rather than media bytes.
+The active milestone is **Media Lifecycle Hardening `v0.50.1-alpha.1`**. Gemini media cleanup now registers known uploaded files before validating metadata, bounds lifecycle responses, and stops automatic retries and fallback when remote retention is unresolved. Current dependency vulnerabilities are patched. The existing explicit-consent, 5 MiB, four-image, multimodal-capability and stateless-interaction boundaries remain in force; deletion is attempted, never guaranteed after a network failure. See ADR-0060 for behavior and known limits.
 
 Backup archives are encrypted before storage, authenticated with the local master key, and verified by archive and per-entry SHA-256 hashes. Database replacement is excluded from the live API: the app stages and fingerprints restore plans, then its privileged supervisor stops the backend before invoking the offline recovery command. The prior database is retained as a `.pre-restore` file. Production release jobs fail closed without a Windows signing certificate.
 

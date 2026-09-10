@@ -469,6 +469,16 @@ The adapter accepts only exact HTTPS Google upload-session URLs and returned fil
 
 Runtime source commit `7b0cd7b3f2fb05e2fee8ca1ff043416ad77ec8b1` passed all 180 backend tests at 83.65% coverage and all 16 desktop tests, plus Ruff/oxlint lint, mypy/TypeScript checks, formatting, migration round-trip, both dependency audits, the production Electron build, exact-head frozen-backend packaging and smoke, unpacked Windows packaging, and NSIS packaging. The unsigned installer `Job-Apply-Pro-0.50.0-alpha.1-x64.exe` is 169,761,115 bytes, SHA-256 `23A5AF5D774838F8A0E0230A491A529D6D1DD34F90C07D123482445CFD106925`. The bundled backend is 18,518,255 bytes, SHA-256 `85ADB1A563FDF77374C70C5690CAA3D985B0296389E8CAE6FC4FC2AEEBD41CDC`; the unpacked desktop executable is 225,500,672 bytes, SHA-256 `37536071B993E90C1A474C3CA184D5FC420C7428F5CBC7C2F7DB9231811E6E9D`. All report `NotSigned`, as expected without owner signing credentials.
 
+### Media Lifecycle Hardening source validation
+
+`Media Lifecycle Hardening v0.50.1-alpha.1` corrects Gemini cleanup ownership and stops automatic model retries/fallback on uncertain remote retention. All lifecycle response bodies are bounded; malformed file metadata, inactive files, invalid URLs, deeply nested JSON and failed cleanup are covered with synthetic HTTP fixtures. ADR-0060 records functions, failure semantics and the unresolved crash-recovery/durable-cleanup limitations. No database migration is required.
+
+The full backend suite passed 248 tests at 83.98% coverage, including migration round-trip and local browser fixtures; the focused gateway/lifecycle suite passed 89 cases. All 16 desktop tests, formatting, Ruff/oxlint, strict Python/TypeScript checks and the production build passed. The final metadata check also corrects stale v0.30 shared-contract and diagnostic labels and guards them with `test_version_sync.py`.
+
+Dependency audits report zero known vulnerabilities after bounded same-series npm overrides, Vitest 4.1.11, pypdf 6.16.1 and httpx2 2.12.0. The unpublished local application package is not auditable through PyPI and is explicitly skipped by pip-audit. Checks and advisory enforcement remain enabled.
+
+The installation guide now distinguishes unsigned development candidates from signed publication; the previous old signed-installer instruction was not supported by release evidence. This patch does not enable live portal automation, configure signing or satisfy physical release-lab acceptance.
+
 ## External launch evidence still required
 
 1. A protected GDS-G Windows signing certificate configured as GitHub release secrets without exposing the certificate password in chat, source, logs, or artifacts.
