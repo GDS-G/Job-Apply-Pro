@@ -24,7 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
-    "oxlint": "1.78.0",
+    "oxlint": "1.81.0",
     "prettier": "3.9.6",
     "typescript": "7.0.2",
     "vite": "7.3.6",
