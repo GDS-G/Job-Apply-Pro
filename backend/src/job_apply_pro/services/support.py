@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Observed Form Control Capture"
+    BUILD_NAME = "Media Lifecycle Hardening"
 
     def __init__(
         self,

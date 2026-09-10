@@ -2,6 +2,21 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.50.1-alpha.1] - Unreleased
+
+### Fixed
+
+- Register every valid Gemini uploaded-file name before checking remaining metadata so malformed responses still trigger cleanup.
+- Stop gateway retries and fallback on ambiguous finalization or failed deletion; record a sanitized failed invocation without caching its result.
+- Require current media-upload consent before cache reuse, active file state, exact file/URI identity, and trusted upload-session paths.
+- Stream and bound upload-start, finalization, interaction, and deletion response bodies; treat already-absent files as successfully cleaned up.
+- Correct stale shared-contract and support-diagnostic build labels and extend the version-sync test to prevent recurrence.
+
+### Security
+
+- Patch vulnerable npm transitive dependencies with bounded overrides, update Vitest, and raise safe minimums for httpx2 and pypdf.
+- Add synthetic lifecycle failure regressions and API coverage without real media, credentials, or live provider calls.
+
 ## [0.50.0-alpha.1] - Unreleased
 
 ### Added

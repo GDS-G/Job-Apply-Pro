@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Observed Form Control Capture",
-  version: "0.30.0-alpha.1",
+  name: "Media Lifecycle Hardening",
+  version: "0.50.1-alpha.1",
   channel: "alpha",
 } as const;
 

@@ -1,6 +1,6 @@
 {
   "name": "@job-apply-pro/contracts",
-  "version": "0.50.0-alpha.1",
+  "version": "0.50.1-alpha.1",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -28,6 +28,6 @@
     "prettier": "3.9.6",
     "typescript": "7.0.2",
     "vite": "7.3.6",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }
