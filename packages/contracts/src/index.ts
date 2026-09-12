@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Durable Media Recovery",
-  version: "0.51.0-alpha.1",
+  name: "Validated Media Inputs",
+  version: "0.52.0-alpha.1",
   channel: "alpha",
 } as const;
 

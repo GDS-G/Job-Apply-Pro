@@ -1,0 +1,31 @@
+# ADR-0062: Validated media inputs
+
+## Status and scope
+
+Accepted for Validated Media Inputs `v0.52.0-alpha.1`. Supplements ADR-0061 by replacing signature-only uploaded-image acceptance with local decoding and normalization. No schema migration or public request-field addition is required. Provider processing-state polling, aggregate hard network cancellation and production acceptance are not established here.
+
+## Construction boundary and exact bytes
+
+`domain/ai.py:AIInputPart.validate_part()` validates media during construction, before gateway cache/audit fingerprints or provider requests. `ai/media_normalization.py:normalize_image(data, mime_type)` accepts approved JPEG, PNG and WebP source types and returns canonical PNG bytes. The frozen value's `data` and `mime_type` are set to the normalized bytes and `image/png`. Text and image-URL parts keep their existing contract; this code neither fetches nor sanitizes URL content. Trusted code must not use Pydantic `model_construct()` or unchecked `model_copy(update=...)` to introduce media bytes.
+
+The existing `_input_part_fingerprints()` hashes the exact normalized bytes and normalized length/MIME. Metadata-only variants with identical pixels may therefore share a cache entry, whereas changed pixels do not. Revalidation is deterministic within the current encoder runtime and does not introduce repeated lossy JPEG generations. Encoder/library changes may invalidate cache entries without making older bytes current. Consent is still checked before cache reuse, and all downstream lifecycle and cleanup policies remain in force. `display_name` retains its existing request/fingerprint meaning; metadata removal does not imply all user-provided fields have been erased.
+
+## Decoder and resource limits
+
+Constants are `MAX_MEDIA_BYTES = 5_242_880`, `MAX_IMAGE_DIMENSION = 8_192`, `MAX_IMAGE_PIXELS = 16_777_216`, and `NORMALIZED_MEDIA_MIME = image/png`. At most four uploaded images remain allowed per gateway request. A cheap request preflight counts raw media parts and rejects excessive counts or obviously absent/false consent before decoding; the post-validation policy check remains authoritative after Pydantic parsing. Both source and normalized output must fit the byte cap. No dimension reduction or frame selection is performed to make an input pass.
+
+`_matches_signature()` verifies the declared format; `_validate_container()` checks PNG chunk framing/CRC/IEND and WebP RIFF length/chunk boundaries/animation markers. `_validate_jpeg_framing()` bounds marker lengths, scan byte stuffing and restart markers, accepts progressive multiple scans, rejects multiple frames/MPF, and requires the first real end marker to terminate the input. Pillow opens only the declared format. `_validate_image_header()` checks dimensions, total pixels and one static frame. `verify()` is followed by a separate open and full `load()` because verification alone does not decode pixel data. These checks are defense in depth, not a replacement for Pillow's entropy decoder or a guarantee that every entropy-bit corruption is detectable.
+
+`_orient_pixels()` reads only EXIF orientation tag 274, requires an integer from 1 through 8, and applies the corresponding pixel transpose through `_ORIENTATION_TRANSPOSES`. It deliberately avoids `ImageOps.exif_transpose()`, which can reserialize unrelated malformed EXIF that will only be discarded. Conversion selects 8-bit RGB or RGBA, preserving alpha/transparency where present. A fresh `Image.new()` canvas receives only pixels; PNG save uses compression level 6 with optimization disabled. `_BoundedOutput.write()` refuses growth beyond the output cap while encoding. JPEG/WebP photographs can be small in their original lossy format but exceed the PNG limit; they are rejected with a safe message rather than resized or recompressed lossily. Per-image limits bound decoded work but are not a whole-process memory quota or decoder-process isolation.
+
+Source EXIF/GPS, XMP, comments, thumbnails, PNG textual chunks and ICC profiles are not copied. ICC transformations are not applied; non-default color spaces and high-bit-depth images may render differently after conversion. Metadata removal does not obscure visible personal information or steganographic pixel content. Callers must review pixels and apply classification/consent policy before external use. Pillow's global decoding settings are not relaxed; a process that has enabled truncated-image loading fails closed at this boundary.
+
+## Input-free errors
+
+`MediaNormalizationError` contains only application-authored safe messages, not filenames or decoder exception text. `main.py:sanitize_request_validation()` handles FastAPI `RequestValidationError` for the local API with HTTP 422 and the static detail `Request validation failed; check required fields and supported values`. It does not serialize input, location keys, exception context or raw bytes and does not log the error object. Authentication remains before protected-route validation. This replaces framework-default schema-error detail, not intentional domain/HTTP error contracts.
+
+## Verification and remaining work
+
+`test_media_normalization.py` covers format, pixel, orientation, metadata and rejection boundaries. `image_helpers.py` creates in-memory synthetic images; gateway, Gemini lifecycle and cleanup-service tests no longer substitute a magic signature for a valid image. Integration tests compare exact uploaded normalized bytes/MIME/length and cache/audit fingerprints. `test_api_validation_privacy.py` covers malformed media/base64/JSON, arbitrary extra fields, safe 422 serialization and authentication precedence. The packaged smoke sends a valid synthetic PNG to a deliberately unknown prompt, proving decoding reaches domain validation without invoking a provider, and compares it with signature-only PNG rejection.
+
+The readiness audit owns exact test totals, runtime source commit, unsigned artifact hashes and protected CI evidence. Tests do not prove live provider retention, portal authorization, signed installation, physical failures or update/rollback acceptance. An adjacent audit identified frozen browser worker startup and supervisor ownership gaps; those require dedicated packaged runtime validation and subsequent fixes rather than a whole-app completion claim.

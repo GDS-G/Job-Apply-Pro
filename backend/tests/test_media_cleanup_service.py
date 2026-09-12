@@ -14,6 +14,7 @@ from pydantic import SecretStr
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from image_helpers import synthetic_image_bytes
 from job_apply_pro.ai.configuration import build_ai_registry
 from job_apply_pro.ai.providers import (
     AIProviderMediaRetentionError,
@@ -46,7 +47,7 @@ def _request() -> AIProviderRequest:
         system_instruction="Review",
         user_content="Describe",
         input_parts=[
-            AIInputPart(kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png")
+            AIInputPart(kind="media", data=synthetic_image_bytes(), mime_type="image/png")
         ],
         media_upload_consent=True,
         timeout_seconds=5,

@@ -1542,7 +1542,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Durable Media Recovery v0.51.0-alpha.1</strong>
+              <strong>Validated Media Inputs v0.52.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

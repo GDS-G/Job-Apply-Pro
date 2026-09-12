@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from image_helpers import synthetic_image_bytes
 from job_apply_pro.ai.providers import (
     AIProviderError,
     AIProviderMediaRetentionError,
@@ -38,7 +39,7 @@ def _request(count: int = 1) -> AIProviderRequest:
         system_instruction="Review the synthetic image",
         user_content="Describe",
         input_parts=[
-            AIInputPart(kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png")
+            AIInputPart(kind="media", data=synthetic_image_bytes(), mime_type="image/png")
             for _ in range(count)
         ],
         media_upload_consent=True,

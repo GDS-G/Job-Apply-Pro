@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -78,6 +79,19 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "X-Job-Apply-Pro-Token"],
     )
+
+    @application.exception_handler(RequestValidationError)
+    async def sanitize_request_validation(
+        _request: Request, _error: RequestValidationError
+    ) -> JSONResponse:
+        # Pydantic errors can contain whole input objects, arbitrary field names,
+        # bytes and custom exception context. Do not reflect or log any of them.
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "detail": "Request validation failed; check required fields and supported values"
+            },
+        )
 
     @application.middleware("http")
     async def authenticate_local_api(

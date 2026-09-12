@@ -4,7 +4,15 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Durable Media Recovery `v0.51.0-alpha.1`**. Final local validation passes 320 backend tests at 84.45% coverage and 79 desktop tests, with formatting, lint, strict typing, frozen dependency installation, production build and dependency audits passing. Protected CI and Windows packaging evidence are recorded separately below when available. The tables and earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.51 release has been validated.
+The active source milestone is **Validated Media Inputs `v0.52.0-alpha.1`**. Exact-version validation is recorded below; earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.52 release or live-provider acceptance has been established.
+
+### Validated Media Inputs validation
+
+Full decoding, orientation, metadata-free PNG encoding and safe API rejection are implemented in ADR-0062. Integrated validation and exact-runtime artifact evidence are pending for this source milestone.
+
+### Newly identified packaged-runtime gaps
+
+A read-only audit found the frozen browser client launches the backend executable with Python `-m` arguments that its entrypoint does not support; the current windowed executable also lacks standard streams required by JSON-lines RPC, and its analysis inventory does not include `browser.worker_process`. Existing packaged health/backup smoke does not prove browser execution. Reproduce and repair this through a dedicated hidden, console-capable worker and packaged loopback tests before claiming packaged browser acceptance. Backend supervisor migration ownership, concurrent starts, spawn-error handling and shutdown/restore serialization also need dedicated lifecycle tests. Historical packaging claims below describe only the exercised scope.
 
 ### Durable Media Recovery Windows candidate
 
