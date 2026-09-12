@@ -2,6 +2,20 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.54.0-alpha.1] - Unreleased
+
+### Fixed
+
+- Coalesce backend startup and shutdown, track migration/service/restore child ownership, and require observed exit before releasing ownership.
+- Bound migration/readiness observation, cancel stale requests and backup scheduling, and prevent old processes or reentrant listeners from reviving automation.
+- Keep non-atomic restore writers alive on observation timeout; block restart, quit or update while writing, and block automatic relaunch after an uncertain restore outcome.
+- Await safe desktop shutdown and update preparation, acquire a single-instance lock before key initialization, and keep a visible recovery window if shutdown is unsafe.
+
+### Added
+
+- Deterministic process/timer, client cancellation, quit and update regression tests; explicit source versus physical-process limitations in ADR-0064.
+- Corrected product traceability: named-portal end-to-end adapters and verified outgoing attachment delivery remain first-party source work, not only external authorization gates.
+
 ## [0.53.0-alpha.1] - Unreleased
 
 ### Fixed

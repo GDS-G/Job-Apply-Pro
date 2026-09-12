@@ -4,7 +4,11 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Packaged Browser Runtime `v0.53.0-alpha.1`**. Exact-version validation is recorded below; earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.53 release or live-provider acceptance has been established.
+The active source milestone is **Bounded Backend Lifecycle `v0.54.0-alpha.1`**. Exact-version validation is recorded below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, verified outgoing attachments, Gemini processing budgets and durable crash/relaunch restore recovery. Signing and live acceptance alone cannot complete those features. No signed v0.54 release or live-provider acceptance has been established.
+
+### Bounded Backend Lifecycle validation
+
+ADR-0064 defines coalesced and generation-owned startup/shutdown, tracked child exit, bounded migration/readiness, non-killing restore observation, and awaited quit/update preparation. The focused frontend suite passes 126 tests before the opt-in packaged-supervisor test is added. Final integrated checks, rebuilt v0.54 artifacts and delivered-process evidence are pending; do not reuse the v0.53 artifact hashes as v0.54 acceptance. Restore recovery-required state remains session-local and does not replace a durable crash/relaunch marker.
 
 ### Packaged Browser Runtime validation
 
@@ -551,4 +555,4 @@ Repository, service, lifecycle, restore, and desktop bridge test sources accompa
 5. Attached release-lab evidence for the manual rows in `docs/failure-injection-matrix.md`, including offline network, expired login, unavailable Edge, locked database, write denial/storage pressure, sleep/resume, uninstall/reinstall, update, and rollback.
 6. ~~Named support and incident-response ownership with a private vulnerability-reporting route.~~ Resolved: the solo `@GDS-G` maintainer owns support and incident response, and GitHub Private vulnerability reporting is enabled.
 
-Until evidence groups 1-5 exist, the application remains alpha. Supervised portal capability and automated final submission stay disabled by default; mail/calendar writes require reviewed OAuth scopes, explicit mutation confirmation, and authorized validation. None is claimed as production-ready.
+Until the remaining first-party implementation gaps and evidence groups 1–5 are closed, the application remains alpha. Supervised portal capability and automated final submission stay disabled by default; mail/calendar writes require reviewed OAuth scopes, explicit mutation confirmation, and authorized validation. None is claimed as production-ready.

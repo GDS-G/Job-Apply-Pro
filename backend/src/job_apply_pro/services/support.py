@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Packaged Browser Runtime"
+    BUILD_NAME = "Bounded Backend Lifecycle"
 
     def __init__(
         self,

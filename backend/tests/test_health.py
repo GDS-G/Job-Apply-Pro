@@ -10,8 +10,8 @@ def test_health_reports_current_build() -> None:
     assert response.json() == {
         "status": "ok",
         "service": "job-apply-pro-backend",
-        "version": "0.53.0-alpha.1",
-        "build": "Packaged Browser Runtime",
+        "version": "0.54.0-alpha.1",
+        "build": "Bounded Backend Lifecycle",
         "environment": "development",
     }
 

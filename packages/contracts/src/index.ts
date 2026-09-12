@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Packaged Browser Runtime",
-  version: "0.53.0-alpha.1",
+  name: "Bounded Backend Lifecycle",
+  version: "0.54.0-alpha.1",
   channel: "alpha",
 } as const;
 

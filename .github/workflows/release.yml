@@ -56,6 +56,10 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Smoke-test delivered browser runtime
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_packaged_backend.ps1 -BackendDirectory release/win-unpacked/resources/backend
+      - name: Exercise delivered backend supervisor lifecycle
+        run: |
+          $env:JAP_LIFECYCLE_TEST_BACKEND = (Resolve-Path -LiteralPath 'release/win-unpacked/resources/backend/job-apply-pro-backend.exe').Path
+          pnpm --filter @job-apply-pro/desktop test src/main/backend-supervisor.packaged.test.ts
       - name: Generate SPDX SBOM from packaged application
         uses: anchore/sbom-action@v0
         with:
