@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from typing import cast
+from base64 import urlsafe_b64encode
+from io import BytesIO
+from typing import Literal, cast
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from image_helpers import synthetic_image_bytes
 from job_apply_pro.ai.configuration import build_ai_registry
 from job_apply_pro.ai.prompts import AGENT_SCHEMAS
 from job_apply_pro.ai.providers import (
@@ -236,7 +241,7 @@ def test_cached_media_still_requires_current_upload_consent(session: Session) ->
     service = _service(session, [provider], models, [_policy(models[0].id)])
     request = _request(
         input_parts=[
-            AIInputPart(kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png")
+            AIInputPart(kind="media", data=synthetic_image_bytes(), mime_type="image/png")
         ],
         media_upload_consent=True,
     )
@@ -244,6 +249,69 @@ def test_cached_media_still_requires_current_upload_consent(session: Session) ->
     with pytest.raises(AIGatewayPolicyError, match="current consent"):
         service.invoke(request.model_copy(update={"media_upload_consent": False}))
     assert len(provider.requests) == 1
+
+
+@pytest.mark.parametrize("image_format", ["JPEG", "PNG", "WEBP"])
+def test_media_cache_and_audit_hash_normalized_pixels_not_source_metadata(
+    session: Session, image_format: Literal["JPEG", "PNG", "WEBP"]
+) -> None:
+    response_text = json.dumps(
+        {"answer": "Reviewed", "evidence_claim_ids": [], "needs_user": False}
+    )
+    provider = FakeProvider("local", [response_text, response_text])
+    models = [
+        model.model_copy(update={"capabilities": model.capabilities | {AICapability.MULTIMODAL}})
+        for model in _models("local")
+    ]
+    service = _service(session, [provider], models, [_policy(models[0].id)])
+    sources = [
+        synthetic_image_bytes(image_format, metadata="synthetic-private-location-one"),
+        synthetic_image_bytes(image_format, metadata="synthetic-private-location-two"),
+        synthetic_image_bytes(
+            image_format, metadata="synthetic-private-location-two", color=(240, 32, 64)
+        ),
+    ]
+    mime_type = f"image/{image_format.lower()}"
+    parts = [
+        AIInputPart.model_validate({"kind": "media", "data": source, "mime_type": mime_type})
+        for source in sources
+    ]
+    requests = [_request(input_parts=[part], media_upload_consent=True) for part in parts]
+    responses = [service.invoke(request) for request in requests]
+
+    assert sources[0] != sources[1]
+    assert [response.cached for response in responses] == [False, True, False]
+    assert len(provider.requests) == 2
+    normalized = parts[0].data
+    assert normalized is not None and normalized == parts[1].data != parts[2].data
+    assert provider.requests[0].input_parts[0].data == normalized
+    assert parts[0].mime_type == "image/png"
+    assert b"synthetic-private-location" not in normalized
+    expected_input = {
+        "input": requests[0].input_data,
+        "parts": [
+            {
+                "kind": "media",
+                "mime_type": "image/png",
+                "display_name": None,
+                "value_hash": None,
+                "data_hash": hashlib.sha256(normalized).hexdigest(),
+                "data_bytes": len(normalized),
+            }
+        ],
+    }
+    expected_hash = hashlib.sha256(
+        json.dumps(
+            expected_input, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    first = session.get(ModelInvocationRow, responses[0].invocation_id)
+    cached = session.get(ModelInvocationRow, responses[1].invocation_id)
+    changed = session.get(ModelInvocationRow, responses[2].invocation_id)
+    assert first is not None and cached is not None and changed is not None
+    assert first.input_hash == cached.input_hash == expected_hash
+    assert first.cache_key == cached.cache_key != changed.cache_key
+    assert first.input_hash != changed.input_hash
 
 
 def test_media_retention_api_returns_sanitized_terminal_failure(session: Session) -> None:
@@ -261,6 +329,48 @@ def test_media_retention_api_returns_sanitized_terminal_failure(session: Session
     assert "automatic retries and fallback stopped" in response.json()["detail"]
     assert "private file identifier" not in response.text
     assert len(provider.requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("mime_type", "invalid_data"),
+    [
+        ("image/png", b"\x89PNG\r\n\x1a\ntruncated-synthetic-image"),
+        ("image/jpeg", b"\xff\xd8\xfftruncated-synthetic-image"),
+        ("image/webp", b"RIFF\x10\x00\x00\x00WEBPtruncated-synthetic-image"),
+    ],
+)
+def test_ai_api_rejects_signature_only_media_before_gateway_or_persistence(
+    session: Session, mime_type: str, invalid_data: bytes
+) -> None:
+    provider = FakeProvider("local", [])
+    models = [
+        model.model_copy(update={"capabilities": model.capabilities | {AICapability.MULTIMODAL}})
+        for model in _models("local")
+    ]
+    service = _service(session, [provider], models, [_policy(models[0].id)])
+    payload = _request().model_dump(mode="json")
+    payload.update(
+        {
+            "media_upload_consent": True,
+            "input_parts": [
+                {
+                    "kind": "media",
+                    "mime_type": mime_type,
+                    "data": urlsafe_b64encode(invalid_data).decode("ascii"),
+                }
+            ],
+        }
+    )
+    app.dependency_overrides[get_ai_gateway] = lambda: service
+    try:
+        response = TestClient(app).post("/api/v1/ai/invoke", json=payload)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert not provider.requests
+    assert session.scalar(select(AICacheRow)) is None
+    assert session.scalar(select(ModelInvocationRow)) is None
 
 
 def test_external_privacy_requires_consent_blocks_restricted_and_redacts(
@@ -633,7 +743,10 @@ def test_gemini_adapter_supports_stateless_interactions_tools_and_embeddings() -
     assert embedding["requests"][0]["model"] == "models/gemini-embedding-fixture"
 
 
-def test_gemini_adapter_uploads_uses_and_deletes_consented_media() -> None:
+@pytest.mark.parametrize("image_format", ["JPEG", "PNG", "WEBP"])
+def test_gemini_adapter_uploads_uses_and_deletes_consented_media(
+    image_format: Literal["JPEG", "PNG", "WEBP"],
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -694,19 +807,21 @@ def test_gemini_adapter_uploads_uses_and_deletes_consented_media() -> None:
         transport=httpx.MockTransport(handler),
         journal_factory=new_test_journal,
     )
+    source = synthetic_image_bytes(image_format, metadata="synthetic-private-camera-location")
+    part = AIInputPart.model_validate(
+        {
+            "kind": "media",
+            "data": source,
+            "mime_type": f"image/{image_format.lower()}",
+            "display_name": "Sanitized fixture",
+        }
+    )
     result = provider.complete(
         AIProviderRequest(
             model="gemini-fixture",
             system_instruction="Describe",
             user_content="Review the image",
-            input_parts=[
-                AIInputPart(
-                    kind="media",
-                    data=b"\x89PNG\r\n\x1a\nsynthetic-bytes",
-                    mime_type="image/png",
-                    display_name="Sanitized fixture",
-                )
-            ],
+            input_parts=[part],
             media_upload_consent=True,
             timeout_seconds=5,
         )
@@ -714,7 +829,15 @@ def test_gemini_adapter_uploads_uses_and_deletes_consented_media() -> None:
 
     assert result.content == "Reviewed"
     assert [request.method for request in requests] == ["POST", "POST", "POST", "DELETE"]
-    assert requests[1].read() == b"\x89PNG\r\n\x1a\nsynthetic-bytes"
+    uploaded = requests[1].read()
+    assert uploaded == part.data and uploaded != source
+    assert b"synthetic-private-camera-location" not in uploaded
+    assert requests[0].headers["x-goog-upload-header-content-type"] == "image/png"
+    assert requests[0].headers["x-goog-upload-header-content-length"] == str(len(uploaded))
+    with Image.open(BytesIO(uploaded)) as image:
+        image.load()
+        assert image.format == "PNG"
+        assert not image.getexif() and not image.info
     interaction = json.loads(requests[2].read())
     assert interaction["store"] is False
     assert interaction["input"][1] == {
@@ -782,9 +905,7 @@ def test_gemini_adapter_deletes_media_when_interaction_fails() -> None:
                 system_instruction="Describe",
                 user_content="Review",
                 input_parts=[
-                    AIInputPart(
-                        kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png"
-                    )
+                    AIInputPart(kind="media", data=synthetic_image_bytes(), mime_type="image/png")
                 ],
                 media_upload_consent=True,
                 timeout_seconds=5,
@@ -841,7 +962,7 @@ def test_gemini_adapter_rejects_key_exfiltration_and_untrusted_image_urls() -> N
 def test_gateway_requires_media_consent_multimodal_route_and_hashes_media(
     session: Session,
 ) -> None:
-    media = b"\x89PNG\r\n\x1a\nfixture"
+    media = synthetic_image_bytes()
     with pytest.raises(ValueError, match="media-upload consent"):
         _request(input_parts=[AIInputPart(kind="media", data=media, mime_type="image/png")])
 
@@ -871,7 +992,7 @@ def test_gateway_requires_media_consent_multimodal_route_and_hashes_media(
 def test_media_part_rejects_mismatched_signature_and_too_many_parts() -> None:
     with pytest.raises(ValueError, match="do not match"):
         AIInputPart(kind="media", data=b"not-png", mime_type="image/png")
-    part = AIInputPart(kind="media", data=b"\x89PNG\r\n\x1a\nfixture", mime_type="image/png")
+    part = AIInputPart(kind="media", data=synthetic_image_bytes(), mime_type="image/png")
     with pytest.raises(ValueError, match="At most four"):
         _request(input_parts=[part] * 5, media_upload_consent=True)
 
@@ -908,7 +1029,7 @@ def test_gemini_rejects_untrusted_upload_session_url() -> None:
                 input_parts=[
                     AIInputPart(
                         kind="media",
-                        data=b"\x89PNG\r\n\x1a\nfixture",
+                        data=synthetic_image_bytes(),
                         mime_type="image/png",
                     )
                 ],

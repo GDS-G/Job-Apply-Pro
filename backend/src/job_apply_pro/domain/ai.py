@@ -6,6 +6,12 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+from job_apply_pro.ai.media_normalization import (
+    MAX_MEDIA_BYTES,
+    NORMALIZED_MEDIA_MIME,
+    normalize_image,
+)
+
 
 class ProviderKind(StrEnum):
     OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE"
@@ -102,7 +108,7 @@ class AIInputPart(BaseModel):
 
     kind: Literal["text", "image_url", "media"]
     value: str | None = Field(default=None, min_length=1, max_length=5_000_000)
-    data: bytes | None = Field(default=None, min_length=1, max_length=5_242_880)
+    data: bytes | None = Field(default=None, min_length=1, max_length=MAX_MEDIA_BYTES)
     mime_type: Literal["image/jpeg", "image/png", "image/webp"] | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
 
@@ -118,17 +124,13 @@ class AIInputPart(BaseModel):
                 raise ValueError("Text and image URL parts require only a value")
         elif self.data is None or self.mime_type is None or self.value is not None:
             raise ValueError("Media parts require bytes and an approved MIME type")
-        elif not self._matches_media_signature(self.data, self.mime_type):
-            raise ValueError("Media bytes do not match the declared MIME type")
+        else:
+            # The frozen public value is constructed from safe pixels before any
+            # gateway fingerprint or provider request can consume its bytes.
+            normalized = normalize_image(self.data, self.mime_type)
+            object.__setattr__(self, "data", normalized)
+            object.__setattr__(self, "mime_type", NORMALIZED_MEDIA_MIME)
         return self
-
-    @staticmethod
-    def _matches_media_signature(data: bytes, mime_type: str) -> bool:
-        if mime_type == "image/png":
-            return data.startswith(b"\x89PNG\r\n\x1a\n")
-        if mime_type == "image/jpeg":
-            return data.startswith(b"\xff\xd8\xff")
-        return len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP"
 
 
 class AIToolDefinition(BaseModel):
@@ -164,6 +166,27 @@ class AIGatewayRequest(BaseModel):
     max_cost_micros: int | None = Field(default=None, ge=0)
     timeout_seconds: float | None = Field(default=None, ge=1, le=300)
     cache_mode: Literal["USE", "BYPASS", "REFRESH"] = "USE"
+
+    @model_validator(mode="before")
+    @classmethod
+    def preflight_media_policy(cls, value: object) -> object:
+        # JSON clients must not force five or more full image decodes before the
+        # request's four-image policy rejects them. The after-validator remains
+        # authoritative once Pydantic has parsed/coerced all fields.
+        if isinstance(value, dict):
+            parts = value.get("input_parts")
+            if isinstance(parts, (list, tuple)):
+                media_count = sum(
+                    (isinstance(part, dict) and part.get("kind") == "media")
+                    or (isinstance(part, AIInputPart) and part.kind == "media")
+                    for part in parts
+                )
+                if media_count > 4:
+                    raise ValueError("At most four uploaded media parts are allowed")
+                consent = value.get("media_upload_consent", False)
+                if media_count and consent is False:
+                    raise ValueError("Media parts require explicit media-upload consent")
+        return value
 
     @model_validator(mode="after")
     def validate_media_policy(self) -> Self:

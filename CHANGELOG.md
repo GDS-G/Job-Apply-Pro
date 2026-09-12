@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.52.0-alpha.1] - Unreleased
+
+### Added
+
+- Fully decode bounded static JPEG, PNG and WebP images, validate source MIME/container and frame/dimension limits, apply orientation, and encode clean RGB/RGBA PNG pixels before gateway hashing and provider transfer.
+- Add synthetic metadata, animation, corruption, size, cache and exact-upload regression coverage plus frozen-backend image decoding/rejection smoke.
+
+### Security
+
+- Strip embedded image metadata using a fresh pixel canvas; normalized output must also fit 5 MiB. This is not redaction of visible content or image URLs.
+- Return a fixed, input-free 422 response for request-schema failures instead of reflecting Pydantic input, custom context, arbitrary field names or binary content.
+- Preserve current consent, production-disabled gates and durable provider-media recovery. Signed/live acceptance and packaged browser lifecycle validation remain separate work.
+
 ## [0.51.0-alpha.1] - Unreleased
 
 ### Added

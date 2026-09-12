@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Durable Media Recovery"
+    BUILD_NAME = "Validated Media Inputs"
 
     def __init__(
         self,

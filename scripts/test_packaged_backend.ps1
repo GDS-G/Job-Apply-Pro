@@ -74,6 +74,36 @@ try {
     if (@($cleanup.items).Count -ne 0) { throw "Fresh packaged cleanup journal is not empty" }
     $cleanupRetry = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup/retry" -Headers $headers -TimeoutSec 5
     if (@($cleanupRetry.items).Count -ne 0) { throw "Empty packaged cleanup retry changed state" }
+    # Synthetic pixels only. The deliberately unknown prompt stops before any
+    # route/provider work, but only after successful packaged image decoding.
+    $mediaCases = @(
+        @{
+            data = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNk5+BkYGBgYgADAAFIABwHDoKrAAAAAElFTkSuQmCC"
+            detail = "Prompt is missing or does not match the task type"
+        },
+        @{
+            data = [Convert]::ToBase64String([byte[]](137, 80, 78, 71, 13, 10, 26, 10))
+            detail = "Request validation failed; check required fields and supported values"
+        }
+    )
+    foreach ($mediaCase in $mediaCases) {
+        $mediaBody = @{
+            task_type = "ANSWER"
+            prompt_id = "package-smoke-deliberately-unknown-prompt"
+            input_data = @{}
+            media_upload_consent = $true
+            input_parts = @(@{ kind = "media"; mime_type = "image/png"; data = $mediaCase.data })
+        } | ConvertTo-Json -Depth 5
+        try {
+            Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8876/api/v1/ai/invoke" -Headers $headers -ContentType "application/json" -Body $mediaBody -TimeoutSec 10 | Out-Null
+            throw "Packaged synthetic media check unexpectedly invoked a model"
+        }
+        catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 422) { throw }
+            $mediaError = $_.ErrorDetails.Message | ConvertFrom-Json
+            if ($mediaError.detail -ne $mediaCase.detail) { throw "Packaged image decoding or safe rejection failed" }
+        }
+    }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -111,7 +141,7 @@ try {
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
     $restoredCleanup = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    Write-Output "Packaged startup, migration, cleanup API, encrypted backup and offline restore smoke passed."
+    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, encrypted backup and offline restore smoke passed."
 }
 finally {
     Stop-SmokeBackend -Process $process

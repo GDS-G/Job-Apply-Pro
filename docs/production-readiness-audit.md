@@ -4,7 +4,25 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Durable Media Recovery `v0.51.0-alpha.1`**. Final local validation passes 320 backend tests at 84.45% coverage and 79 desktop tests, with formatting, lint, strict typing, frozen dependency installation, production build and dependency audits passing. Protected CI and Windows packaging evidence are recorded separately below when available. The tables and earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.51 release has been validated.
+The active source milestone is **Validated Media Inputs `v0.52.0-alpha.1`**. Exact-version validation is recorded below; earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.52 release or live-provider acceptance has been established.
+
+### Validated Media Inputs validation
+
+Runtime source commit `2f65eebee63e300f1977934ec9337716b86934af` passes 402 backend tests at 84.59% coverage and 79 desktop tests. Ruff lint/format, strict mypy (140 source/test files), TypeScript, frozen pnpm installation, production build, pnpm audit and pip-audit pass. The unpublished editable backend package is skipped by the public-package audit. An earlier overlapping development run collected an adversarial expectation before its correction; the final clean-snapshot full suite above supersedes that run. ADR-0062 records full decoding, orientation, metadata-free PNG encoding and safe API rejection. Exact-runtime artifact and protected CI evidence are recorded separately; all provider fixtures are synthetic.
+
+### Validated Media Inputs unsigned Windows candidate
+
+The NSIS installer, unpacked desktop and bundled backend were produced from runtime commit `2f65eebee63e300f1977934ec9337716b86934af`. Packaged startup, migration, valid synthetic image decoding, malformed image rejection, cleanup API, encrypted backup and offline restore smoke pass with no configured AI provider. Artifact evidence:
+
+- `Job-Apply-Pro-0.52.0-alpha.1-x64.exe`: 170239724 bytes; SHA-256 `11FD117E7B13E74E911A73CF48BFD6ED6183A88EE0F42C011B239583B98E1F5F`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `E13D956C874BB755FCB073385F13AF8F926EAFF4D3D23DDCDBB80A09E349CA12`.
+- Bundled backend executable: 18560457 bytes; SHA-256 `CF33280274A9D6BA1554D4B91A432A9BF9AE3AD7A53B78DE588B7231B2865F45`; source backend-dist and unpacked copy match.
+
+All three report `NotSigned`. No tag or production release is authorized by these development checks. A hidden synthetic probe against that exact backend confirms the packaged browser launch defect below: existing worker arguments exit with code 2 and return no shutdown RPC. No browser or external provider was contacted.
+
+### Newly identified packaged-runtime gaps
+
+A read-only audit found the frozen browser client launches the backend executable with Python `-m` arguments that its entrypoint does not support; the current windowed executable also lacks standard streams required by JSON-lines RPC, and its analysis inventory does not include `browser.worker_process`. Existing packaged health/backup smoke does not prove browser execution. Reproduce and repair this through a dedicated hidden, console-capable worker and packaged loopback tests before claiming packaged browser acceptance. Backend supervisor migration ownership, concurrent starts, spawn-error handling and shutdown/restore serialization also need dedicated lifecycle tests. Historical packaging claims below describe only the exercised scope.
 
 ### Durable Media Recovery Windows candidate
 

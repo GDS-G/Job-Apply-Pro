@@ -8,7 +8,7 @@
 - The release is initiated manually by the solo `@GDS-G` maintainer through an exact version tag or `workflow_dispatch`. A required reviewer is optional and is not configured while the project has one maintainer.
 - The maintainer's GitHub account uses MFA or a passkey and has verified release-notification delivery.
 - A verified encrypted backup and a previous signed installer available for rollback rehearsal.
-- For Durable Media Recovery `v0.51.0-alpha.1`, migration `20260814_0023` and the cleanup journal must be available before any Gemini media transfer. A running or unresolved obligation in the current database blocks database restore; do not bypass it by replacing the database manually.
+- For Validated Media Inputs `v0.52.0-alpha.1` and later, migration `20260814_0023` and the cleanup journal must be available before any Gemini media transfer. A running or unresolved obligation in the current database blocks database restore; do not bypass it by replacing the database manually.
 
 ## Solo-maintainer signing-secret setup
 
@@ -62,7 +62,7 @@ Install the unsigned candidate only on an isolated test workstation. Verify firs
 
 ### Durable media recovery acceptance
 
-The source milestone is `Durable Media Recovery v0.51.0-alpha.1`. The readiness audit records passed local full-suite checks and unsigned Windows candidate hashes against runtime commit `056d2f16b1375e7453a6011f1795575b9ae08718`. Protected integration is tracked in PR #82; these local results do not establish signing, live-provider acceptance or release-lab completion.
+The current source milestone is `Validated Media Inputs v0.52.0-alpha.1`. ADR-0062 requires full image decoding, static-frame/dimension limits, orientation and clean PNG re-encoding before hash/upload. Verify metadata-only variants reuse the same normalized-byte cache fingerprint and malformed media receives a static input-free 422. The source and normalized image each must fit 5 MiB; no silent resizing is permitted. The readiness audit records exact-version validation, protected integration and unsigned candidate hashes separately; none establishes signing, live-provider acceptance or release-lab completion. Frozen browser worker execution and supervisor lifecycle gaps identified during this audit require subsequent packaged acceptance, not just health checks.
 
 Use synthetic files and mocked provider responses first. Verify an intent is committed before transfer, validated identifiers are encrypted, known resources survive a backend interruption and receive only deletion requests after lease expiry, and unknown finalization becomes manual review without listing or reuploading files. Check same-credential admission across provider aliases, current-owner lease renewal, stale-owner rejection, changed/removed credentials, unreadable ciphertext, a locked database, and more than 100 mismatched-credential records followed by a matching identity. Different API keys cannot be assumed to identify different remote accounts; original-credential matching is deliberately conservative. Current leases are renewed for 20 minutes before lifecycle phases; recovery makes at most two deletion attempts per cycle, waits 60 seconds between cycles, uses a 15-second network timeout, and schedules failed deletion retries exponentially from 60 seconds up to 3,600 seconds. These are ownership and scheduling controls, not hard real-time end-to-end deadlines.
 
@@ -72,7 +72,7 @@ For database-restore tests, stop the API and recovery worker through the supervi
 
 ## Signed publication
 
-1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.51.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
+1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.52.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
 2. The workflow tests, builds, requires the certificate, signs the NSIS installer, generates an SPDX JSON SBOM, verifies Authenticode, creates SHA-256 checksums and dependency inventories, and only then publishes a prerelease.
 3. Download the published installer on a clean supported Windows workstation. Verify `Get-AuthenticodeSignature` reports `Valid`, the subject is the expected publisher, and the SHA-256 value matches `SHA256SUMS.txt`.
 4. Install, launch, perform the smoke workflow, and confirm the update metadata resolves to the same signed artifact.
