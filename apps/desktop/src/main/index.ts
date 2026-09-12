@@ -130,8 +130,8 @@ app
       app.isPackaged,
       app.getVersion(),
       async () => {
-        notificationManager?.stop();
         await backendSupervisor?.prepareUpdate();
+        notificationManager?.stop();
         quitRequested = true;
       },
     );

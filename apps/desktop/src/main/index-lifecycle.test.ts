@@ -211,4 +211,19 @@ describe("desktop terminal lifecycle callers", () => {
     expect(mocks.shutdown).toHaveBeenCalledOnce();
     await settle();
   });
+
+  it("rejected update preparation does not stop notifications for a continuing restore", async () => {
+    mocks.prepareUpdate.mockRejectedValue(
+      new Error("Synthetic restore is in progress."),
+    );
+    await import("./index.js");
+    await settle();
+    await expect(mocks.installGate!()).rejects.toThrow(
+      "restore is in progress",
+    );
+    expect(mocks.prepareUpdate).toHaveBeenCalledOnce();
+    expect(mocks.notificationStop).not.toHaveBeenCalled();
+    expect(mocks.shutdown).not.toHaveBeenCalled();
+    expect(mocks.appQuit).not.toHaveBeenCalled();
+  });
 });
