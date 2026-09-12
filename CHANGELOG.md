@@ -22,7 +22,7 @@ All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
 - Derive account identity from the exact API-key bytes through SHA-256 before the keyed blind index; persist neither credentials nor media bytes, upload URLs, display names, or raw provider errors in the cleanup journal.
 - Preserve unknown finalization and unreadable encrypted identifiers for manual review; never guess resource names, list/delete an account's files, or reupload as recovery.
-- Keep provider terms/privacy review, per-use consent, supported image limits, and production-automation gates unchanged. Full release-suite, CI, packaged-artifact, signing, and live-provider acceptance evidence remains pending for this version.
+- Keep provider terms/privacy review, per-use consent, supported image limits, and production-automation gates unchanged. Local full-suite and unsigned Windows artifact evidence is recorded in the readiness audit. Protected CI, signing, and live-provider acceptance remain separate gates.
 
 ## [0.50.1-alpha.1] - Unreleased
 
