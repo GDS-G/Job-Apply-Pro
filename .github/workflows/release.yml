@@ -54,6 +54,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Smoke-test delivered browser runtime
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_packaged_backend.ps1 -BackendDirectory release/win-unpacked/resources/backend
       - name: Generate SPDX SBOM from packaged application
         uses: anchore/sbom-action@v0
         with:

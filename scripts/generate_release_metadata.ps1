@@ -13,6 +13,24 @@ New-Item -ItemType Directory -Force -Path $target | Out-Null
 $installers = @(Get-ChildItem -LiteralPath $target -Filter "Job-Apply-Pro-*.exe" -File)
 if ($installers.Count -eq 0) { throw "No Job Apply Pro installer was found in $target" }
 
+# Validate the delivered process boundary as well as its installer container.
+# The new worker must be present and signed with the rest of the release payload.
+$requiredPayloads = @(
+    "win-unpacked\Job Apply Pro.exe",
+    "win-unpacked\resources\backend\job-apply-pro-backend.exe",
+    "win-unpacked\resources\backend\job-apply-pro-browser-worker.exe"
+)
+foreach ($payload in $requiredPayloads) {
+    $payloadPath = Join-Path $target $payload
+    if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
+        throw "Required release payload is missing: $payload"
+    }
+    $payloadSignature = Get-AuthenticodeSignature -LiteralPath $payloadPath
+    if ($payloadSignature.Status -ne "Valid") {
+        throw "Release payload signature is not valid: $payload ($($payloadSignature.Status))"
+    }
+}
+
 $hashLines = foreach ($installer in $installers) {
     $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
     if ($signature.Status -ne "Valid") {

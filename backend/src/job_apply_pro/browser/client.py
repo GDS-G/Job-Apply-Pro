@@ -10,6 +10,8 @@ from queue import Empty, Queue
 from typing import Any
 from uuid import uuid4
 
+FROZEN_BROWSER_WORKER_NAME = "job-apply-pro-browser-worker.exe"
+
 
 class BrowserWorkerError(RuntimeError):
     pass
@@ -37,28 +39,52 @@ class BrowserWorkerClient:
     def start(self) -> None:
         if self.running:
             return
-        source_root = Path(__file__).resolve().parents[2]
         environment = os.environ.copy()
-        current_python_path = environment.get("PYTHONPATH")
-        environment["PYTHONPATH"] = (
-            f"{source_root}{os.pathsep}{current_python_path}"
-            if current_python_path
-            else str(source_root)
-        )
         creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        self._process = subprocess.Popen(
-            [sys.executable, "-m", "job_apply_pro.browser.worker_process"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            bufsize=1,
-            env=environment,
-            cwd=str(source_root),
-            creationflags=creation_flags,
+        try:
+            if getattr(sys, "frozen", False):
+                working_directory = Path(sys.executable).resolve(strict=True).parent
+                worker_executable = working_directory / FROZEN_BROWSER_WORKER_NAME
+                if not worker_executable.is_file():
+                    raise BrowserWorkerUnavailableError(
+                        "The packaged browser worker is missing; "
+                        "repair the application installation"
+                    )
+                command = [str(worker_executable), "browser-worker"]
+                # A frozen worker uses its collected modules, never a development
+                # source tree or a PATH-provided Python interpreter.
+                for key in tuple(environment):
+                    if key.upper() == "PYTHONPATH":
+                        del environment[key]
+            else:
+                working_directory = Path(__file__).resolve().parents[2]
+                current_python_path = environment.get("PYTHONPATH")
+                environment["PYTHONPATH"] = (
+                    f"{working_directory}{os.pathsep}{current_python_path}"
+                    if current_python_path
+                    else str(working_directory)
+                )
+                command = [sys.executable, "-m", "job_apply_pro.browser.worker_process"]
+            self._process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+                env=environment,
+                cwd=str(working_directory),
+                creationflags=creation_flags,
+            )
+        except OSError:
+            self._process = None
+            raise BrowserWorkerUnavailableError(
+                "The browser worker could not be started; verify the application installation"
+            ) from None
+        self._reader = threading.Thread(
+            target=self._read_responses, args=(self._process,), daemon=True
         )
-        self._reader = threading.Thread(target=self._read_responses, daemon=True)
         self._reader.start()
 
     def close(self) -> None:
@@ -98,8 +124,13 @@ class BrowserWorkerClient:
                     {"id": request_id, "method": method, "params": params},
                     separators=(",", ":"),
                 )
-                process.stdin.write(payload + "\n")
-                process.stdin.flush()
+                try:
+                    process.stdin.write(payload + "\n")
+                    process.stdin.flush()
+                except (OSError, ValueError):
+                    raise BrowserWorkerUnavailableError(
+                        "Browser worker input is unavailable"
+                    ) from None
                 try:
                     response = response_queue.get(timeout=timeout_seconds or self._timeout_seconds)
                 except Empty as error:
@@ -123,9 +154,8 @@ class BrowserWorkerClient:
                 with self._responses_lock:
                     self._responses.pop(request_id, None)
 
-    def _read_responses(self) -> None:
-        process = self._process
-        if process is None or process.stdout is None:
+    def _read_responses(self, process: subprocess.Popen[str]) -> None:
+        if process.stdout is None:
             return
         for line in process.stdout:
             try:

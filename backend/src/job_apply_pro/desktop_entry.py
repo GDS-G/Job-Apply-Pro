@@ -1,20 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
-
-import uvicorn
-from alembic import command
-from alembic.config import Config
-
-from job_apply_pro.config import get_settings
-from job_apply_pro.domain.operations import RestoreConfirmation, RestoreStatus
-from job_apply_pro.main import app
-from job_apply_pro.services.backup import BackupError, BackupService
-from job_apply_pro.storage.database import SessionFactory, engine
-from job_apply_pro.storage.operations_repository import OperationsRepository
+from pathlib import Path, PureWindowsPath
 
 
 def _resource_path(name: str) -> Path:
@@ -22,13 +12,45 @@ def _resource_path(name: str) -> Path:
     return (Path(frozen_root) if frozen_root else Path(__file__).parents[2]) / name
 
 
+def _configure_worker_browser_cache() -> None:
+    """Use the installed Windows cache instead of a nonexistent frozen bundle cache."""
+    if not getattr(sys, "frozen", False) or sys.platform != "win32":
+        return
+    if "PLAYWRIGHT_BROWSERS_PATH" in os.environ:
+        return
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    directory = PureWindowsPath(local_app_data)
+    if (
+        not local_app_data
+        or local_app_data != local_app_data.strip()
+        or not directory.is_absolute()
+        or ".." in directory.parts
+        or any(ord(character) < 32 for character in local_app_data)
+    ):
+        raise ValueError(
+            "LOCALAPPDATA must be an absolute Windows directory for the installed browser cache"
+        )
+    # Do not download browsers or create the cache. A missing installed browser
+    # remains an ordinary controlled launch failure. An explicit override,
+    # including Playwright's hermetic '0', is always left unchanged.
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(directory / "ms-playwright")
+
+
 def migrate() -> None:
+    from alembic import command
+    from alembic.config import Config
+
     configuration = Config(str(_resource_path("alembic.ini")))
     configuration.set_main_option("script_location", str(_resource_path("migrations")))
     command.upgrade(configuration, "head")
 
 
 def serve() -> None:
+    import uvicorn
+
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.main import app
+
     settings = get_settings()
     uvicorn.run(
         app,
@@ -41,6 +63,12 @@ def serve() -> None:
 
 def restore(plan_id: str, fingerprint: str) -> None:
     """Apply an already-staged restore while the API process is stopped."""
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.domain.operations import RestoreConfirmation, RestoreStatus
+    from job_apply_pro.services.backup import BackupError, BackupService
+    from job_apply_pro.storage.database import SessionFactory, engine
+    from job_apply_pro.storage.operations_repository import OperationsRepository
+
     settings = get_settings()
     confirmation = RestoreConfirmation(
         fingerprint=fingerprint,
@@ -85,11 +113,25 @@ def restore(plan_id: str, fingerprint: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Job Apply Pro packaged backend")
-    parser.add_argument("command", choices=("migrate", "serve", "restore"))
+    parser.add_argument("command", choices=("migrate", "serve", "restore", "browser-worker"))
     parser.add_argument("--plan-id")
     parser.add_argument("--fingerprint")
     arguments = parser.parse_args()
-    if arguments.command == "migrate":
+    if arguments.command == "browser-worker":
+        if arguments.plan_id or arguments.fingerprint:
+            parser.error("browser-worker does not accept restore arguments")
+        if sys.stdin is None or sys.stdout is None:
+            parser.error("browser-worker requires usable standard input and output")
+        try:
+            _configure_worker_browser_cache()
+        except ValueError as error:
+            parser.error(str(error))
+        # The console-capable worker EXE shares this entry stage and module
+        # archive, but must not initialize the API, database, or migration code.
+        from job_apply_pro.browser.worker_process import main as worker_main
+
+        worker_main()
+    elif arguments.command == "migrate":
         migrate()
     elif arguments.command == "serve":
         serve()

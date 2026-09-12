@@ -1542,7 +1542,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Validated Media Inputs v0.52.0-alpha.1</strong>
+              <strong>Packaged Browser Runtime v0.53.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

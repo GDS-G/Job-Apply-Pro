@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.53.0-alpha.1] - Unreleased
+
+### Fixed
+
+- Package a dedicated console-capable browser worker and launch it hidden through an exact sibling path; frozen builds no longer treat the windowed backend as a Python `-m` interpreter.
+- Dispatch worker mode before API/database initialization and fail safely when the worker installation or process launch is unavailable.
+- Report the current shared build name from health instead of a stale hard-coded milestone; version synchronization now checks that endpoint's build identity.
+
+### Added
+
+- Extend packaged validation to synthetic loopback browser startup, observation, session stop and worker shutdown through direct RPC and the authenticated packaged API.
+- Preserve source-mode operation, exact-origin policy, renderer isolation and disabled production gates; track remaining supervisor lifecycle work separately.
+
 ## [0.52.0-alpha.1] - Unreleased
 
 ### Added
