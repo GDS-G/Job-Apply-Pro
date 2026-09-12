@@ -5,17 +5,6 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-import uvicorn
-from alembic import command
-from alembic.config import Config
-
-from job_apply_pro.config import get_settings
-from job_apply_pro.domain.operations import RestoreConfirmation, RestoreStatus
-from job_apply_pro.main import app
-from job_apply_pro.services.backup import BackupError, BackupService
-from job_apply_pro.storage.database import SessionFactory, engine
-from job_apply_pro.storage.operations_repository import OperationsRepository
-
 
 def _resource_path(name: str) -> Path:
     frozen_root = getattr(sys, "_MEIPASS", None)
@@ -23,12 +12,20 @@ def _resource_path(name: str) -> Path:
 
 
 def migrate() -> None:
+    from alembic import command
+    from alembic.config import Config
+
     configuration = Config(str(_resource_path("alembic.ini")))
     configuration.set_main_option("script_location", str(_resource_path("migrations")))
     command.upgrade(configuration, "head")
 
 
 def serve() -> None:
+    import uvicorn
+
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.main import app
+
     settings = get_settings()
     uvicorn.run(
         app,
@@ -41,6 +38,12 @@ def serve() -> None:
 
 def restore(plan_id: str, fingerprint: str) -> None:
     """Apply an already-staged restore while the API process is stopped."""
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.domain.operations import RestoreConfirmation, RestoreStatus
+    from job_apply_pro.services.backup import BackupError, BackupService
+    from job_apply_pro.storage.database import SessionFactory, engine
+    from job_apply_pro.storage.operations_repository import OperationsRepository
+
     settings = get_settings()
     confirmation = RestoreConfirmation(
         fingerprint=fingerprint,
@@ -85,11 +88,21 @@ def restore(plan_id: str, fingerprint: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Job Apply Pro packaged backend")
-    parser.add_argument("command", choices=("migrate", "serve", "restore"))
+    parser.add_argument("command", choices=("migrate", "serve", "restore", "browser-worker"))
     parser.add_argument("--plan-id")
     parser.add_argument("--fingerprint")
     arguments = parser.parse_args()
-    if arguments.command == "migrate":
+    if arguments.command == "browser-worker":
+        if arguments.plan_id or arguments.fingerprint:
+            parser.error("browser-worker does not accept restore arguments")
+        if sys.stdin is None or sys.stdout is None:
+            parser.error("browser-worker requires usable standard input and output")
+        # The console-capable worker EXE shares this entry stage and module
+        # archive, but must not initialize the API, database, or migration code.
+        from job_apply_pro.browser.worker_process import main as worker_main
+
+        worker_main()
+    elif arguments.command == "migrate":
         migrate()
     elif arguments.command == "serve":
         serve()

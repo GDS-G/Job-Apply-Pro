@@ -4,7 +4,11 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Validated Media Inputs `v0.52.0-alpha.1`**. Exact-version validation is recorded below; earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.52 release or live-provider acceptance has been established.
+The active source milestone is **Packaged Browser Runtime `v0.53.0-alpha.1`**. Exact-version validation is recorded below; earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.53 release or live-provider acceptance has been established.
+
+### Packaged Browser Runtime validation
+
+ADR-0063 repairs the reproduced frozen worker launch defect with a console-capable hidden worker and explicit entry dispatch. Current-version integrated test and artifact results are pending; the v0.52 evidence below remains historical. Supervisor migration/start/shutdown/restore ownership remains a separate open work item.
 
 ### Validated Media Inputs validation
 

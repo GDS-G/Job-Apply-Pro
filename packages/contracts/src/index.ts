@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Validated Media Inputs",
-  version: "0.52.0-alpha.1",
+  name: "Packaged Browser Runtime",
+  version: "0.53.0-alpha.1",
   channel: "alpha",
 } as const;
 

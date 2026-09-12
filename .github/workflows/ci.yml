@@ -77,6 +77,9 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
+      - name: Smoke-test delivered browser runtime
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_packaged_backend.ps1 -BackendDirectory release/win-unpacked/resources/backend
+
       - name: Upload package smoke artifact
         uses: actions/upload-artifact@v7
         with:

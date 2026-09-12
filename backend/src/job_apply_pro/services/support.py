@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Validated Media Inputs"
+    BUILD_NAME = "Packaged Browser Runtime"
 
     def __init__(
         self,

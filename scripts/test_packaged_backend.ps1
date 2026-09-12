@@ -1,7 +1,25 @@
+param(
+    [string]$BackendDirectory = "apps\desktop\backend-dist\job-apply-pro-backend",
+    [string]$PythonPath = ""
+)
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$backend = Join-Path $repoRoot "apps\desktop\backend-dist\job-apply-pro-backend\job-apply-pro-backend.exe"
+$bundleRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot $BackendDirectory))
+$repoPrefix = $repoRoot.TrimEnd("\", "/") + [IO.Path]::DirectorySeparatorChar
+if (-not $bundleRoot.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Packaged backend directory must be inside this repository"
+}
+$backend = Join-Path $bundleRoot "job-apply-pro-backend.exe"
 if (-not (Test-Path -LiteralPath $backend -PathType Leaf)) {
     throw "Packaged backend executable was not found at $backend"
+}
+$browserWorker = Join-Path (Split-Path -Parent $backend) "job-apply-pro-browser-worker.exe"
+if (-not (Test-Path -LiteralPath $browserWorker -PathType Leaf)) {
+    throw "Packaged browser worker executable was not found beside the backend"
+}
+if ([string]::IsNullOrWhiteSpace($PythonPath)) {
+    $localPython = Join-Path $repoRoot ".venv-dev\Scripts\python.exe"
+    $PythonPath = if (Test-Path -LiteralPath $localPython -PathType Leaf) { $localPython } else { "python" }
 }
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("job-apply-pro-package-smoke-" + [guid]::NewGuid())
@@ -18,10 +36,16 @@ $env:JAP_BROWSER_ARTIFACT_DIR = Join-Path $resolvedTestRoot "artifacts"
 $env:JAP_DOCUMENT_DATA_DIR = Join-Path $resolvedTestRoot "documents"
 $env:JAP_BACKUP_DATA_DIR = Join-Path $resolvedTestRoot "backups"
 $env:JAP_RESTORE_STAGING_DIR = Join-Path $resolvedTestRoot "restore"
-$env:JAP_API_PORT = "8876"
+$portProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+$portProbe.Start()
+$env:JAP_API_PORT = ([Net.IPEndPoint]$portProbe.LocalEndpoint).Port.ToString()
+$portProbe.Stop()
+$apiRoot = "http://127.0.0.1:$($env:JAP_API_PORT)"
 $env:JAP_API_TOKEN = "package-smoke-token"
 $env:JAP_MASTER_KEY = [Convert]::ToBase64String([byte[]](1..32))
 $env:JAP_AI_CONFIG_JSON = '{"providers":[],"models":[],"policies":[]}'
+$env:JAP_AUTOMATION_ENABLED = "false"
+$env:JAP_BROWSER_HEADLESS = "true"
 
 function Start-SmokeBackend {
     param(
@@ -35,7 +59,7 @@ function Start-SmokeBackend {
     do {
         Start-Sleep -Milliseconds 250
         try {
-            $health = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/health" -TimeoutSec 2
+            $health = Invoke-RestMethod -Uri "$apiRoot/api/v1/health" -TimeoutSec 2
         }
         catch {
             $health = $null
@@ -50,15 +74,37 @@ function Start-SmokeBackend {
 }
 
 function Stop-SmokeBackend {
-    param([System.Diagnostics.Process]$Process)
+    param(
+        [System.Diagnostics.Process]$Process,
+        [System.Diagnostics.Process]$WorkerProcess = $null
+    )
 
+    if ($null -eq $WorkerProcess -and $null -ne $Process -and -not $Process.HasExited) {
+        $ownedWorkers = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id)" | Where-Object {
+            $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
+        })
+        if ($ownedWorkers.Count -eq 1) {
+            $WorkerProcess = Get-Process -Id $ownedWorkers[0].ProcessId -ErrorAction SilentlyContinue
+            if ($null -ne $WorkerProcess) { $null = $WorkerProcess.Handle }
+        }
+    }
     if ($null -ne $Process -and -not $Process.HasExited) {
         Stop-Process -Id $Process.Id -Force
         $Process.WaitForExit()
     }
+    if ($null -ne $WorkerProcess -and -not $WorkerProcess.WaitForExit(15000)) {
+        # Only this previously verified backend child is eligible for cleanup.
+        Stop-Process -Id $WorkerProcess.Id -Force
+        $WorkerProcess.WaitForExit()
+        throw "Packaged API-owned worker did not exit after its parent's IPC pipe closed"
+    }
+    if ($null -ne $WorkerProcess -and $WorkerProcess.ExitCode -ne 0) {
+        throw "Packaged API-owned worker exited unsuccessfully after parent shutdown"
+    }
 }
 
 $process = $null
+$apiWorkerProcess = $null
 try {
     $migration = Start-Process -FilePath $backend -ArgumentList "migrate" -WindowStyle Hidden -Wait -PassThru
     if ($migration.ExitCode -ne 0) { throw "Packaged backend migration failed" }
@@ -70,9 +116,9 @@ try {
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $stdoutPath -StderrPath $stderrPath
 
     $headers = @{ "X-Job-Apply-Pro-Token" = $env:JAP_API_TOKEN }
-    $cleanup = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
+    $cleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($cleanup.items).Count -ne 0) { throw "Fresh packaged cleanup journal is not empty" }
-    $cleanupRetry = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup/retry" -Headers $headers -TimeoutSec 5
+    $cleanupRetry = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/ai/media-cleanup/retry" -Headers $headers -TimeoutSec 5
     if (@($cleanupRetry.items).Count -ne 0) { throw "Empty packaged cleanup retry changed state" }
     # Synthetic pixels only. The deliberately unknown prompt stops before any
     # route/provider work, but only after successful packaged image decoding.
@@ -95,7 +141,7 @@ try {
             input_parts = @(@{ kind = "media"; mime_type = "image/png"; data = $mediaCase.data })
         } | ConvertTo-Json -Depth 5
         try {
-            Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8876/api/v1/ai/invoke" -Headers $headers -ContentType "application/json" -Body $mediaBody -TimeoutSec 10 | Out-Null
+            Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/ai/invoke" -Headers $headers -ContentType "application/json" -Body $mediaBody -TimeoutSec 10 | Out-Null
             throw "Packaged synthetic media check unexpectedly invoked a model"
         }
         catch {
@@ -104,19 +150,30 @@ try {
             if ($mediaError.detail -ne $mediaCase.detail) { throw "Packaged image decoding or safe rejection failed" }
         }
     }
+    & $PythonPath (Join-Path $PSScriptRoot "test_packaged_browser.py") --worker $browserWorker --test-root $resolvedTestRoot --api-url $apiRoot
+    if ($LASTEXITCODE -ne 0) { throw "Packaged loopback browser smoke failed" }
+    $workerRecords = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($process.Id)" | Where-Object {
+        $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
+    })
+    if ($workerRecords.Count -ne 1) {
+        throw "Packaged API did not retain exactly one fixed-sibling browser worker"
+    }
+    $apiWorkerProcess = Get-Process -Id $workerRecords[0].ProcessId -ErrorAction Stop
+    $null = $apiWorkerProcess.Handle
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
     } | ConvertTo-Json
-    $backup = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8876/api/v1/operations/backups" -Headers $headers -ContentType "application/json" -Body $backupBody
+    $backup = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -ContentType "application/json" -Body $backupBody
     if ($backup.status -ne "VERIFIED") { throw "Packaged backup did not verify" }
     $restoreBody = @{ categories = @("DATABASE", "DOCUMENTS") } | ConvertTo-Json
-    $plan = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8876/api/v1/operations/backups/$($backup.id)/restore-plans" -Headers $headers -ContentType "application/json" -Body $restoreBody
+    $plan = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/operations/backups/$($backup.id)/restore-plans" -Headers $headers -ContentType "application/json" -Body $restoreBody
     if ($plan.status -ne "STAGED") { throw "Packaged restore plan was not staged" }
 
     Set-Content -LiteralPath $documentPath -Value "damaged" -Encoding utf8 -NoNewline
-    Stop-SmokeBackend -Process $process
+    Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     $process = $null
+    $apiWorkerProcess = $null
     $restoreArguments = @("restore", "--plan-id", $plan.id, "--fingerprint", $plan.fingerprint)
     $restore = Start-Process -FilePath $backend -ArgumentList $restoreArguments -WindowStyle Hidden -Wait -PassThru
     if ($restore.ExitCode -ne 0) { throw "Packaged offline restore failed" }
@@ -133,19 +190,23 @@ try {
     $postRestoreStdout = Join-Path $resolvedTestRoot "post-restore.stdout.log"
     $postRestoreStderr = Join-Path $resolvedTestRoot "post-restore.stderr.log"
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $postRestoreStdout -StderrPath $postRestoreStderr
-    $backups = @(Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/operations/backups" -Headers $headers -TimeoutSec 5)
+    $backups = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -TimeoutSec 5)
     if ($backups.Count -ne 1 -or $backups[0].id -ne $backup.id) {
         throw "Recovered database did not retain the backup manifest"
     }
-    $diagnostics = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/operations/diagnostics" -Headers $headers -TimeoutSec 5
+    $diagnostics = Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/diagnostics" -Headers $headers -TimeoutSec 5
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
-    $restoredCleanup = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
+    $restoredCleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, encrypted backup and offline restore smoke passed."
+    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, encrypted backup and offline restore smoke passed."
 }
 finally {
-    Stop-SmokeBackend -Process $process
-    if (Test-Path -LiteralPath $resolvedTestRoot) {
-        Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
+    try {
+        Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
+    }
+    finally {
+        if (Test-Path -LiteralPath $resolvedTestRoot) {
+            Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
+        }
     }
 }

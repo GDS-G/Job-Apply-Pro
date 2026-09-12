@@ -54,8 +54,23 @@ executable = EXE(
     upx=True,
     console=False,
 )
+browser_worker_executable = EXE(
+    pyz,
+    analysis.scripts,
+    [],
+    exclude_binaries=True,
+    name="job-apply-pro-browser-worker",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    # JSON-lines RPC requires real stdin/stdout. The parent supplies hidden
+    # Windows creation flags and redirected pipes, so no console is displayed.
+    console=True,
+)
 bundle = COLLECT(
     executable,
+    browser_worker_executable,
     analysis.binaries,
     analysis.datas,
     strip=False,
