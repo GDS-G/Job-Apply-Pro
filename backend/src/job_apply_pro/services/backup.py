@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Protocol
@@ -50,7 +51,7 @@ class DisabledCloudBackupProvider:
 
 
 class BackupService:
-    SCHEMA_REVISION = "20260805_0009"
+    SCHEMA_REVISION = "20260814_0023"
     RESTORE_PHRASE = "APPLY VERIFIED RESTORE"
 
     def __init__(
@@ -235,14 +236,21 @@ class BackupService:
         document_dir: Path,
         staging_dir: Path,
     ) -> None:
-        """Apply verified staged files; callers must ensure the database is offline."""
+        """Apply verified staged files only with the API and media worker stopped.
+
+        The desktop supervisor waits for the API process to exit, then its restore
+        CLI closes database handles before calling here. The journal check below
+        is a read-only offline precondition, not serialization against live writers.
+        """
         staged = Path(plan.staged_path).resolve()
         staging_root = staging_dir.resolve()
         if not staged.is_dir() or staging_root not in staged.parents:
             raise BackupError("Restore staging directory is unavailable")
         if BackupCategory.DATABASE in plan.categories:
             source = staged / "database" / "job_apply_pro.db"
-            cls._atomic_restore(source, cls._sqlite_path(database_url), preserve_previous=True)
+            target_database = cls._sqlite_path(database_url)
+            cls._require_resolved_media_cleanup(target_database)
+            cls._atomic_restore(source, target_database, preserve_previous=True)
         if BackupCategory.DOCUMENTS in plan.categories:
             source_root = staged / "documents"
             if not source_root.is_dir():
@@ -252,6 +260,41 @@ class BackupService:
                 if source.is_file() and not source.is_symlink():
                     relative = source.relative_to(source_root)
                     cls._atomic_restore(source, target_root / relative, preserve_previous=False)
+
+    @staticmethod
+    def _require_resolved_media_cleanup(database_path: Path) -> None:
+        """Never discard current provider cleanup obligations during offline restore."""
+        try:
+            if not database_path.is_file():
+                raise OSError("Current database is unavailable")
+            # Do not use immutable=1: it can ignore committed journal rows in WAL.
+            # mode=ro prohibits writes and refuses to create a missing database.
+            with closing(
+                sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True, timeout=1.0)
+            ) as connection:
+                journal = connection.execute(
+                    "SELECT type FROM sqlite_master WHERE name = 'ai_media_cleanup' COLLATE NOCASE"
+                ).fetchone()
+                if journal is None:
+                    # A valid legacy database predating the media journal is safe.
+                    return
+                if journal != ("table",):
+                    raise sqlite3.DatabaseError("Media cleanup journal is not a table")
+                unresolved = connection.execute(
+                    "SELECT 1 FROM ai_media_cleanup "
+                    "WHERE state IS NULL OR state COLLATE BINARY != ? LIMIT 1",
+                    ("DELETED",),
+                ).fetchone()
+        except (OSError, sqlite3.Error):
+            raise BackupError(
+                "Current database cannot be inspected safely for provider media cleanup; "
+                "restore was not applied"
+            ) from None
+        if unresolved is not None:
+            raise BackupError(
+                "Database restore is blocked by unresolved provider media cleanup; "
+                "complete recovery or verified manual review before restoring"
+            )
 
     def list_backups(self) -> list[BackupManifest]:
         return self._repository.list_backups()

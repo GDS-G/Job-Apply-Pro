@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -14,6 +15,7 @@ from job_apply_pro.ai.providers import (
     GeminiProvider,
 )
 from job_apply_pro.domain.ai import AIInputPart, AIProviderRequest
+from media_cleanup_helpers import new_test_journal
 
 _HOST = "https://generativelanguage.googleapis.com"
 _UPLOAD_URL = f"{_HOST}/upload/v1beta/files?upload_id=synthetic-session"
@@ -90,6 +92,7 @@ class _Harness:
                 }
             ),
             transport=httpx.MockTransport(self.handle),
+            journal_factory=new_test_journal,
         )
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -245,22 +248,69 @@ def test_unknown_finalization_response_never_becomes_retryable(failure: str) -> 
         assert body.read_chunks <= 81
 
 
-@pytest.mark.parametrize("stage", ["start", "delete"])
 @pytest.mark.parametrize("failure", ["oversized", "stream"])
-def test_start_and_delete_responses_are_streamed_and_bounded(stage: str, failure: str) -> None:
+def test_start_response_is_streamed_and_bounded(failure: str) -> None:
     harness = _Harness()
     body = _TrackedStream(oversized=failure == "oversized", broken=failure == "stream")
     response = httpx.Response(200, headers={"x-goog-upload-url": _UPLOAD_URL}, stream=body)
-    if stage == "start":
-        harness.start = response
-    else:
-        harness.deletions["files/synthetic-image"] = response
+    harness.start = response
     with pytest.raises(AIProviderError) as caught:
         harness.provider.complete(_request())
-    assert isinstance(caught.value, AIProviderMediaRetentionError) is (stage == "delete")
+    assert not isinstance(caught.value, AIProviderMediaRetentionError)
     assert body.closed and body.read_chunks <= 81
+    assert harness.events == ["start"]
+
+
+@pytest.mark.parametrize("status", [200, 204, 404])
+def test_successful_deletion_closes_without_consuming_irrelevant_body(status: int) -> None:
+    harness = _Harness()
+    body = _TrackedStream(broken=True)
+    harness.deletions["files/synthetic-image"] = httpx.Response(status, stream=body)
+    assert harness.provider.complete(_request()).content == "Reviewed"
+    assert body.closed and body.read_chunks == 0
+
+
+def test_accepted_deletion_is_not_evidence_of_completed_deletion() -> None:
+    harness = _Harness()
+    harness.deletions["files/synthetic-image"] = httpx.Response(202)
+    with pytest.raises(AIProviderMediaRetentionError):
+        harness.provider.complete(_request())
+
+
+@pytest.mark.parametrize("stage", ["start", "finalize", "interaction"])
+def test_slow_trickle_response_respects_deadline_and_preserves_cleanup(
+    stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    elapsed = [100.0]
+    monkeypatch.setattr(
+        "job_apply_pro.ai.providers.time", SimpleNamespace(monotonic=lambda: elapsed[0])
+    )
+
+    class SlowStream(httpx.SyncByteStream):
+        closed = False
+
+        def __iter__(self) -> Iterator[bytes]:
+            yield b"{"
+            elapsed[0] += 6  # request timeout is five seconds, without real sleeps
+            yield b"}"
+
+        def close(self) -> None:
+            self.closed = True
+
+    body = SlowStream()
+    response = httpx.Response(200, headers={"x-goog-upload-url": _UPLOAD_URL}, stream=body)
+    harness = _Harness([response] if stage == "finalize" else None)
     if stage == "start":
-        assert harness.events == ["start"]
+        harness.start = response
+    elif stage == "interaction":
+        harness.interaction = response
+    with pytest.raises(AIProviderError) as caught:
+        harness.provider.complete(_request())
+    assert isinstance(caught.value, AIProviderMediaRetentionError) is (stage == "finalize")
+    assert body.closed
+    if stage == "interaction":
+        assert harness.events[-1] == "delete:files/synthetic-image"
 
 
 @pytest.mark.parametrize(

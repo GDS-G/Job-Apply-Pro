@@ -228,6 +228,9 @@ const bridge: DesktopBridge = {
       },
     }),
     listBackups: async () => [],
+    listMediaCleanup: async () => ({ items: [] }),
+    retryMediaCleanup: async () => ({ items: [] }),
+    resolveMediaCleanup: async () => ({ items: [] }),
     listBackupSchedules: async () => [],
     createBackup: async () => {
       throw new Error("Not implemented in this test.");

@@ -501,6 +501,27 @@ class AICacheRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class MediaCleanupRow(Base):
+    __tablename__ = "ai_media_cleanup"
+    __table_args__ = (
+        Index("ix_ai_media_cleanup_account", "account_fingerprint", "state", "provider_id"),
+        Index("ix_ai_media_cleanup_recovery", "state", "lease_until", "next_attempt_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider_id: Mapped[str] = mapped_column(String(80))
+    account_fingerprint: Mapped[str] = mapped_column(String(64))
+    owner_token: Mapped[str] = mapped_column(String(80))
+    state: Mapped[str] = mapped_column(String(40))
+    encrypted_resource: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class PortalRunRow(Base):
     __tablename__ = "portal_runs"
     __table_args__ = (Index("ix_portal_runs_workflow_updated", "workflow_id", "updated_at"),)

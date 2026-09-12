@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Media Lifecycle Hardening",
-  version: "0.50.1-alpha.1",
+  name: "Durable Media Recovery",
+  version: "0.51.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -750,6 +750,27 @@ export interface DesktopNotificationStatus {
 }
 
 export type BackupCategory = "DATABASE" | "DOCUMENTS";
+export type MediaCleanupState =
+  "UPLOADING" | "IN_USE" | "DELETE_PENDING" | "MANUAL_REVIEW" | "DELETED";
+
+/** Redacted recovery metadata; provider resource names and URIs are never public. */
+export interface MediaCleanupPublicRecord {
+  id: string;
+  provider_id: string;
+  state: MediaCleanupState;
+  known_resource: boolean;
+  attempts: number;
+  reason: string | null;
+  lease_until: string | null;
+  next_attempt_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MediaCleanupListResponse {
+  items: MediaCleanupPublicRecord[];
+}
+
 export type BackupStatus = "CREATING" | "VERIFIED" | "FAILED";
 export type RestoreStatus = "STAGED" | "APPLIED" | "FAILED";
 export type LicenseStatus =
@@ -1670,6 +1691,13 @@ export interface DesktopBridge {
       enabled: boolean,
     ): Promise<DesktopNotificationStatus>;
     getOperationsDashboard(): Promise<OperationsDashboard>;
+    listMediaCleanup(): Promise<MediaCleanupListResponse>;
+    retryMediaCleanup(): Promise<MediaCleanupListResponse>;
+    resolveMediaCleanup(
+      id: string,
+      expectedUpdatedAt: string,
+      confirmation: string,
+    ): Promise<MediaCleanupListResponse>;
     listBackups(): Promise<BackupManifest[]>;
     listBackupSchedules(): Promise<BackupSchedule[]>;
     createBackup(label: string): Promise<BackupManifest>;

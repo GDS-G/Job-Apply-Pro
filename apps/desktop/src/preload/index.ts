@@ -221,6 +221,19 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
     setNativeNotificationsEnabled: (enabled: boolean) =>
       ipcRenderer.invoke("notifications:set-native-enabled", enabled),
     getOperationsDashboard: () => ipcRenderer.invoke("operations:dashboard"),
+    listMediaCleanup: () => ipcRenderer.invoke("ai:media-cleanup-list"),
+    retryMediaCleanup: () => ipcRenderer.invoke("ai:media-cleanup-retry"),
+    resolveMediaCleanup: (
+      id: string,
+      expectedUpdatedAt: string,
+      confirmation: string,
+    ) =>
+      ipcRenderer.invoke(
+        "ai:media-cleanup-resolve",
+        id,
+        expectedUpdatedAt,
+        confirmation,
+      ),
     listBackups: () => ipcRenderer.invoke("operations:backups"),
     listBackupSchedules: () =>
       ipcRenderer.invoke("operations:backup-schedules"),

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from sqlalchemy.orm import Session
 
 from job_apply_pro.ai.configuration import build_ai_registry
+from job_apply_pro.api.routes.ai import get_media_cleanup_service
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
 from job_apply_pro.documents.extractors import DocumentExtractionError, DocumentIngestionOptions
@@ -97,7 +98,12 @@ def get_knowledge_service(
             ocr_page_timeout_seconds=settings.document_ocr_page_timeout_seconds,
         ),
         ai_gateway=AIGatewayService(
-            build_ai_registry(settings.ai_config_json), AIGatewayRepository(session), cipher
+            build_ai_registry(
+                settings.ai_config_json,
+                journal_factory=get_media_cleanup_service(cipher).journal_factory,
+            ),
+            AIGatewayRepository(session),
+            cipher,
         ),
     )
 

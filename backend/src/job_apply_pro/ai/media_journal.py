@@ -1,0 +1,16 @@
+from collections.abc import Callable
+from typing import Protocol
+
+
+class MediaJournal(Protocol):
+    """One invocation's durable media ownership; never carries image bytes."""
+
+    def begin(self) -> str: ...
+
+    def register(self, record_id: str, name: str) -> None: ...
+
+    def abandon_before_upload(self, record_id: str) -> None: ...
+
+    def renew(self) -> None: ...
+
+    def cleanup(self, delete: Callable[[str], None]) -> None: ...

@@ -53,6 +53,7 @@ from job_apply_pro.services.ai import (
 )
 from job_apply_pro.storage.ai_repository import AIGatewayRepository
 from job_apply_pro.storage.models import AICacheRow, ModelInvocationRow
+from media_cleanup_helpers import new_test_journal
 
 
 class FakeProvider:
@@ -691,6 +692,7 @@ def test_gemini_adapter_uploads_uses_and_deletes_consented_media() -> None:
             }
         ),
         transport=httpx.MockTransport(handler),
+        journal_factory=new_test_journal,
     )
     result = provider.complete(
         AIProviderRequest(
@@ -771,6 +773,7 @@ def test_gemini_adapter_deletes_media_when_interaction_fails() -> None:
             }
         ),
         transport=httpx.MockTransport(handler),
+        journal_factory=new_test_journal,
     )
     with pytest.raises(AIProviderUnavailableError, match="request failed"):
         provider.complete(
@@ -894,6 +897,7 @@ def test_gemini_rejects_untrusted_upload_session_url() -> None:
                 200, headers={"x-goog-upload-url": "https://attacker.example/upload/session"}
             )
         ),
+        journal_factory=new_test_journal,
     )
     with pytest.raises(AIProviderError, match="untrusted upload URL"):
         provider.complete(
