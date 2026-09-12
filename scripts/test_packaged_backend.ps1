@@ -21,6 +21,7 @@ $env:JAP_RESTORE_STAGING_DIR = Join-Path $resolvedTestRoot "restore"
 $env:JAP_API_PORT = "8876"
 $env:JAP_API_TOKEN = "package-smoke-token"
 $env:JAP_MASTER_KEY = [Convert]::ToBase64String([byte[]](1..32))
+$env:JAP_AI_CONFIG_JSON = '{"providers":[],"models":[],"policies":[]}'
 
 function Start-SmokeBackend {
     param(
@@ -69,6 +70,10 @@ try {
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $stdoutPath -StderrPath $stderrPath
 
     $headers = @{ "X-Job-Apply-Pro-Token" = $env:JAP_API_TOKEN }
+    $cleanup = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
+    if (@($cleanup.items).Count -ne 0) { throw "Fresh packaged cleanup journal is not empty" }
+    $cleanupRetry = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup/retry" -Headers $headers -TimeoutSec 5
+    if (@($cleanupRetry.items).Count -ne 0) { throw "Empty packaged cleanup retry changed state" }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -104,6 +109,9 @@ try {
     }
     $diagnostics = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/operations/diagnostics" -Headers $headers -TimeoutSec 5
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
+    $restoredCleanup = Invoke-RestMethod -Uri "http://127.0.0.1:8876/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
+    if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
+    Write-Output "Packaged startup, migration, cleanup API, encrypted backup and offline restore smoke passed."
 }
 finally {
     Stop-SmokeBackend -Process $process

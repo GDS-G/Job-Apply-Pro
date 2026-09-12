@@ -4,6 +4,20 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
+The active source milestone is **Durable Media Recovery `v0.51.0-alpha.1`**. Final local validation passes 320 backend tests at 84.45% coverage and 79 desktop tests, with formatting, lint, strict typing, frozen dependency installation, production build and dependency audits passing. Protected CI and Windows packaging evidence are recorded separately below when available. The tables and earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.51 release has been validated.
+
+### Durable Media Recovery Windows candidate
+
+Runtime source commit `056d2f16b1375e7453a6011f1795575b9ae08718` produced the unsigned NSIS installer and unpacked application. Subsequent source-control changes add only smoke-test/documentation evidence, not packaged application code. The expanded packaged-backend smoke passed startup, migration, cleanup listing/empty retry, encrypted backup, offline restore and post-restore cleanup status with isolated synthetic storage and no configured AI providers. The built backend and the copy inside the unpacked desktop have identical SHA-256 hashes.
+
+| Artifact | Bytes | SHA-256 | Authenticode |
+| --- | ---: | --- | --- |
+| `Job-Apply-Pro-0.51.0-alpha.1-x64.exe` | 170234625 | `B866F9D08B2EA810CFE737055833D8FE3651091C34BD5A5E8F3F58025ED41FC5` | NotSigned |
+| `win-unpacked/Job Apply Pro.exe` | 225500672 | `8A7A57B84218B6130DB3389604CDBD0B0D81334D3CB4C50EA8EF92FD438C48F2` | NotSigned |
+| Bundled `job-apply-pro-backend.exe` | 18552957 | `338C9A9B7A21EA0D84A04BC8FE77396B93D4BBF5A75F9759A9CE7ED49B820DAC` | NotSigned |
+
+Protected pull-request checks must pass before integration. No signed release, live provider/portal validation, signed update/rollback rehearsal, or physical Windows acceptance is claimed by these local results.
+
 | Requirement                       | Implementation evidence                                                                           | Validation evidence                                                                                          | Result                                                                                                             |
 | --------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | Performance and stress testing    | Bounded diagnostic queries, workflow limits, startup deadline                                     | 2,000-job test under 3 seconds; packaged startup under 60 seconds; backend coverage gate at least 80%        | Source/packaged candidate complete                                                                                 |
@@ -23,7 +37,7 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 
 `cryptography>=50,<51` is required. Version 50.0.0 fixes `PYSEC-2026-3552`; the security workflow runs direct `pip-audit` with no advisory exceptions.
 
-### Latest remote validation
+### Phase 12 remote validation (historical)
 
 PR #12 final head `c6caf7acc22d291a62561bbf6aaef013ec8cf177` passed dependency audit, secret scanning, Python CodeQL, JavaScript/TypeScript CodeQL, formatting, lint, strict type checking, all backend and desktop tests, the 80% coverage gate, production build, frozen-backend packaging and smoke validation, unpacked Windows packaging, and artifact upload. Commit `4e461799e7cd32a63868d8719853ccc17fafc77c` corrected a hard-coded calendar test date that had crossed from scheduled to due; the test now creates its fixture relative to the test clock and asserts both scheduled and due counts. Commit `cc0fd82774ea379257e1b7d69d0ad2310cbf945e` migrated checkout, pnpm setup, Node setup, Python setup, Gitleaks, CodeQL, and artifact upload to their Node 24-compatible action majors and added default-branch security analysis.
 
@@ -173,7 +187,11 @@ PR #44 validated exact final release head `0590449f67775e7ad749ba833c82b6d09b702
 
 ## Current release classification
 
-`Calendar Interview Awareness v0.21.0-alpha.1` is the current integrated Windows alpha source build with green release-branch and main-branch validation. It preserves the bounded-document, evidence-bound generation, Portal Readiness, Provider Connectivity, supervised execution, provider-data resilience, encrypted incremental mail, provider-configuration, notification, and production-hardening baselines while adding privacy-bounded pull-based calendar snapshots and local interview reminders. It is not feature-complete or a stable production release: webhook/push synchronization infrastructure, richer document layout/templates/ranking, portal-specific mappings, cross-platform packaging, and other traceability items remain source work. Signing, provider registration/authorization, legal/terms and quota approval, authorized live evidence, owner-installed helper validation, physical Windows notification/Focus Assist/sleep evidence, and other release-lab evidence remain external gates. Credentials pasted into chat are not an automation or secret-storage route; live validation requires owner-controlled browser sign-in, with MFA and one-time codes completed by the owner. The signed release workflow must not be dispatched and no portal catalog entry may set `production_enabled=true` until the relevant source and external controls exist.
+`Durable Media Recovery v0.51.0-alpha.1` is the active Windows alpha source milestone. Passed local validation and unsigned Windows candidate evidence appear in this audit's opening section; protected integration is tracked in PR #82. It adds durable provider-media cleanup ownership, credential-scoped admission, restart recovery, operator review, and original-database restore protection to the governed Gemini media boundary. This is not a production-ready or feature-complete release. The remaining source requirements are tracked in `docs/requirements-traceability.md`; signed installer/update/rollback, authorized live portal and provider validation, terms/privacy approval, and physical Windows release-lab evidence remain external gates. No portal catalog entry may set `production_enabled=true`, and no signed release workflow may be dispatched, until the relevant controls and authorization exist.
+
+### Calendar Interview Awareness release classification (historical)
+
+`Calendar Interview Awareness v0.21.0-alpha.1` was an integrated Windows alpha source build with green release-branch and main-branch validation. It preserved the bounded-document, evidence-bound generation, Portal Readiness, Provider Connectivity, supervised execution, provider-data resilience, encrypted incremental mail, provider-configuration, notification, and production-hardening baselines while adding privacy-bounded pull-based calendar snapshots and local interview reminders. It was not feature-complete or a stable production release. Its recorded external gates included signing, provider registration/authorization, legal/terms and quota approval, authorized live evidence, owner-installed helper validation, physical Windows notification/Focus Assist/sleep evidence, and other release-lab evidence. Credentials pasted into chat are not an automation or secret-storage route; live validation requires owner-controlled browser sign-in, with MFA and one-time codes completed by the owner.
 
 ### Native Gemini Fallback source validation
 
@@ -478,6 +496,16 @@ The full backend suite passed 248 tests at 83.98% coverage, including migration 
 Dependency audits report zero known vulnerabilities after bounded same-series npm overrides, Vitest 4.1.11, pypdf 6.16.1 and httpx2 2.12.0. The unpublished local application package is not auditable through PyPI and is explicitly skipped by pip-audit. Checks and advisory enforcement remain enabled.
 
 The installation guide now distinguishes unsigned development candidates from signed publication; the previous old signed-installer instruction was not supported by release evidence. This patch does not enable live portal automation, configure signing or satisfy physical release-lab acceptance.
+
+### Durable Media Recovery source readiness
+
+`Durable Media Recovery v0.51.0-alpha.1` adds the `ai_media_cleanup` journal in migration `20260814_0023`. Each file's intent commits before external upload; a validated remote resource name is encrypted before remaining metadata validation. Admission is durable across invocations and processes for the same credential identity. Its fingerprint binds provider kind, trusted origin, and exact API-key bytes: SHA-256 precedes the HMAC blind index so key case and whitespace distinctions survive normalization. The configuration ID is excluded, so renamed or aliased configurations with identical credentials share the gate and support recovery; the original provider ID remains record context. Distinct API keys cannot prove a shared remote account, and rotation leaves old obligations retained. Secrets, resource names, URLs, image bytes/hashes, and filenames are excluded from public cleanup status. ADR-0061 records the design.
+
+Ownership uses a token and a 20-minute lease renewed between lifecycle phases; it is not a hard real-time request deadline. Known-resource recovery is deletion-only, runs at startup and periodically with 60 seconds between background passes, and attempts at most two eligible deletions per pass with a 15-second configured network timeout. It honors active leases, retry eligibility, and matching enabled provider credential identity. Missing or changed credentials leave obligations unresolved; a configuration rename alone does not. Only HTTP `200`, `204`, or `404` confirms deletion; `202` is not completion evidence. Recovery never uploads media, invokes a model, lists provider files, or guesses an unknown resource.
+
+Unknown finalization becomes manual review. Local closure requires the exact phrase `I VERIFIED PROVIDER MEDIA CLEANUP` and the reviewed record's unchanged timestamp; it records the operator's verification, not independently observed provider deletion. Known-resource ciphertext that cannot be read is preserved, remains unresolved, and cannot be manually acknowledged away. The authenticated status endpoint and desktop refresh are read-only. The offline database restore guard inspects the original current database, including committed SQLite WAL state, and blocks replacement when obligations remain or inspection fails; the backend and worker must already be stopped.
+
+Repository, service, lifecycle, restore, and desktop bridge test sources accompany the implementation. The opening audit section records the passed local full suite, built unsigned installer `Job-Apply-Pro-0.51.0-alpha.1-x64.exe`, artifact hashes and packaged smoke against runtime source `056d2f16b1375e7453a6011f1795575b9ae08718`. Protected CI, signed publication and live-provider acceptance remain separate evidence gates. Processing-state polling, full image validation/EXIF removal, aggregate hard-deadline policy, authorized provider retention acceptance, and physical crash/network/key-recovery evidence remain outstanding. Existing signing, live portal, and release-lab gates are unchanged.
 
 ## External launch evidence still required
 

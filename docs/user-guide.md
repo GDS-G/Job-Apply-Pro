@@ -1,17 +1,30 @@
 # Job Apply Pro user guide
 
-This guide applies to Media Lifecycle Hardening `v0.50.1-alpha.1`. This is an alpha build: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are implemented but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, explicit media-upload consent for images, and a local uncommitted gateway configuration.
+This guide applies to Durable Media Recovery `v0.51.0-alpha.1`. This is an alpha milestone with a locally validated unsigned development package, not a production-ready signed release: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are implemented but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, explicit media-upload consent for images, and a local uncommitted gateway configuration.
 
-Gemini image review accepts only JPEG, PNG, or WebP bytes whose signatures match their declared type. Each image is limited to 5 MiB and each request to four images. Media is uploaded only after separate consent and used in a stateless interaction after the provider reports it active. The app immediately attempts deletion, including after malformed metadata or inference failure. If finalization or deletion cannot be confirmed, the invocation fails and automatic retries/fallback stop. Review provider file retention before starting another request; there is no automatic cleanup after a process crash. Treat every visual result as a proposal and compare it with the source image before promoting any candidate claim.
+Gemini image review accepts only JPEG, PNG, or WebP bytes whose signatures match their declared type. Each image is limited to 5 MiB and each request to four images. Media is uploaded only after separate consent and used in a stateless interaction after the provider reports it active. Before each upload, the app commits durable cleanup intent; returned resource names are encrypted locally before other file metadata is validated. The app immediately attempts deletion, including after malformed metadata or inference failure. If finalization or deletion cannot be confirmed, the invocation fails and automatic retries/fallback stop. Unresolved cleanup blocks further media invocations using the same provider kind, trusted endpoint, and exact API key, including after restart or a provider-configuration rename. Treat every visual result as a proposal and compare it with the source image before promoting any candidate claim.
 
 ## Install and start
 
-1. For production use, wait for a published signed installer. The current `Job-Apply-Pro-0.50.1-alpha.1-x64.exe` candidate is an unsigned development build, not a signed release. Test unsigned candidates only on an isolated development workstation.
+1. For production use, wait for a published signed installer. `Job-Apply-Pro-0.51.0-alpha.1-x64.exe` is an unsigned local development candidate whose build and bundled-backend smoke passed; hashes are recorded in the readiness audit. It is not a signed production release. Test unsigned candidates only on an isolated development workstation.
 2. For a future signed release, compare the Authenticode publisher and checksum with its release record; do not assume that a GitHub account name is the certificate subject. Do not proceed with production installation if its signature is invalid or its publisher is unexpected.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
 
 The packaged browser runtime uses Microsoft Edge. Keep Windows and Edge supported and updated.
+
+## Review durable media recovery
+
+Open **Operations, recovery & licensing** and find **Durable media recovery**. Select **Refresh media cleanup** to read unresolved local records. Refresh does not contact the provider. The panel shows operational record IDs, provider labels, states, attempt counts, safe reasons, and relevant times; it does not show image bytes, hashes, remote resource names, URLs, API keys, or filenames.
+
+Known-resource recovery runs at backend startup and periodically while it is running. Each pass attempts at most two eligible deletions, with 60 seconds between background passes and a 15-second configured network timeout per deletion. Active uploads and interactions retain a 20-minute lease renewed between lifecycle phases. A restarted worker waits for an unexpired lease; neither the lease nor the network timeout is a guaranteed real-time cleanup deadline. Failed deletions remain pending with backoff. Only provider responses `200`, `204`, or `404` are accepted as deletion confirmation; a pending/accepted response is not enough.
+
+- **Active lease / awaiting recovery:** the upload or interaction may still own the resource. Review the displayed lease time and refresh later; a retry does not override an active lease.
+- **Deletion pending:** select **Retry automatic deletion** to run an eligible deletion-only pass. It does not bypass retry timing, upload media, run a model, or list the provider's files. Automatic deletion requires an enabled Gemini configuration with the same trusted endpoint and exact original API key; a renamed or aliased configuration with that credential identity can recover the record. Changed or missing credentials leave the obligation unresolved. Different API keys do not prove the same remote account, and rotating a key does not clear earlier cleanup obligations.
+- **Unknown resource — manual review:** the app cannot safely identify what the provider retained after an uncertain upload. Inspect the original provider account yourself and verify that its media cleanup is complete. Only then select **Review manual cleanup**, type exactly `I VERIFIED PROVIDER MEDIA CLEANUP`, and select **Record operator acknowledgement**. This records your verification and closes the local obligation; it is not independent app confirmation of remote deletion. If the record changed since review, acknowledgement fails: refresh and review again.
+- **Provider review required / unreadable encrypted metadata:** the retained resource cannot be recovered safely. Known encrypted-resource records cannot be manually acknowledged away, even after provider review. Preserve the database and original encryption key and seek support; do not delete records or replace the database to bypass the block.
+
+Recovery does not guarantee provider deletion and cannot safely guess an unknown resource. Keep API keys in local secret configuration only; never put them in chat, diagnostics, screenshots, or a support report. No unresolved local records means no outstanding journal entries, not a complete inventory or audit of the provider account.
 
 ## Review and enable notifications
 
@@ -191,12 +204,14 @@ Controls inside an `aria-hidden=true` subtree remain visible in bounded review e
 
 Use **Operations, recovery & licensing** to create a verified backup. A successful backup is encrypted and checked at both the archive and entry level. Store a copy separately from the workstation, but never store the master key beside it.
 
+Before restoring a database, review **Durable media recovery** and complete eligible deletion or verified unknown-resource manual review. The offline restore checks the original current database, including committed journal state in SQLite's write-ahead log. It refuses database replacement if any cleanup obligation is unresolved or the current database cannot be inspected safely. A backup without those records does not bypass the check; unreadable known-resource records still block replacement. Stop the backend and recovery worker before any offline restore, as the managed desktop does automatically.
+
 To restore:
 
 1. Verify the selected backup.
 2. Select **Stage restore** and review the displayed fingerprint and file count.
 3. Select **Apply staged restore** and read the warning.
-4. Confirm only if the fingerprint is still the reviewed value. The app stops its backend, applies the staged files offline, retains the prior database as `job-apply-pro.db.pre-restore`, migrates if required, and restarts.
+4. Confirm only if the fingerprint is still the reviewed value. The app stops its backend and recovery worker, checks the original database for unresolved media cleanup, applies the staged files offline only when the check permits replacement, retains the prior database as `job-apply-pro.db.pre-restore`, migrates if required, and restarts.
 5. Confirm the dashboard, candidate records, and backup status are expected before continuing work.
 
 If recovery fails, do not repeatedly overwrite files. Export diagnostics and follow the rollback runbook.

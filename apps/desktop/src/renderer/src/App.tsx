@@ -69,6 +69,8 @@ import type {
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
 
+import { MediaCleanupPanel } from "./MediaCleanupPanel";
+
 const initialStatus: BackendRuntimeStatus = {
   state: "starting",
   message: "Connecting to the encrypted local backend…",
@@ -1540,7 +1542,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Media Lifecycle Hardening v0.50.1-alpha.1</strong>
+              <strong>Durable Media Recovery v0.51.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -3481,6 +3483,7 @@ export function App() {
                 </small>
               </article>
             </div>
+            <MediaCleanupPanel backendReady={status.state === "ready"} />
             <div className="backup-workspace">
               <div>
                 <strong>Encrypted local backups</strong>

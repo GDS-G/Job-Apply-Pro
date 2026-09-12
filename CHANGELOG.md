@@ -2,6 +2,28 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.51.0-alpha.1] - Unreleased
+
+### Added
+
+- Persist per-file cleanup intent before Gemini media transfer and encrypt validated remote resource names with record/provider/account-bound AES-GCM context; migration `20260814_0023` adds the local journal.
+- Recover known resources after interruption through deletion-only startup/periodic work, with exact credential-identity matching, renewable ownership leases, bounded batches, and scheduled retries.
+- Show unresolved media status in the desktop Operations/recovery area, with deletion-only retry and explicitly verified, timestamp-bound acknowledgment of unidentified uploads.
+- Add synthetic repository, concurrency, lifecycle, recovery, desktop-boundary, and restore-guard regression coverage.
+
+### Fixed
+
+- Block new media transfer for a credential identity while another invocation or unresolved cleanup obligation owns it, including aliases of the same credentials; an invocation may own its own active image records.
+- Filter recovery by configured credential fingerprint before limiting each scan, so removed credentials cannot permanently hide later eligible resources and configuration renaming does not prevent cleanup.
+- Confirm deletion only on the official endpoint's 200, 204, or already-absent 404 response, close irrelevant bodies without reading them, and reject merely accepted deletion responses.
+- Reject offline database restoration when the current database contains unresolved media obligations or cannot be safely inspected, including committed WAL records.
+
+### Security
+
+- Derive account identity from the exact API-key bytes through SHA-256 before the keyed blind index; persist neither credentials nor media bytes, upload URLs, display names, or raw provider errors in the cleanup journal.
+- Preserve unknown finalization and unreadable encrypted identifiers for manual review; never guess resource names, bulk-list or bulk-delete an account's files, or reupload as recovery.
+- Keep provider terms/privacy review, per-use consent, supported image limits, and production-automation gates unchanged. Local full-suite and unsigned Windows artifact evidence is recorded in the readiness audit. Protected CI, signing, and live-provider acceptance remain separate gates.
+
 ## [0.50.1-alpha.1] - Unreleased
 
 ### Fixed

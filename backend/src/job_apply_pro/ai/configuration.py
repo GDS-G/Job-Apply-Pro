@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from job_apply_pro.ai.media_journal import MediaJournal
 from job_apply_pro.ai.providers import AIProviderRuntime, GeminiProvider, OpenAICompatibleProvider
 from job_apply_pro.ai.registry import AIRegistry
 from job_apply_pro.domain.ai import (
@@ -27,13 +30,26 @@ class AIConfiguration(BaseModel):
     policies: list[AIRoutingPolicy] = Field(max_length=50)
 
 
-def build_ai_registry(config_json: SecretStr | None) -> AIRegistry:
+def build_ai_registry(
+    config_json: SecretStr | None,
+    *,
+    journal_factory: Callable[[AIProviderRuntime], Callable[[], MediaJournal]] | None = None,
+) -> AIRegistry:
     if config_json is None:
         return AIRegistry([], [], [])
     config = AIConfiguration.model_validate_json(config_json.get_secret_value())
     providers = [
         (
-            GeminiProvider(AIProviderRuntime(definition=item.definition, api_key=item.api_key))
+            GeminiProvider(
+                AIProviderRuntime(definition=item.definition, api_key=item.api_key),
+                journal_factory=(
+                    journal_factory(
+                        AIProviderRuntime(definition=item.definition, api_key=item.api_key)
+                    )
+                    if journal_factory is not None
+                    else None
+                ),
+            )
             if item.definition.kind is ProviderKind.GEMINI
             else OpenAICompatibleProvider(
                 AIProviderRuntime(definition=item.definition, api_key=item.api_key)

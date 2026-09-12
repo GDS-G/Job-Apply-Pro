@@ -8,6 +8,7 @@
 - The release is initiated manually by the solo `@GDS-G` maintainer through an exact version tag or `workflow_dispatch`. A required reviewer is optional and is not configured while the project has one maintainer.
 - The maintainer's GitHub account uses MFA or a passkey and has verified release-notification delivery.
 - A verified encrypted backup and a previous signed installer available for rollback rehearsal.
+- For Durable Media Recovery `v0.51.0-alpha.1`, migration `20260814_0023` and the cleanup journal must be available before any Gemini media transfer. A running or unresolved obligation in the current database blocks database restore; do not bypass it by replacing the database manually.
 
 ## Solo-maintainer signing-secret setup
 
@@ -59,9 +60,19 @@ pnpm --filter @job-apply-pro/desktop package:win
 
 Install the unsigned candidate only on an isolated test workstation. Verify first-start migration, restart, backup create/verify/stage/apply, diagnostics export/redaction, update UI, Edge browser launch, sleep/resume, and uninstall with retained user data. Confirm native notifications begin disabled, enabling persists across restart, generic alerts appear in Windows Notification Center without protected source text, click activation opens the fixed workbench destination, Focus Assist behaves as expected, disabling stops future native delivery, and in-app alerts remain visible. Execute failure injections for no network, backend termination, invalid token, missing staged file, changed restore fingerprint, corrupt backup, database lock, unavailable browser runtime, unsupported notification delivery, and sleep/resume while an action is pending.
 
+### Durable media recovery acceptance
+
+The source milestone is `Durable Media Recovery v0.51.0-alpha.1`. The readiness audit records passed local full-suite checks and unsigned Windows candidate hashes against runtime commit `056d2f16b1375e7453a6011f1795575b9ae08718`. Protected integration is tracked in PR #82; these local results do not establish signing, live-provider acceptance or release-lab completion.
+
+Use synthetic files and mocked provider responses first. Verify an intent is committed before transfer, validated identifiers are encrypted, known resources survive a backend interruption and receive only deletion requests after lease expiry, and unknown finalization becomes manual review without listing or reuploading files. Check same-credential admission across provider aliases, current-owner lease renewal, stale-owner rejection, changed/removed credentials, unreadable ciphertext, a locked database, and more than 100 mismatched-credential records followed by a matching identity. Different API keys cannot be assumed to identify different remote accounts; original-credential matching is deliberately conservative. Current leases are renewed for 20 minutes before lifecycle phases; recovery makes at most two deletion attempts per cycle, waits 60 seconds between cycles, uses a 15-second network timeout, and schedules failed deletion retries exponentially from 60 seconds up to 3,600 seconds. These are ownership and scheduling controls, not hard real-time end-to-end deadlines.
+
+Verify the Operations/recovery panel exposes only safe status metadata; its retry action must not upload, invoke a model, or replay a failed request. Unknown-resource acknowledgment requires the exact phrase `I VERIFIED PROVIDER MEDIA CLEANUP` and the current record timestamp. Do not acknowledge without independent provider review; local acknowledgment is not programmatically confirmed remote deletion. Known resources with unreadable ciphertext must remain preserved and cannot be acknowledged through this unknown-only action.
+
+For database-restore tests, stop the API and recovery worker through the supervisor and wait for process exit. Confirm the guard inspects the original current database, observes committed WAL data, and refuses replacement for any state other than exact `DELETED`, missing/corrupt/inaccessible data, or an invalid journal object. A valid older database without a journal remains compatible. Preserve the current database and key material under the existing protected backup policy; never disable the guard to install an older snapshot. Authorized live Gemini validation additionally requires owner configuration, reviewed terms/privacy/retention settings, explicit external-AI and media consent, and sanitized outcome evidence. Provider auto-expiry is not proof of immediate deletion.
+
 ## Signed publication
 
-1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.50.1-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
+1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.51.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
 2. The workflow tests, builds, requires the certificate, signs the NSIS installer, generates an SPDX JSON SBOM, verifies Authenticode, creates SHA-256 checksums and dependency inventories, and only then publishes a prerelease.
 3. Download the published installer on a clean supported Windows workstation. Verify `Get-AuthenticodeSignature` reports `Valid`, the subject is the expected publisher, and the SHA-256 value matches `SHA256SUMS.txt`.
 4. Install, launch, perform the smoke workflow, and confirm the update metadata resolves to the same signed artifact.
@@ -71,6 +82,7 @@ Install the unsigned candidate only on an isolated test workstation. Verify firs
 
 1. Stop Job Apply Pro and copy `%APPDATA%\Job Apply Pro` to protected recovery storage.
 2. If the failure followed a data restore, preserve both `job-apply-pro.db` and `job-apply-pro.db.pre-restore` before changing either.
+   Preserve the current encrypted media journal and its key as well. Resolve known-resource recovery or independently verified unknown-resource review through the current compatible version before any database replacement; a backup made before an upload cannot cancel the resulting provider obligation.
 3. Uninstall the faulty application. User data is retained by installer policy.
 4. Install the prior signed version and verify its publisher and checksum.
 5. Start it offline. If its schema cannot open the newer database, stop it and restore the verified pre-upgrade backup through the version that created that backup; never force an unsupported schema downgrade.

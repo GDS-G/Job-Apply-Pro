@@ -39,6 +39,7 @@ import type {
   IntegrationProvider,
   HelpTopic,
   MockWorkflowCreate,
+  MediaCleanupListResponse,
   OperationsDashboard,
   OAuthAuthorizationRequest,
   OAuthAuthorizationState,
@@ -654,6 +655,28 @@ export class BackendClient {
 
   getOperationsDashboard(): Promise<OperationsDashboard> {
     return this.request("/operations/dashboard");
+  }
+
+  listMediaCleanup(): Promise<MediaCleanupListResponse> {
+    return this.request("/ai/media-cleanup");
+  }
+
+  retryMediaCleanup(): Promise<MediaCleanupListResponse> {
+    return this.request("/ai/media-cleanup/retry", { method: "POST" }, 120_000);
+  }
+
+  resolveMediaCleanup(
+    id: string,
+    expectedUpdatedAt: string,
+    confirmation: string,
+  ): Promise<MediaCleanupListResponse> {
+    return this.request(`/ai/media-cleanup/${encodeURIComponent(id)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({
+        expected_updated_at: expectedUpdatedAt,
+        confirmation,
+      }),
+    });
   }
 
   listBackups(): Promise<BackupManifest[]> {

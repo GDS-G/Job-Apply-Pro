@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -10,8 +11,11 @@ from fastapi.responses import JSONResponse
 
 from job_apply_pro import __version__
 from job_apply_pro.api.router import api_router
+from job_apply_pro.api.routes.ai import get_media_cleanup_service
 from job_apply_pro.api.routes.browser import shutdown_browser_worker
+from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
+from job_apply_pro.services.media_cleanup import run_media_cleanup_worker
 from job_apply_pro.storage.database import SessionFactory
 from job_apply_pro.storage.models import ErrorRecordRow
 
@@ -47,8 +51,18 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
-        yield
-        shutdown_browser_worker()
+        stop = asyncio.Event()
+        cleanup_task = asyncio.create_task(
+            run_media_cleanup_worker(lambda: get_media_cleanup_service(get_cipher()), stop)
+        )
+        try:
+            yield
+        finally:
+            stop.set()
+            # Finish the bounded deletion batch; cancelling to_thread does not stop
+            # its underlying thread and could outlive database/browser shutdown.
+            await cleanup_task
+            shutdown_browser_worker()
 
     application = FastAPI(
         title="Job Apply Pro Local API",

@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Media Lifecycle Hardening v0.50.1-alpha.1"),
+      screen.getByText("Durable Media Recovery v0.51.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

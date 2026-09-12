@@ -1,6 +1,8 @@
-from typing import Annotated
+from typing import Annotated, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from job_apply_pro.ai.configuration import build_ai_registry
@@ -18,6 +20,7 @@ from job_apply_pro.domain.ai import (
     EvaluationCase,
     EvaluationReport,
 )
+from job_apply_pro.domain.media_cleanup import MediaCleanupPublicRecord
 from job_apply_pro.security.encryption import DecryptionError, SensitiveDataCipher
 from job_apply_pro.security.keys import KeyConfigurationError
 from job_apply_pro.services.ai import (
@@ -29,8 +32,13 @@ from job_apply_pro.services.ai import (
     AIGatewayUnavailableError,
     AIGatewayValidationError,
 )
+from job_apply_pro.services.media_cleanup import MediaCleanupService
 from job_apply_pro.storage.ai_repository import AIGatewayRepository
-from job_apply_pro.storage.database import get_session
+from job_apply_pro.storage.database import SessionFactory, get_session
+from job_apply_pro.storage.media_cleanup_repository import (
+    MediaCleanupConflict,
+    MediaCleanupRepository,
+)
 
 router = APIRouter(prefix="/ai", tags=["ai-gateway"])
 SessionDependency = Annotated[Session, Depends(get_session)]
@@ -39,8 +47,61 @@ CipherDependency = Annotated[SensitiveDataCipher, Depends(get_cipher)]
 
 def get_ai_gateway(session: SessionDependency, cipher: CipherDependency) -> AIGatewayService:
     return AIGatewayService(
-        build_ai_registry(get_settings().ai_config_json), AIGatewayRepository(session), cipher
+        build_ai_registry(
+            get_settings().ai_config_json,
+            journal_factory=get_media_cleanup_service(cipher).journal_factory,
+        ),
+        AIGatewayRepository(session),
+        cipher,
     )
+
+
+def get_media_cleanup_service(cipher: CipherDependency) -> MediaCleanupService:
+    return MediaCleanupService(
+        MediaCleanupRepository(SessionFactory, cipher), cipher, get_settings().ai_config_json
+    )
+
+
+CleanupDependency = Annotated[MediaCleanupService, Depends(get_media_cleanup_service)]
+
+
+class MediaCleanupListResponse(BaseModel):
+    items: list[MediaCleanupPublicRecord]
+
+
+class MediaCleanupResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_updated_at: AwareDatetime
+    confirmation: Literal["I VERIFIED PROVIDER MEDIA CLEANUP"]
+
+
+@router.get("/media-cleanup", response_model=MediaCleanupListResponse)
+def list_media_cleanup(service: CleanupDependency) -> MediaCleanupListResponse:
+    return MediaCleanupListResponse(items=service.list_public())
+
+
+@router.post("/media-cleanup/retry", response_model=MediaCleanupListResponse)
+def retry_media_cleanup(service: CleanupDependency) -> MediaCleanupListResponse:
+    try:
+        service.recover()
+    except Exception as error:
+        raise HTTPException(
+            503, "Media cleanup could not run; unresolved records are retained"
+        ) from error
+    return MediaCleanupListResponse(items=service.list_public())
+
+
+@router.post("/media-cleanup/{record_id}/resolve", response_model=MediaCleanupListResponse)
+def resolve_media_cleanup(
+    record_id: UUID, command: MediaCleanupResolution, service: CleanupDependency
+) -> MediaCleanupListResponse:
+    try:
+        service.resolve_manual(str(record_id), command.expected_updated_at)
+    except MediaCleanupConflict as error:
+        raise HTTPException(
+            409, "Media cleanup review changed or cannot be acknowledged"
+        ) from error
+    return MediaCleanupListResponse(items=service.list_public())
 
 
 GatewayDependency = Annotated[AIGatewayService, Depends(get_ai_gateway)]

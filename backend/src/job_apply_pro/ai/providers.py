@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import math
 import re
+import sys
+import time
 from collections.abc import Callable
 from typing import Protocol, cast
 from urllib.parse import urlparse
@@ -10,6 +12,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, SecretStr
 
+from job_apply_pro.ai.media_journal import MediaJournal
 from job_apply_pro.domain.ai import (
     AIProviderDefinition,
     AIProviderRequest,
@@ -206,16 +209,18 @@ class GeminiProvider:
         *,
         transport: httpx.BaseTransport | None = None,
         client_factory: Callable[..., httpx.Client] = httpx.Client,
+        journal_factory: Callable[[], MediaJournal] | None = None,
     ) -> None:
         self.definition = runtime.definition
         self._api_key = runtime.api_key
         self._transport = transport
         self._client_factory = client_factory
+        self._journal_factory = journal_factory
         self._validate_runtime()
 
     def complete(self, request: AIProviderRequest) -> AIProviderResponse:
         input_blocks: list[dict[str, object]] = [{"type": "text", "text": request.user_content}]
-        uploaded_names: list[str] = []
+        journal: MediaJournal | None = None
         model_name = self._model_name(request.model)
         try:
             for part in request.input_parts:
@@ -226,12 +231,18 @@ class GeminiProvider:
                 else:
                     if not request.media_upload_consent:
                         raise AIProviderError("Gemini media upload requires explicit consent")
+                    if journal is None:
+                        if self._journal_factory is None:
+                            raise AIProviderMediaRetentionError(
+                                "Gemini media requires durable cleanup storage"
+                            )
+                        journal = self._journal_factory()
                     uri = self._upload_media(
                         cast(bytes, part.data),
                         cast(str, part.mime_type),
                         part.display_name or "Job Apply Pro review image",
                         request.timeout_seconds,
-                        uploaded_names,
+                        journal,
                     )
                     input_blocks.append({"type": "image", "uri": uri, "mime_type": part.mime_type})
 
@@ -259,7 +270,11 @@ class GeminiProvider:
                     "schema": request.output_schema,
                 }
 
+            if journal is not None:
+                journal.renew()
             response = self._post("interactions", payload, request.timeout_seconds)
+            if journal is not None:
+                journal.renew()
             status = cast(str, response["status"])
             if status not in {"completed", "requires_action"}:
                 raise AIProviderError("Gemini interaction did not complete")
@@ -318,16 +333,14 @@ class GeminiProvider:
         except (KeyError, TypeError, ValueError) as error:
             raise AIProviderError("Gemini returned an invalid interaction envelope") from error
         finally:
-            delete_failed = False
-            for name in reversed(uploaded_names):
+            if journal is not None:
+                active_error = sys.exception()
                 try:
-                    self._delete_media(name, request.timeout_seconds)
-                except AIProviderError:
-                    delete_failed = True
-            if delete_failed:
-                raise AIProviderMediaRetentionError(
-                    "Gemini uploaded media deletion could not be confirmed"
-                )
+                    journal.cleanup(lambda name: self._delete_media(name, request.timeout_seconds))
+                except AIProviderMediaRetentionError:
+                    if isinstance(active_error, AIProviderMediaRetentionError):
+                        raise active_error from None
+                    raise
         return result
 
     def _upload_media(
@@ -336,10 +349,14 @@ class GeminiProvider:
         mime_type: str,
         display_name: str,
         timeout: float,
-        uploaded_names: list[str],
+        journal: MediaJournal,
     ) -> str:
         if not data or len(data) > self._MAX_MEDIA_BYTES:
             raise AIProviderError("Gemini media exceeds the 5 MiB upload limit")
+        journal.renew()
+        record_id = journal.begin()
+        transfer_started = False
+        deadline = time.monotonic() + timeout
         base = str(self.definition.base_url).rstrip("/").removesuffix("/v1beta")
         headers = {
             "Content-Type": "application/json",
@@ -359,10 +376,13 @@ class GeminiProvider:
                     headers=headers,
                     json={"file": {"display_name": display_name}},
                 ) as start:
-                    self._read_response_body(start)
+                    self._read_response_body(start, deadline=deadline)
                     upload_url = start.headers.get("x-goog-upload-url", "")
                     self._validate_upload_url(upload_url)
                 try:
+                    journal.renew()
+                    transfer_started = True
+                    deadline = time.monotonic() + timeout
                     with client.stream(
                         "POST",
                         upload_url,
@@ -374,7 +394,7 @@ class GeminiProvider:
                         },
                         content=data,
                     ) as uploaded:
-                        payload = json.loads(self._read_response_body(uploaded))
+                        payload = json.loads(self._read_response_body(uploaded, deadline=deadline))
                 except (httpx.HTTPError, ValueError, RecursionError, AIProviderError) as error:
                     # The server may have finalized the upload before the response failed.
                     # Without a validated resource name, immediate deletion is impossible.
@@ -382,8 +402,12 @@ class GeminiProvider:
                         "Gemini media finalization outcome could not be confirmed"
                     ) from error
         except AIProviderError:
+            if not transfer_started:
+                journal.abandon_before_upload(record_id)
             raise
         except (httpx.HTTPError, ValueError) as error:
+            if not transfer_started:
+                journal.abandon_before_upload(record_id)
             raise AIProviderUnavailableError("Gemini media upload failed") from error
         file = payload.get("file") if isinstance(payload, dict) else None
         name = file.get("name") if isinstance(file, dict) else None
@@ -393,7 +417,7 @@ class GeminiProvider:
             )
         # Register ownership before inspecting any other untrusted metadata. Even a
         # missing URI, invalid port, or failed processing state must reach cleanup.
-        uploaded_names.append(name)
+        journal.register(record_id, name)
         assert isinstance(file, dict)
         uri = file.get("uri")
         if (
@@ -424,6 +448,10 @@ class GeminiProvider:
             raise AIProviderError("Gemini returned an untrusted uploaded-file URI")
         return uri
 
+    def delete_uploaded_media(self, name: str, timeout: float) -> None:
+        """Recovery entrypoint: delete a validated known resource, never upload."""
+        self._delete_media(name, timeout)
+
     def _delete_media(self, name: str, timeout: float) -> None:
         if not self._FILE_NAME_PATTERN.fullmatch(name):
             raise AIProviderError("Gemini file name is invalid")
@@ -439,9 +467,12 @@ class GeminiProvider:
                     headers={"x-goog-api-key": cast(SecretStr, self._api_key).get_secret_value()},
                 ) as response,
             ):
-                if response.status_code == 404:
-                    return
-                self._read_response_body(response)
+                response.raise_for_status() if response.status_code != 404 else None
+                if response.status_code not in {200, 204, 404}:
+                    raise AIProviderMediaRetentionError("Gemini deletion is not confirmed")
+                # A successful DELETE's body is irrelevant; never let a streaming
+                # body hold the recovery worker/shutdown indefinitely. 202 is NOT
+                # evidence of completed deletion.
         except httpx.HTTPError as error:
             raise AIProviderUnavailableError("Gemini media deletion failed") from error
 
@@ -497,6 +528,7 @@ class GeminiProvider:
 
     def _post(self, path: str, payload: dict[str, object], timeout: float) -> dict[str, object]:
         url = f"{str(self.definition.base_url).rstrip('/')}/{path}"
+        deadline = time.monotonic() + timeout
         headers = {
             "Api-Revision": self._API_REVISION,
             "Content-Type": "application/json",
@@ -511,7 +543,7 @@ class GeminiProvider:
                 ) as client,
                 client.stream("POST", url, headers=headers, json=payload) as response,
             ):
-                body = self._read_response_body(response)
+                body = self._read_response_body(response, deadline=deadline)
             try:
                 result = json.loads(body)
             except RecursionError as error:
@@ -527,13 +559,19 @@ class GeminiProvider:
         return result
 
     @classmethod
-    def _read_response_body(cls, response: httpx.Response) -> bytes:
+    def _read_response_body(cls, response: httpx.Response, *, deadline: float) -> bytes:
         response.raise_for_status()
         body = bytearray()
-        for chunk in response.iter_bytes(chunk_size=64 * 1024):
+        if time.monotonic() >= deadline:
+            raise AIProviderError("Gemini response exceeded the time limit")
+        for chunk in response.iter_bytes():
+            if time.monotonic() >= deadline:
+                raise AIProviderError("Gemini response exceeded the time limit")
             if len(body) + len(chunk) > cls._MAX_RESPONSE_BYTES:
                 raise AIProviderError("Gemini response exceeded the size limit")
             body.extend(chunk)
+        if time.monotonic() >= deadline:
+            raise AIProviderError("Gemini response exceeded the time limit")
         return bytes(body)
 
     def _validate_runtime(self) -> None:

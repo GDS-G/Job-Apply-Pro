@@ -95,6 +95,52 @@ function integrationProvider(value: unknown): IntegrationProvider {
   return value as IntegrationProvider;
 }
 
+function isMediaCleanupTimestamp(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length > 40 ||
+    value !== value.trim()
+  ) {
+    return false;
+  }
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(
+      value,
+    );
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return (
+    year > 0 &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= monthDays[month - 1]! &&
+    Number(match[4]) <= 23 &&
+    Number(match[5]) <= 59 &&
+    Number(match[6]) <= 59 &&
+    Number(match[7] ?? 0) <= 23 &&
+    Number(match[8] ?? 0) <= 59 &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
 function candidateInput(value: unknown): CandidateProfileCreate {
   if (typeof value !== "object" || value === null || !("contact" in value)) {
     throw new TypeError("Candidate profile input is invalid.");
@@ -1266,6 +1312,46 @@ export function registerWorkbenchIpc(
   ipcMain.handle("operations:dashboard", () =>
     supervisor.client.getOperationsDashboard(),
   );
+  ipcMain.handle("ai:media-cleanup-list", (_event, ...args: unknown[]) => {
+    if (args.length !== 0) {
+      throw new TypeError("Media cleanup listing takes no arguments.");
+    }
+    return supervisor.client.listMediaCleanup();
+  });
+  ipcMain.handle("ai:media-cleanup-retry", (_event, ...args: unknown[]) => {
+    if (args.length !== 0) {
+      throw new TypeError("Media cleanup retry takes no arguments.");
+    }
+    return supervisor.client.retryMediaCleanup();
+  });
+  ipcMain.handle("ai:media-cleanup-resolve", (_event, ...args: unknown[]) => {
+    const [id, expectedUpdatedAt, confirmation] = args;
+    if (
+      args.length !== 3 ||
+      typeof id !== "string" ||
+      id.length !== 36 ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+        id,
+      )
+    ) {
+      throw new TypeError("Media cleanup id must be a UUID.");
+    }
+    if (!isMediaCleanupTimestamp(expectedUpdatedAt)) {
+      throw new TypeError(
+        "Media cleanup revision must be an ISO timestamp with a timezone.",
+      );
+    }
+    if (confirmation !== "I VERIFIED PROVIDER MEDIA CLEANUP") {
+      throw new TypeError(
+        "Media cleanup acknowledgement requires the exact confirmation phrase.",
+      );
+    }
+    return supervisor.client.resolveMediaCleanup(
+      id,
+      expectedUpdatedAt,
+      confirmation,
+    );
+  });
   ipcMain.handle("operations:backups", () => supervisor.client.listBackups());
   ipcMain.handle("operations:backup-schedules", () =>
     supervisor.client.listBackupSchedules(),
