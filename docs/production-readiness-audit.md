@@ -8,7 +8,17 @@ The active source milestone is **Validated Media Inputs `v0.52.0-alpha.1`**. Exa
 
 ### Validated Media Inputs validation
 
-Full decoding, orientation, metadata-free PNG encoding and safe API rejection are implemented in ADR-0062. Integrated validation and exact-runtime artifact evidence are pending for this source milestone.
+Runtime source commit `2f65eebee63e300f1977934ec9337716b86934af` passes 402 backend tests at 84.59% coverage and 79 desktop tests. Ruff lint/format, strict mypy (140 source/test files), TypeScript, frozen pnpm installation, production build, pnpm audit and pip-audit pass. The unpublished editable backend package is skipped by the public-package audit. An earlier overlapping development run collected an adversarial expectation before its correction; the final clean-snapshot full suite above supersedes that run. ADR-0062 records full decoding, orientation, metadata-free PNG encoding and safe API rejection. Exact-runtime artifact and protected CI evidence are recorded separately; all provider fixtures are synthetic.
+
+### Validated Media Inputs unsigned Windows candidate
+
+The NSIS installer, unpacked desktop and bundled backend were produced from runtime commit `2f65eebee63e300f1977934ec9337716b86934af`. Packaged startup, migration, valid synthetic image decoding, malformed image rejection, cleanup API, encrypted backup and offline restore smoke pass with no configured AI provider. Artifact evidence:
+
+- `Job-Apply-Pro-0.52.0-alpha.1-x64.exe`: 170239724 bytes; SHA-256 `11FD117E7B13E74E911A73CF48BFD6ED6183A88EE0F42C011B239583B98E1F5F`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `E13D956C874BB755FCB073385F13AF8F926EAFF4D3D23DDCDBB80A09E349CA12`.
+- Bundled backend executable: 18560457 bytes; SHA-256 `CF33280274A9D6BA1554D4B91A432A9BF9AE3AD7A53B78DE588B7231B2865F45`; source backend-dist and unpacked copy match.
+
+All three report `NotSigned`. No tag or production release is authorized by these development checks. A hidden synthetic probe against that exact backend confirms the packaged browser launch defect below: existing worker arguments exit with code 2 and return no shutdown RPC. No browser or external provider was contacted.
 
 ### Newly identified packaged-runtime gaps
 
