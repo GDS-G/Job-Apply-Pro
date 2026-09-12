@@ -16,6 +16,8 @@ Runtime source commit `2f65eebee63e300f1977934ec9337716b86934af` passes 402 back
 
 ### Validated Media Inputs unsigned Windows candidate
 
+Protected integration passed at final PR head `464e068d0b25efb9e98be0637d018cead59edef5`: [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319369) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319361). [PR #85](https://github.com/GDS-G/Job-Apply-Pro/pull/85) merged as `2f7448e745ce7faa5f20cbb7ca7b14e616b0667a`; the merged tree matches the tested head. Post-merge main runs are separate evidence.
+
 The NSIS installer, unpacked desktop and bundled backend were produced from runtime commit `2f65eebee63e300f1977934ec9337716b86934af`. Packaged startup, migration, valid synthetic image decoding, malformed image rejection, cleanup API, encrypted backup and offline restore smoke pass with no configured AI provider. Artifact evidence:
 
 - `Job-Apply-Pro-0.52.0-alpha.1-x64.exe`: 170239724 bytes; SHA-256 `11FD117E7B13E74E911A73CF48BFD6ED6183A88EE0F42C011B239583B98E1F5F`.

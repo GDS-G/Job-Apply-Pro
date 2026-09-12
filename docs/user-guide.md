@@ -10,6 +10,8 @@ Media is uploaded only after separate consent and used in a stateless interactio
 
 The packaged browser runtime includes `resources/backend/job-apply-pro-browser-worker.exe`. Do not delete, rename or replace it independently. The app launches it hidden in an isolated profile; it does not use an existing personal browser profile or system Python. If the worker is missing or cannot start, repair/reinstall the matching complete package. Do not download a similarly named executable from another source. Normal packaged operation uses installed Microsoft Edge; automated package tests use controlled Playwright Chromium and local fixtures. Those tests do not validate real portals.
 
+When explicitly using Chromium, its matching Playwright browser must already be installed. Frozen Windows workers use `%LOCALAPPDATA%\ms-playwright` by default and preserve an explicit `PLAYWRIGHT_BROWSERS_PATH` override. No browser is downloaded automatically by the app; a missing executable is a recoverable installation/configuration error, not permission to use another personal browser profile.
+
 1. For production use, wait for a published signed installer. `Job-Apply-Pro-0.53.0-alpha.1-x64.exe` is a development-candidate filename, not evidence of signing or successful acceptance. Consult the readiness audit for this exact version's build, hashes and limitations. Test unsigned candidates only on an isolated development workstation.
 2. For a future signed release, compare the Authenticode publisher and checksum with its release record; do not assume that a GitHub account name is the certificate subject. Do not proceed with production installation if its signature is invalid or its publisher is unexpected.
 3. Choose a per-user installation directory and start Job Apply Pro.
