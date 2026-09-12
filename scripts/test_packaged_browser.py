@@ -261,10 +261,16 @@ def _packaged_api(api_url: str, fixture_url: str, root: Path) -> None:
             "title": "Packaged runtime validation",
         },
     )
+    workflow_id = workflow.get("workflow_id")
+    if not isinstance(workflow_id, str) or not workflow_id.startswith("mock-"):
+        raise TypeError(
+            "Packaged API returned an invalid synthetic workflow identifier"
+        )
+    UUID(workflow_id.removeprefix("mock-"))
     created = post(
         "/browser/sessions",
         {
-            "workflow_id": str(UUID(workflow["workflow_id"])),
+            "workflow_id": workflow_id,
             "start_url": fixture_url,
             "engine": "chromium",
             "profile_name": "packaged-api-" + uuid4().hex,

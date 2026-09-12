@@ -69,7 +69,7 @@ function Start-SmokeBackend {
     } while ($null -eq $health -and [DateTime]::UtcNow -lt $deadline -and -not $started.HasExited)
     if ($null -eq $health -or $health.status -ne "ok" -or $health.service -ne "job-apply-pro-backend" -or $health.environment -ne $env:JAP_ENVIRONMENT) {
         $stderrText = if (Test-Path -LiteralPath $StderrPath) { Get-Content -Raw -LiteralPath $StderrPath } else { "" }
-        if (-not $started.HasExited) { Stop-Process -Id $started.Id -Force }
+        if (-not $started.HasExited) { $started.Kill() }
         throw "Packaged backend did not report healthy before the deadline. $stderrText"
     }
     return $started
@@ -91,13 +91,13 @@ function Stop-SmokeBackend {
         }
     }
     if ($null -ne $Process -and -not $Process.HasExited) {
-        Stop-Process -Id $Process.Id -Force
-        $Process.WaitForExit()
+        $Process.Kill()
+        if (-not $Process.WaitForExit(10000)) { throw "Packaged backend exit could not be verified" }
     }
     if ($null -ne $WorkerProcess -and -not $WorkerProcess.WaitForExit(15000)) {
         # Only this previously verified backend child is eligible for cleanup.
-        Stop-Process -Id $WorkerProcess.Id -Force
-        $WorkerProcess.WaitForExit()
+        $WorkerProcess.Kill()
+        if (-not $WorkerProcess.WaitForExit(10000)) { throw "Packaged API-owned worker cleanup could not be verified" }
         throw "Packaged API-owned worker did not exit after its parent's IPC pipe closed"
     }
     if ($null -ne $WorkerProcess -and $WorkerProcess.ExitCode -ne 0) {

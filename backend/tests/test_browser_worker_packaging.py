@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -18,6 +19,21 @@ from job_apply_pro.browser.client import (
     BrowserWorkerClient,
     BrowserWorkerUnavailableError,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_browser_cache_environment() -> Iterator[None]:
+    # The production helper intentionally writes this variable directly. When
+    # it was initially absent, monkeypatch.delenv alone has no undo record, so
+    # the synthetic Windows cache would otherwise leak into later browser tests.
+    original = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("PLAYWRIGHT_BROWSERS_PATH", None)
+        else:
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = original
 
 
 def _capture_launch(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock]:
