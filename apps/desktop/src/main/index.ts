@@ -131,7 +131,7 @@ app
       app.getVersion(),
       async () => {
         notificationManager?.stop();
-        await backendSupervisor?.shutdown();
+        await backendSupervisor?.prepareUpdate();
         quitRequested = true;
       },
     );

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   key: vi.fn(async () => "synthetic-key"),
   createSupervisor: vi.fn(),
   shutdown: vi.fn<() => Promise<void>>(async () => undefined),
+  prepareUpdate: vi.fn<() => Promise<void>>(async () => undefined),
   start: vi.fn(async () => undefined),
   notificationStop: vi.fn(),
   errorBox: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock("./backend-supervisor.js", () => ({
       mocks.createSupervisor();
     }
     shutdown = mocks.shutdown;
+    prepareUpdate = mocks.prepareUpdate;
     start = mocks.start;
     onStatus = vi.fn();
     status = {
@@ -112,6 +114,7 @@ describe("desktop terminal lifecycle callers", () => {
     vi.clearAllMocks();
     mocks.key.mockImplementation(async () => "synthetic-key");
     mocks.shutdown.mockImplementation(async () => undefined);
+    mocks.prepareUpdate.mockImplementation(async () => undefined);
     vi.stubGlobal("__dirname", "C:/synthetic/out/main");
     vi.stubEnv("JAP_MASTER_KEY", "");
     // Empty is an explicit override, so remove it for key-initialization tests.
@@ -196,15 +199,16 @@ describe("desktop terminal lifecycle callers", () => {
     expect(mocks.start).not.toHaveBeenCalled();
   });
 
-  it("update preparation uses terminal shutdown without preauthorizing future quit", async () => {
+  it("update uses its restore-aware preparation without preauthorizing future quit", async () => {
     await import("./index.js");
     await settle();
     await mocks.installGate!();
-    expect(mocks.shutdown).toHaveBeenCalledOnce();
+    expect(mocks.prepareUpdate).toHaveBeenCalledOnce();
+    expect(mocks.shutdown).not.toHaveBeenCalled();
     const quit = { preventDefault: vi.fn() };
     mocks.handlers.get("before-quit")!(quit);
     expect(quit.preventDefault).toHaveBeenCalledOnce();
-    expect(mocks.shutdown).toHaveBeenCalledTimes(2);
+    expect(mocks.shutdown).toHaveBeenCalledOnce();
     await settle();
   });
 });

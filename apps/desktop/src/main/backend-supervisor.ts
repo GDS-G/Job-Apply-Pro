@@ -123,6 +123,17 @@ export class BackendSupervisor {
     return this.stop();
   }
 
+  async prepareUpdate(): Promise<void> {
+    // Updating automatically relaunches; unlike deliberate quit it must not reset
+    // the session-local uncertainty guard after a possibly partial restore.
+    if (this.restoreRecoveryRequired)
+      throw new Error(RESTORE_RECOVERY_REQUIRED);
+    if (this.restoring !== null) throw new Error(RESTORE_STILL_RUNNING);
+    await this.shutdown();
+    if (this.restoreRecoveryRequired)
+      throw new Error(RESTORE_RECOVERY_REQUIRED);
+  }
+
   applyOfflineRestore(planId: string, fingerprint: string): Promise<void> {
     if (this.closing)
       return Promise.reject(
