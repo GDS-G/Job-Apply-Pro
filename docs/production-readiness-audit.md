@@ -6,6 +6,18 @@ This audit maps the documented Phase 12 exit criteria to direct evidence. It del
 
 The active source milestone is **Durable Media Recovery `v0.51.0-alpha.1`**. Final local validation passes 320 backend tests at 84.45% coverage and 79 desktop tests, with formatting, lint, strict typing, frozen dependency installation, production build and dependency audits passing. Protected CI and Windows packaging evidence are recorded separately below when available. The tables and earlier versioned sections retain historical evidence and must not be read as validation of this milestone. No signed v0.51 release has been validated.
 
+### Durable Media Recovery Windows candidate
+
+Runtime source commit `056d2f16b1375e7453a6011f1795575b9ae08718` produced the unsigned NSIS installer and unpacked application. Subsequent source-control changes add only smoke-test/documentation evidence, not packaged application code. The expanded packaged-backend smoke passed startup, migration, cleanup listing/empty retry, encrypted backup, offline restore and post-restore cleanup status with isolated synthetic storage and no configured AI providers. The built backend and the copy inside the unpacked desktop have identical SHA-256 hashes.
+
+| Artifact | Bytes | SHA-256 | Authenticode |
+| --- | ---: | --- | --- |
+| `Job-Apply-Pro-0.51.0-alpha.1-x64.exe` | 170234625 | `B866F9D08B2EA810CFE737055833D8FE3651091C34BD5A5E8F3F58025ED41FC5` | NotSigned |
+| `win-unpacked/Job Apply Pro.exe` | 225500672 | `8A7A57B84218B6130DB3389604CDBD0B0D81334D3CB4C50EA8EF92FD438C48F2` | NotSigned |
+| Bundled `job-apply-pro-backend.exe` | 18552957 | `338C9A9B7A21EA0D84A04BC8FE77396B93D4BBF5A75F9759A9CE7ED49B820DAC` | NotSigned |
+
+Protected pull-request checks must pass before integration. No signed release, live provider/portal validation, signed update/rollback rehearsal, or physical Windows acceptance is claimed by these local results.
+
 | Requirement                       | Implementation evidence                                                                           | Validation evidence                                                                                          | Result                                                                                                             |
 | --------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | Performance and stress testing    | Bounded diagnostic queries, workflow limits, startup deadline                                     | 2,000-job test under 3 seconds; packaged startup under 60 seconds; backend coverage gate at least 80%        | Source/packaged candidate complete                                                                                 |
