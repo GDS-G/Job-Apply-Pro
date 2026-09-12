@@ -43,6 +43,24 @@ class _NoRedirect(HTTPRedirectHandler):
         del args, kwargs
 
 
+def _worker_error_category(value: object) -> str:
+    """Classify expected failures without reflecting paths, page data, or secrets."""
+    if not isinstance(value, dict) or not isinstance(value.get("message"), str):
+        return "INVALID_WORKER_ERROR"
+    message = value["message"]
+    if "Executable doesn't exist" in message:
+        return "PLAYWRIGHT_BROWSER_EXECUTABLE_MISSING"
+    if "missing dependencies" in message.lower():
+        return "BROWSER_SYSTEM_DEPENDENCIES_MISSING"
+    if "DLL load failed" in message or "Cannot find module" in message:
+        return "PACKAGED_RUNTIME_DEPENDENCY_MISSING"
+    if "Target page, context or browser has been closed" in message:
+        return "BROWSER_CLOSED_DURING_COMMAND"
+    if "timeout" in message.lower() or "timed out" in message.lower():
+        return "BROWSER_COMMAND_TIMEOUT"
+    return "UNCLASSIFIED_WORKER_ERROR"
+
+
 class _WorkerProbe:
     def __init__(self, executable: Path, root: Path) -> None:
         self._stderr = (root / "direct-worker.stderr.log").open("w", encoding="utf-8")
@@ -96,8 +114,10 @@ class _WorkerProbe:
             )
         result = response.get("result")
         if "error" in response or not isinstance(result, dict):
+            category = _worker_error_category(response.get("error"))
             raise RuntimeError(
-                f"Packaged worker rejected {method}; see isolated smoke diagnostics"
+                f"Packaged worker rejected {method} ({category}); "
+                "only a sanitized failure category is reported"
             )
         return result
 
@@ -241,10 +261,16 @@ def _packaged_api(api_url: str, fixture_url: str, root: Path) -> None:
             "title": "Packaged runtime validation",
         },
     )
+    workflow_id = workflow.get("workflow_id")
+    if not isinstance(workflow_id, str) or not workflow_id.startswith("mock-"):
+        raise TypeError(
+            "Packaged API returned an invalid synthetic workflow identifier"
+        )
+    UUID(workflow_id.removeprefix("mock-"))
     created = post(
         "/browser/sessions",
         {
-            "workflow_id": str(UUID(workflow["workflow_id"])),
+            "workflow_id": workflow_id,
             "start_url": fixture_url,
             "engine": "chromium",
             "profile_name": "packaged-api-" + uuid4().hex,

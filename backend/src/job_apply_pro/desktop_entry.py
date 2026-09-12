@@ -1,14 +1,39 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 def _resource_path(name: str) -> Path:
     frozen_root = getattr(sys, "_MEIPASS", None)
     return (Path(frozen_root) if frozen_root else Path(__file__).parents[2]) / name
+
+
+def _configure_worker_browser_cache() -> None:
+    """Use the installed Windows cache instead of a nonexistent frozen bundle cache."""
+    if not getattr(sys, "frozen", False) or sys.platform != "win32":
+        return
+    if "PLAYWRIGHT_BROWSERS_PATH" in os.environ:
+        return
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    directory = PureWindowsPath(local_app_data)
+    if (
+        not local_app_data
+        or local_app_data != local_app_data.strip()
+        or not directory.is_absolute()
+        or ".." in directory.parts
+        or any(ord(character) < 32 for character in local_app_data)
+    ):
+        raise ValueError(
+            "LOCALAPPDATA must be an absolute Windows directory for the installed browser cache"
+        )
+    # Do not download browsers or create the cache. A missing installed browser
+    # remains an ordinary controlled launch failure. An explicit override,
+    # including Playwright's hermetic '0', is always left unchanged.
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(directory / "ms-playwright")
 
 
 def migrate() -> None:
@@ -97,6 +122,10 @@ def main() -> None:
             parser.error("browser-worker does not accept restore arguments")
         if sys.stdin is None or sys.stdout is None:
             parser.error("browser-worker requires usable standard input and output")
+        try:
+            _configure_worker_browser_cache()
+        except ValueError as error:
+            parser.error(str(error))
         # The console-capable worker EXE shares this entry stage and module
         # archive, but must not initialize the API, database, or migration code.
         from job_apply_pro.browser.worker_process import main as worker_main

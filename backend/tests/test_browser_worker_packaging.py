@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -18,6 +19,21 @@ from job_apply_pro.browser.client import (
     BrowserWorkerClient,
     BrowserWorkerUnavailableError,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_browser_cache_environment() -> Iterator[None]:
+    # The production helper intentionally writes this variable directly. When
+    # it was initially absent, monkeypatch.delenv alone has no undo record, so
+    # the synthetic Windows cache would otherwise leak into later browser tests.
+    original = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("PLAYWRIGHT_BROWSERS_PATH", None)
+        else:
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = original
 
 
 def _capture_launch(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock]:
@@ -199,6 +215,84 @@ def test_worker_entry_rejects_restore_only_arguments(monkeypatch: pytest.MonkeyP
         sys, "argv", ["synthetic-worker", "browser-worker", "--plan-id", "synthetic-plan"]
     )
     monkeypatch.setattr(sys, "stdin", io.StringIO())
+
+    with pytest.raises(SystemExit) as failure:
+        desktop_entry.main()
+
+    assert failure.value.code == 2
+
+
+def test_frozen_windows_worker_selects_installed_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\Synthetic User\AppData\Local")
+
+    desktop_entry._configure_worker_browser_cache()
+
+    assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == (
+        r"C:\Users\Synthetic User\AppData\Local\ms-playwright"
+    )
+
+
+@pytest.mark.parametrize("override", ["0", r"D:\reviewed-browser-cache", ""])
+def test_frozen_worker_preserves_explicit_browser_cache_override(
+    monkeypatch: pytest.MonkeyPatch, override: str
+) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", override)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    desktop_entry._configure_worker_browser_cache()
+
+    assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == override
+
+
+@pytest.mark.parametrize("frozen, platform", [(False, "win32"), (True, "linux")])
+def test_source_and_non_windows_cache_selection_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, frozen: bool, platform: str
+) -> None:
+    monkeypatch.setattr(sys, "frozen", frozen, raising=False)
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    desktop_entry._configure_worker_browser_cache()
+
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in os.environ
+
+
+@pytest.mark.parametrize(
+    "local_app_data",
+    [None, "", "relative-cache", r"C:drive-relative", r"\root-relative", r"C:\cache\..\other"],
+)
+def test_missing_or_invalid_frozen_windows_cache_root_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, local_app_data: str | None
+) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    if local_app_data is None:
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    else:
+        monkeypatch.setenv("LOCALAPPDATA", local_app_data)
+
+    with pytest.raises(ValueError, match="absolute Windows directory"):
+        desktop_entry._configure_worker_browser_cache()
+
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in os.environ
+
+
+def test_worker_entry_invalid_cache_configuration_is_controlled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["synthetic-worker", "browser-worker"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
 
     with pytest.raises(SystemExit) as failure:
         desktop_entry.main()

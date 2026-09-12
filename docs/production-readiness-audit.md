@@ -8,13 +8,26 @@ The active source milestone is **Packaged Browser Runtime `v0.53.0-alpha.1`**. E
 
 ### Packaged Browser Runtime validation
 
-ADR-0063 repairs the reproduced frozen worker launch defect with a console-capable hidden worker and explicit entry dispatch. Current-version integrated test and artifact results are pending; the v0.52 evidence below remains historical. Supervisor migration/start/shutdown/restore ownership remains a separate open work item.
+ADR-0063 repairs the reproduced frozen worker launch defect with a console-capable hidden worker, explicit entry dispatch and the installed Windows Chromium cache default. The final local suite passes 432 backend tests at 84.77% coverage and 79 desktop tests. Ruff lint/format, strict mypy (142 source/test/helper files), TypeScript, frozen pnpm installation, production build, pnpm audit and pip-audit pass. The unpublished editable backend package is skipped by the public-package audit. A test-only cache-environment leak and a smoke-helper assumption that mock workflow IDs were bare UUIDs were corrected before the final passing runs; neither changes the packaged application snapshot.
+
+### Packaged Browser Runtime unsigned Windows candidate
+
+Application runtime source `7ce3c86b0f8e08ab9d1a3fb61522ec36b8c13bdd` produced the NSIS installer and unpacked application. Later source changes affect only test/helper/documentation evidence. Both backend-dist and the delivered `win-unpacked/resources/backend` copy pass startup, migration, valid image decoding, malformed image rejection, cleanup API, encrypted backup and offline restore smoke. Each also passes a real local Chromium start/observe/stop/shutdown cycle through the worker's JSON-lines RPC and through the authenticated packaged API. The captured API-owned worker exits successfully after backend shutdown. All data and pages are synthetic loopback fixtures; no real account or provider is exercised.
+
+- `Job-Apply-Pro-0.53.0-alpha.1-x64.exe`: 188515422 bytes; SHA-256 `F921A860D2351BEE7689B09FBC9C965ABA9026767D4768B608F275064873F672`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `D32AD5F841B1DF4F73A9A8500DA5A9DF7E50264CFBB6DAF351CEECD6EC85F2B2`.
+- Bundled backend executable: 18578708 bytes; SHA-256 `AF1B1A57BD61DE607954B1E0BF20D48E99793C06CBDA07774F985E7F3270E305`.
+- Bundled browser-worker executable: 18582804 bytes; SHA-256 `C8CC3160BDC1357F1F3E1F49FC90E96CE6701110E96FA7EA4FAC64815C3663A9`.
+
+Both backend/worker source-bundle hashes match their delivered copies. All four executables report `NotSigned`; the metadata script correctly rejects the unsigned desktop payload before generating release metadata. This negative gate test does not verify a valid signing identity. Protected PR checks remain pending. No tag, signed publication, live-provider acceptance or physical process-tree/lifecycle acceptance is claimed. Supervisor migration/start/shutdown/restore ownership remains a separate open work item.
 
 ### Validated Media Inputs validation
 
 Runtime source commit `2f65eebee63e300f1977934ec9337716b86934af` passes 402 backend tests at 84.59% coverage and 79 desktop tests. Ruff lint/format, strict mypy (140 source/test files), TypeScript, frozen pnpm installation, production build, pnpm audit and pip-audit pass. The unpublished editable backend package is skipped by the public-package audit. An earlier overlapping development run collected an adversarial expectation before its correction; the final clean-snapshot full suite above supersedes that run. ADR-0062 records full decoding, orientation, metadata-free PNG encoding and safe API rejection. Exact-runtime artifact and protected CI evidence are recorded separately; all provider fixtures are synthetic.
 
 ### Validated Media Inputs unsigned Windows candidate
+
+Protected integration passed at final PR head `464e068d0b25efb9e98be0637d018cead59edef5`: [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319369) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319361). [PR #85](https://github.com/GDS-G/Job-Apply-Pro/pull/85) merged as `2f7448e745ce7faa5f20cbb7ca7b14e616b0667a`; the merged tree matches the tested head. Post-merge main runs are separate evidence.
 
 The NSIS installer, unpacked desktop and bundled backend were produced from runtime commit `2f65eebee63e300f1977934ec9337716b86934af`. Packaged startup, migration, valid synthetic image decoding, malformed image rejection, cleanup API, encrypted backup and offline restore smoke pass with no configured AI provider. Artifact evidence:
 
@@ -24,9 +37,9 @@ The NSIS installer, unpacked desktop and bundled backend were produced from runt
 
 All three report `NotSigned`. No tag or production release is authorized by these development checks. A hidden synthetic probe against that exact backend confirms the packaged browser launch defect below: existing worker arguments exit with code 2 and return no shutdown RPC. No browser or external provider was contacted.
 
-### Newly identified packaged-runtime gaps
+### Packaged-runtime gaps identified at v0.52
 
-A read-only audit found the frozen browser client launches the backend executable with Python `-m` arguments that its entrypoint does not support; the current windowed executable also lacks standard streams required by JSON-lines RPC, and its analysis inventory does not include `browser.worker_process`. Existing packaged health/backup smoke does not prove browser execution. Reproduce and repair this through a dedicated hidden, console-capable worker and packaged loopback tests before claiming packaged browser acceptance. Backend supervisor migration ownership, concurrent starts, spawn-error handling and shutdown/restore serialization also need dedicated lifecycle tests. Historical packaging claims below describe only the exercised scope.
+The v0.52 audit found that the frozen browser client launched the backend executable with unsupported Python `-m` arguments; its windowed executable lacked JSON-lines standard streams and its analysis omitted `browser.worker_process`. ADR-0063 and the v0.53 candidate above now repair and verify that path. Backend supervisor migration ownership, concurrent starts, spawn-error handling and shutdown/restore serialization still need dedicated lifecycle tests. Historical packaging claims below describe only their exercised scope.
 
 ### Durable Media Recovery Windows candidate
 
