@@ -36,6 +36,8 @@ $env:JAP_BROWSER_ARTIFACT_DIR = Join-Path $resolvedTestRoot "artifacts"
 $env:JAP_DOCUMENT_DATA_DIR = Join-Path $resolvedTestRoot "documents"
 $env:JAP_BACKUP_DATA_DIR = Join-Path $resolvedTestRoot "backups"
 $env:JAP_RESTORE_STAGING_DIR = Join-Path $resolvedTestRoot "restore"
+$env:JAP_API_HOST = "127.0.0.1"
+$env:JAP_ENVIRONMENT = "package-smoke-" + [guid]::NewGuid().ToString("N")
 $portProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $portProbe.Start()
 $env:JAP_API_PORT = ([Net.IPEndPoint]$portProbe.LocalEndpoint).Port.ToString()
@@ -65,7 +67,7 @@ function Start-SmokeBackend {
             $health = $null
         }
     } while ($null -eq $health -and [DateTime]::UtcNow -lt $deadline -and -not $started.HasExited)
-    if ($null -eq $health -or $health.status -ne "ok") {
+    if ($null -eq $health -or $health.status -ne "ok" -or $health.service -ne "job-apply-pro-backend" -or $health.environment -ne $env:JAP_ENVIRONMENT) {
         $stderrText = if (Test-Path -LiteralPath $StderrPath) { Get-Content -Raw -LiteralPath $StderrPath } else { "" }
         if (-not $started.HasExited) { Stop-Process -Id $started.Id -Force }
         throw "Packaged backend did not report healthy before the deadline. $stderrText"

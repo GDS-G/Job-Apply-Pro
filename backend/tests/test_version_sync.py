@@ -4,6 +4,7 @@ import tomllib
 from pathlib import Path
 
 from job_apply_pro import __version__
+from job_apply_pro.api.routes.health import health
 from job_apply_pro.services.support import SupportService
 
 
@@ -29,6 +30,7 @@ def test_release_metadata_is_synchronized() -> None:
     assert workspace["version"] == desktop["version"] == contracts["version"] == version
     assert backend["project"]["version"] == "0.53.0a1"
     assert build["name"] == SupportService.BUILD_NAME
+    assert health().build == build["name"]
     contract_source = (root / "packages/contracts/src/index.ts").read_text(encoding="utf-8")
     build_info_block = contract_source.split("export const buildInfo = {", 1)[1].split(
         "} as const;", 1

@@ -8,6 +8,7 @@ All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
 - Package a dedicated console-capable browser worker and launch it hidden through an exact sibling path; frozen builds no longer treat the windowed backend as a Python `-m` interpreter.
 - Dispatch worker mode before API/database initialization and fail safely when the worker installation or process launch is unavailable.
+- Report the current shared build name from health instead of a stale hard-coded milestone; version synchronization now checks that endpoint's build identity.
 
 ### Added
 

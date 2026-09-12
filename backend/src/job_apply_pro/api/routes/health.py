@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from job_apply_pro import __version__
 from job_apply_pro.config import get_settings
+from job_apply_pro.services.support import SupportService
 
 router = APIRouter(tags=["health"])
 
@@ -22,6 +23,6 @@ def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         version=__version__,
-        build="Observed Form Control Capture",
+        build=SupportService.BUILD_NAME,
         environment=settings.environment,
     )
