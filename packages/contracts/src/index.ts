@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Gemini Processing Budget",
-  version: "0.57.0-alpha.1",
+  name: "Greenhouse Public Discovery",
+  version: "0.58.0-alpha.1",
   channel: "alpha",
 } as const;
 
