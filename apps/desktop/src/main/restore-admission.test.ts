@@ -21,7 +21,12 @@ describe("DB-free durable restore admission", () => {
   let workspace: string;
   let options: { dataRoot: string; databaseUrl: string; projectRoot: string };
   beforeEach(() => {
-    workspace = fs.mkdtempSync(join(tmpdir(), "jap-restore-admission-"));
+    // Hosted Windows TEMP can use a short-name or redirected ancestor. The
+    // positive fixtures need the canonical path; redirect rejection is tested
+    // separately below without weakening production admission.
+    workspace = fs.realpathSync.native(
+      fs.mkdtempSync(join(tmpdir(), "jap-restore-admission-")),
+    );
     options = {
       dataRoot: join(workspace, "data"),
       databaseUrl: `sqlite:///${join(workspace, "data", "candidate.db")}`,
