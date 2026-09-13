@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -37,7 +38,9 @@ describe("master key restore admission", () => {
   let keyPath: string;
   beforeEach(() => {
     vi.clearAllMocks();
-    root = mkdtempSync(join(tmpdir(), "jap-key-admission-"));
+    root = realpathSync.native(
+      mkdtempSync(join(tmpdir(), "jap-key-admission-")),
+    );
     keyPath = join(root, "secrets", "master-key.bin");
   });
   afterEach(() => {

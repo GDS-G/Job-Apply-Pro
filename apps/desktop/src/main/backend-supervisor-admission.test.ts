@@ -1,6 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,7 +37,9 @@ describe("desktop durable restore lifecycle gate", () => {
   let children: FakeChild[];
   beforeEach(() => {
     vi.useFakeTimers();
-    root = mkdtempSync(join(tmpdir(), "jap-supervisor-admission-"));
+    root = realpathSync.native(
+      mkdtempSync(join(tmpdir(), "jap-supervisor-admission-")),
+    );
     children = [];
     vi.mocked(spawn).mockImplementation(() => {
       const child = new FakeChild();
