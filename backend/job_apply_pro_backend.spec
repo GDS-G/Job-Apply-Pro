@@ -52,7 +52,10 @@ executable = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    # Recovery-only Electron startup captures authenticated JSON over redirected
+    # stdout. The desktop always uses windowsHide=True, so the console subsystem
+    # supplies real pipes without showing a user-facing console window.
+    console=True,
 )
 browser_worker_executable = EXE(
     pyz,

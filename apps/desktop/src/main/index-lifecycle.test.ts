@@ -70,8 +70,8 @@ vi.mock("electron", () => ({
 }));
 vi.mock("./backend-supervisor.js", () => ({
   BackendSupervisor: class {
-    constructor() {
-      mocks.createSupervisor();
+    constructor(options: unknown) {
+      mocks.createSupervisor(options);
     }
     shutdown = mocks.shutdown;
     prepareUpdate = mocks.prepareUpdate;
@@ -202,6 +202,11 @@ describe("desktop terminal lifecycle callers", () => {
       configurable: true,
       value: "C:/synthetic/resources",
     });
+    vi.stubEnv("JAP_PROJECT_ROOT", "D:/untrusted-project-override");
+    vi.stubEnv(
+      "JAP_DATABASE_URL",
+      "sqlite:///D:/untrusted-database-override.db",
+    );
     mocks.admission.mockImplementation(() => {
       throw new RestoreAdmissionError();
     });
@@ -223,6 +228,36 @@ describe("desktop terminal lifecycle callers", () => {
     expect(mocks.installGate).toBeUndefined();
     expect(mocks.windows).toHaveLength(0);
     expect(mocks.appQuit).toHaveBeenCalledOnce();
+  });
+
+  it("ignores project and database environment overrides during normal packaged startup", async () => {
+    mocks.packaged = true;
+    Object.defineProperty(process, "resourcesPath", {
+      configurable: true,
+      value: "C:/synthetic/resources",
+    });
+    vi.stubEnv("JAP_PROJECT_ROOT", "D:/untrusted-project-override");
+    vi.stubEnv(
+      "JAP_DATABASE_URL",
+      "sqlite:///D:/untrusted-database-override.db",
+    );
+
+    await import("./index.js");
+    await settle();
+
+    expect(mocks.createSupervisor).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        projectRoot: "C:/synthetic/resources",
+        dataRoot: "C:/synthetic/workspace",
+        databaseUrl: "sqlite:///C:/synthetic/workspace/job-apply-pro.db",
+        backendExecutable:
+          "C:\\synthetic\\resources\\backend\\job-apply-pro-backend.exe",
+        browserEngine: "msedge",
+      }),
+    );
+    expect(mocks.recovery).not.toHaveBeenCalled();
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.installGate).toBeTypeOf("function");
   });
 
   it("enters recovery-only startup if a guard appears while loading an existing key", async () => {

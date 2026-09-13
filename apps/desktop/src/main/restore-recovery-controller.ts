@@ -17,6 +17,7 @@ const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
 const MAX_GUARD_BYTES = 36;
 const MAX_STDOUT_BYTES = 32 * 1024;
 const MAX_STDERR_BYTES = 8 * 1024;
+const RECOVERY_COMMAND_TIMEOUT_MS = 60_000;
 
 export const INSTALLED_RECOVERY_MESSAGE =
   "The authenticated restore recovery could not continue. The recovery guard remains in place and normal startup, migrations, API services, and updates remain blocked. Preserve the workspace, restore-control folder, backups, staging files, and original protected key before retrying.";
@@ -33,7 +34,8 @@ export interface InstalledRecoveryOptions extends RestoreAdmissionOptions {
   masterKeyPath: string;
 }
 
-export type InstalledRecoveryOutcome = "cancelled" | "rolled-back";
+export type InstalledRecoveryOutcome =
+  "cancelled" | "finalized" | "rolled-back";
 
 interface RestoreInspection {
   operation_id: string;
@@ -139,11 +141,23 @@ async function runRecoveryCommand(
     let stderrBytes = 0;
     let oversized = false;
     let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     const reject = () => {
       if (settled) return;
       settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
       rejectOutput(new InstalledRecoveryError());
     };
+    timeout = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // The recovery session still fails closed if termination is refused.
+      } finally {
+        reject();
+      }
+    }, RECOVERY_COMMAND_TIMEOUT_MS);
+    timeout.unref();
     child.stdout.on("data", (chunk: Buffer | string) => {
       const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       stdoutBytes += value.length;
@@ -163,6 +177,7 @@ async function runRecoveryCommand(
         return;
       }
       settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
       resolveOutput(Buffer.concat(stdout, stdoutBytes));
     });
   });
@@ -243,8 +258,57 @@ export async function runInstalledRestoreRecovery(
   const operationId = await readGuardOperation(options);
   const masterKey = await loadExistingMasterKey(options.masterKeyPath);
   const inspection = await inspect(options, masterKey, operationId);
-  if (!inspection.rollback_supported || !inspection.review_fingerprint)
-    throw new InstalledRecoveryError();
+  if (!inspection.rollback_supported) {
+    if (inspection.state !== "APPLIED" && inspection.state !== "ROLLED_BACK")
+      throw new InstalledRecoveryError();
+    const terminalState = inspection.state;
+    const confirmation = await dialog.showMessageBox({
+      type: "warning",
+      title: "Job Apply Pro — verified restore finalization",
+      message:
+        terminalState === "APPLIED"
+          ? "Finalize the verified applied restore?"
+          : "Finalize the verified restore rollback?",
+      detail:
+        `Job Apply Pro authenticated terminal ${terminalState} receipt for operation ` +
+        `${operationId}. Finalization rechecks every sealed target before clearing the ` +
+        "recovery guard. It does not apply or roll back target files.",
+      buttons: ["Keep workspace blocked", "Finalize exact restore state"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (confirmation.response !== 1) return "cancelled";
+
+    const finalizeOutput = await runRecoveryCommand(options, masterKey, [
+      "restore-finalize",
+      "--operation-id",
+      operationId,
+    ]);
+    if (finalizeOutput.length !== 0) throw new InstalledRecoveryError();
+    const finalized = await inspect(options, masterKey, operationId);
+    if (
+      finalized.state !== terminalState ||
+      finalized.rollback_supported ||
+      finalized.review_fingerprint !== null ||
+      restoreAdmissionBlocked(options)
+    )
+      throw new InstalledRecoveryError();
+
+    await dialog.showMessageBox({
+      type: "info",
+      title: "Job Apply Pro — restore finalization verified",
+      message: `The terminal ${terminalState} restore state was finalized and verified.`,
+      detail:
+        "Job Apply Pro will close now. Reopen it to start the recovered workspace normally.",
+      buttons: ["Close Job Apply Pro"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    return "finalized";
+  }
+  if (!inspection.review_fingerprint) throw new InstalledRecoveryError();
 
   const confirmation = await dialog.showMessageBox({
     type: "warning",
@@ -274,7 +338,8 @@ export async function runInstalledRestoreRecovery(
   if (
     terminal.state !== "ROLLED_BACK" ||
     terminal.rollback_supported ||
-    terminal.review_fingerprint !== null
+    terminal.review_fingerprint !== null ||
+    restoreAdmissionBlocked(options)
   )
     throw new InstalledRecoveryError();
 

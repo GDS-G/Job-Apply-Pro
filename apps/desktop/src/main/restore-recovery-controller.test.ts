@@ -26,6 +26,9 @@ interface ChildResult {
   code?: number;
   signal?: NodeJS.Signals | null;
   error?: Error;
+  effect?: () => void;
+  hung?: boolean;
+  killError?: Error;
 }
 
 const mocks = vi.hoisted(() => ({
@@ -34,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   showMessageBox: vi.fn(),
   encryptString: vi.fn(),
   decryptString: vi.fn(),
+  children: [] as { kill: ReturnType<typeof vi.fn> }[],
 }));
 
 vi.mock("node:child_process", () => ({
@@ -76,6 +80,7 @@ describe("installed restore recovery controller", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.results.length = 0;
+    mocks.children.length = 0;
     root = realpathSync.native(
       mkdtempSync(join(tmpdir(), "jap-installed-recovery-")),
     );
@@ -97,12 +102,18 @@ describe("installed restore recovery controller", () => {
       };
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
-      child.kill = vi.fn(() => true);
+      child.kill = vi.fn(() => {
+        if (result.killError) throw result.killError;
+        return true;
+      });
+      mocks.children.push(child);
       queueMicrotask(() => {
+        if (result.hung) return;
         if (result.error) {
           child.emit("error", result.error);
           return;
         }
+        result.effect?.();
         child.stdout.end(result.stdout ?? "");
         child.stderr.end(result.stderr ?? "");
         child.emit("close", result.code ?? 0, result.signal ?? null);
@@ -116,6 +127,7 @@ describe("installed restore recovery controller", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     rmSync(root, { recursive: true, force: true });
     vi.unstubAllEnvs();
   });
@@ -136,7 +148,7 @@ describe("installed restore recovery controller", () => {
     });
     mocks.results.push(
       { stdout: inspection("INTERRUPTED") },
-      { stdout: "" },
+      { stdout: "", effect: () => rmSync(guardPath) },
       { stdout: inspection("ROLLED_BACK") },
     );
     mocks.showMessageBox
@@ -204,6 +216,178 @@ describe("installed restore recovery controller", () => {
     expect(readFileSync(keyPath, "utf8")).toBe("synthetic protected key");
     expect(safeStorage.encryptString).not.toHaveBeenCalled();
   });
+
+  it.each(["APPLIED", "ROLLED_BACK"] as const)(
+    "offers exact finalization for an authenticated terminal %s receipt",
+    async (terminalState) => {
+      mocks.results.push(
+        { stdout: inspection(terminalState) },
+        { stdout: "", effect: () => rmSync(guardPath) },
+        { stdout: inspection(terminalState) },
+      );
+      mocks.showMessageBox
+        .mockResolvedValueOnce({ response: 1, checkboxChecked: false })
+        .mockResolvedValueOnce({ response: 0, checkboxChecked: false });
+
+      await expect(runInstalledRestoreRecovery(options())).resolves.toBe(
+        "finalized",
+      );
+
+      expect(mocks.spawn.mock.calls.map((call) => call[1])).toEqual([
+        ["restore-inspect", "--operation-id", OPERATION_ID],
+        ["restore-finalize", "--operation-id", OPERATION_ID],
+        ["restore-inspect", "--operation-id", OPERATION_ID],
+      ]);
+      expect(mocks.showMessageBox.mock.calls[0]![0]).toMatchObject({
+        defaultId: 0,
+        cancelId: 0,
+        buttons: ["Keep workspace blocked", "Finalize exact restore state"],
+      });
+      expect(mocks.showMessageBox.mock.calls[0]![0].detail).toContain(
+        `terminal ${terminalState} receipt`,
+      );
+      expect(() => readFileSync(guardPath)).toThrow();
+      expect(safeStorage.encryptString).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps an authenticated terminal receipt blocked when finalization is cancelled", async () => {
+    mocks.results.push({ stdout: inspection("APPLIED") });
+
+    await expect(runInstalledRestoreRecovery(options())).resolves.toBe(
+      "cancelled",
+    );
+
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(mocks.spawn.mock.calls[0]![1][0]).toBe("restore-inspect");
+    expect(readFileSync(guardPath, "ascii")).toBe(OPERATION_ID);
+    expect(mocks.showMessageBox.mock.calls[0]![0]).toMatchObject({
+      defaultId: 0,
+      cancelId: 0,
+    });
+  });
+
+  it.each([
+    ["rollback", "INTERRUPTED", "restore-rollback"],
+    ["finalization", "APPLIED", "restore-finalize"],
+  ] as const)(
+    "rejects unexpected stdout from the %s mutation command",
+    async (_label, initialState, command) => {
+      mocks.results.push(
+        { stdout: inspection(initialState) },
+        { stdout: "unexpected mutation output" },
+      );
+      mocks.showMessageBox.mockResolvedValueOnce({
+        response: 1,
+        checkboxChecked: false,
+      });
+
+      await expect(
+        runInstalledRestoreRecovery(options()),
+      ).rejects.toBeInstanceOf(InstalledRecoveryError);
+
+      expect(mocks.spawn).toHaveBeenCalledTimes(2);
+      expect(mocks.spawn.mock.calls[1]![1][0]).toBe(command);
+      expect(mocks.showMessageBox).toHaveBeenCalledOnce();
+      expect(readFileSync(guardPath, "ascii")).toBe(OPERATION_ID);
+    },
+  );
+
+  it("rejects a post-finalization inspection whose authenticated terminal state changed", async () => {
+    mocks.results.push(
+      { stdout: inspection("APPLIED") },
+      { stdout: "", effect: () => rmSync(guardPath) },
+      { stdout: inspection("ROLLED_BACK") },
+    );
+    mocks.showMessageBox.mockResolvedValueOnce({
+      response: 1,
+      checkboxChecked: false,
+    });
+
+    await expect(runInstalledRestoreRecovery(options())).rejects.toBeInstanceOf(
+      InstalledRecoveryError,
+    );
+
+    expect(mocks.spawn).toHaveBeenCalledTimes(3);
+    expect(mocks.showMessageBox).toHaveBeenCalledOnce();
+  });
+
+  it("rejects terminal reinspection when the recovery guard was not cleared", async () => {
+    mocks.results.push(
+      { stdout: inspection("APPLIED") },
+      { stdout: "" },
+      { stdout: inspection("APPLIED") },
+    );
+    mocks.showMessageBox.mockResolvedValueOnce({
+      response: 1,
+      checkboxChecked: false,
+    });
+
+    await expect(runInstalledRestoreRecovery(options())).rejects.toBeInstanceOf(
+      InstalledRecoveryError,
+    );
+
+    expect(mocks.spawn).toHaveBeenCalledTimes(3);
+    expect(readFileSync(guardPath, "ascii")).toBe(OPERATION_ID);
+    expect(mocks.showMessageBox).toHaveBeenCalledOnce();
+  });
+
+  it("rejects legacy recovery evidence without offering a native mutation", async () => {
+    mocks.results.push({
+      stdout: JSON.stringify({
+        operation_id: OPERATION_ID,
+        version: 1,
+        state: "RECOVERY_REQUIRED",
+        rollback_supported: false,
+        review_fingerprint: null,
+      }),
+    });
+
+    await expect(runInstalledRestoreRecovery(options())).rejects.toBeInstanceOf(
+      InstalledRecoveryError,
+    );
+
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(dialog.showMessageBox).not.toHaveBeenCalled();
+    expect(readFileSync(guardPath, "ascii")).toBe(OPERATION_ID);
+  });
+
+  it.each([undefined, new Error("synthetic kill refusal")])(
+    "fails a hung child at the exact command timeout even if kill throws",
+    async (killError) => {
+      const observedDelays: number[] = [];
+      const realSetTimeout = globalThis.setTimeout;
+      const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+        handler: TimerHandler,
+        delay?: number,
+      ) => {
+        observedDelays.push(delay ?? 0);
+        const handle = realSetTimeout(() => undefined, 600_000);
+        queueMicrotask(() => {
+          if (typeof handler === "function") handler();
+        });
+        return handle;
+      }) as unknown as typeof setTimeout);
+      mocks.results.push({
+        hung: true,
+        ...(killError ? { killError } : {}),
+      });
+
+      try {
+        await expect(
+          runInstalledRestoreRecovery(options()),
+        ).rejects.toBeInstanceOf(InstalledRecoveryError);
+      } finally {
+        timeout.mockRestore();
+      }
+
+      expect(observedDelays).toEqual([60_000]);
+      expect(mocks.children).toHaveLength(1);
+      expect(mocks.children[0]!.kill).toHaveBeenCalledOnce();
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      expect(readFileSync(guardPath, "ascii")).toBe(OPERATION_ID);
+    },
+  );
 
   it("does not create a replacement when the protected key is missing", async () => {
     rmSync(keyPath);

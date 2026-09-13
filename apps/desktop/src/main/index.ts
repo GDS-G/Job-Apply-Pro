@@ -99,11 +99,9 @@ app
   .then(async () => {
     if (!hasSingleInstanceLock || quitRequested) return;
     app.setAppUserModelId("com.jobapplypro.desktop");
-    const projectRoot =
-      process.env.JAP_PROJECT_ROOT ??
-      (isDevelopment
-        ? resolve(__dirname, "../../../..")
-        : process.resourcesPath);
+    const projectRoot = app.isPackaged
+      ? process.resourcesPath
+      : (process.env.JAP_PROJECT_ROOT ?? resolve(__dirname, "../../../.."));
     const apiToken =
       process.env.JAP_API_TOKEN ?? randomBytes(32).toString("base64url");
     const userDataPath = app.getPath("userData");
@@ -111,8 +109,9 @@ app
       "\\",
       "/",
     );
-    const databaseUrl =
-      process.env.JAP_DATABASE_URL ?? `sqlite:///${databasePath}`;
+    const databaseUrl = app.isPackaged
+      ? `sqlite:///${databasePath}`
+      : (process.env.JAP_DATABASE_URL ?? `sqlite:///${databasePath}`);
     const admission = { dataRoot: userDataPath, databaseUrl, projectRoot };
     // A packaged app with an active guard enters a terminal recovery-only
     // session. It never creates a key or constructs normal desktop services.
