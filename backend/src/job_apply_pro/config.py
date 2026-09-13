@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8765, ge=1024, le=65535)
     database_url: str = "sqlite:///./var/job_apply_pro.db"
+    workspace_root: Path | None = None
     log_level: str = "INFO"
     automation_enabled: bool = False
     supervised_portal_enabled: bool = False

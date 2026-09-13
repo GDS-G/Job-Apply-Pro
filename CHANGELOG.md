@@ -2,6 +2,37 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.58.0-alpha.1] - Unreleased
+
+### Greenhouse Public Discovery
+
+- Add explicit public-board listing, selected-posting review and profile-bound local import without candidate transmission or applications.
+- Bound fixed-origin GETs, identifiers, JSON, source text, URLs and operation time; preserve immutable versioned source fingerprints.
+- Atomically deduplicate local jobs/applications and reject stale, vanished or changed sources without overwriting history.
+- Expose backend-derived controls and prohibit fabricated public transitions for real imports; qualification remains not evaluated.
+- Add client, API, migration, transaction, IPC and renderer regressions. Real application flows and live acceptance remain separate work.
+
+## [0.57.0-alpha.1] - Unreleased
+
+### Gemini Processing Budget
+
+- Share one monotonic work allowance across every upload, processing poll, interaction and response-validation phase in a Gemini invocation.
+- Poll only the original registered resource, at most 30 GETs across all invocation files, with bounded waits and current journal ownership.
+- Keep known-resource deletion under a separate 30-second cleanup allowance; still traverse every durable obligation when network time is exhausted.
+- Preserve no-transfer intent abandonment, unknown-finalization manual review and terminal retention-error precedence. Expired work never returns success merely because response construction finished late.
+- Add deterministic clock, streaming, metadata, lease and cleanup-boundary regressions. These are cooperative phase checks, not hard OS cancellation or live retention acceptance.
+
+## [0.56.0-alpha.1] - Unreleased
+
+### Durable Restore Admission
+
+- Persist encrypted restore intent and a startup guard before candidate replacement; verify authenticated final-target receipts before clearing admission.
+- Coordinate normal runtime and offline restore with OS-backed exclusive ownership, bounded file inventories and supported local-path checks.
+- Refuse original or staged SQLite sidecars before restore reads; missing databases, linked files and redirected paths cannot trigger an implicit empty database or hot-journal recovery.
+- Preserve a fresh encrypted database preimage, mail-send history and media-cleanup obligations; commit restore bookkeeping in one transaction.
+- Block desktop startup and updates after an incomplete restore; never regenerate a missing key for an existing workspace. Add database-free status and evidence-only finalization commands.
+- Retain explicit limits: no deterministic rollback, automatic resume, multi-file atomicity, arbitrary cloud/external layouts or physical power-loss guarantee.
+
 ## [0.55.0-alpha.1] - Unreleased
 
 ### Verified Mail Attachments

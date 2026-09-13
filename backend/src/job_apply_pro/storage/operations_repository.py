@@ -34,6 +34,11 @@ class OperationsRepository:
         self._session = session
 
     def save_backup(self, manifest: BackupManifest) -> BackupManifest:
+        self._put_backup(manifest)
+        self._session.commit()
+        return manifest
+
+    def _put_backup(self, manifest: BackupManifest) -> None:
         row = self._session.get(BackupManifestRow, manifest.id)
         values = {
             "status": manifest.status.value,
@@ -48,8 +53,6 @@ class OperationsRepository:
         else:
             for key, value in values.items():
                 setattr(row, key, value)
-        self._session.commit()
-        return manifest
 
     def get_backup(self, backup_id: str) -> BackupManifest | None:
         row = self._session.get(BackupManifestRow, backup_id)
@@ -101,6 +104,11 @@ class OperationsRepository:
         ]
 
     def save_restore_plan(self, plan: RestorePlan) -> RestorePlan:
+        self._put_restore_plan(plan)
+        self._session.commit()
+        return plan
+
+    def _put_restore_plan(self, plan: RestorePlan) -> None:
         row = self._session.get(RestorePlanRow, plan.id)
         if row is None:
             row = RestorePlanRow(
@@ -116,8 +124,26 @@ class OperationsRepository:
             row.status = plan.status.value
             row.plan_json = plan.model_dump(mode="json")
             row.applied_at = plan.applied_at
-        self._session.commit()
-        return plan
+
+    def save_restore_result(self, manifest: BackupManifest, plan: RestorePlan) -> None:
+        """The recovered manifest and applied plan form one database transaction."""
+        try:
+            self._put_backup(manifest)
+            self._put_restore_plan(plan)
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
+
+    def close_for_offline_restore(self) -> None:
+        """Release this repository's connections before file replacement/verification."""
+        from sqlalchemy.engine import Engine
+
+        bind = self._session.get_bind()
+        self._session.close()
+        if not isinstance(bind, Engine):
+            raise RuntimeError("Offline restore requires a dedicated database engine")
+        bind.dispose()
 
     def get_restore_plan(self, plan_id: str) -> RestorePlan | None:
         row = self._session.get(RestorePlanRow, plan_id)

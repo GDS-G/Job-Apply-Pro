@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Verified Mail Attachments",
-  version: "0.55.0-alpha.1",
+  name: "Greenhouse Public Discovery",
+  version: "0.58.0-alpha.1",
   channel: "alpha",
 } as const;
 
