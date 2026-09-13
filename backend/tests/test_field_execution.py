@@ -275,7 +275,7 @@ def _fixture_service(
         bindings=_ValueRepository(binding),  # type: ignore[arg-type]
         binding_service=SimpleNamespace(
             preview=lambda _command: SimpleNamespace(compatible=True, review_fingerprint="a" * 64)
-        ),  # type: ignore[arg-type]
+        ),
         answers=_AnswerRepository(answer),
         applications=_ValueRepository(application),  # type: ignore[arg-type]
         executions=executions,
@@ -737,7 +737,7 @@ def test_sensitive_browser_action_is_redacted_before_persistence(session: Sessio
     row = session.scalar(select(BrowserActionRow))
     assert row is not None
     assert SECRET_ANSWER not in str(row.action_json)
-    action_json = cast(dict[str, object], row.action_json)
+    action_json = row.action_json
     assert action_json["value"] is None
     verification = cast(dict[str, object], action_json["verification"])
     assert verification["value"] is None
