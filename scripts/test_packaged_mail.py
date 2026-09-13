@@ -1,4 +1,4 @@
-"""Probe frozen attachment review and send admission with providers disabled.
+"""Probe offline standalone attachment review and unbound-send rejection.
 
 Uses only the standard library, synthetic in-memory PDF/DOCX files and an
 isolated loopback API. This is not a live mail/provider acceptance test.
@@ -233,9 +233,9 @@ def probe(api_url: str) -> None:
             "/communications/drafts",
             {
                 "analysis_id": record["id"],
+                "mode": "NEW_MESSAGE",
                 "workflow_id": workflow_id,
                 "provider": provider,
-                "provider_thread_id": "synthetic-thread",
                 "recipient": "recruiter@example.invalid",
                 "subject": "Synthetic review only",
                 "body_text": "No live mail may be sent.",
@@ -255,6 +255,11 @@ def probe(api_url: str) -> None:
                 "attachments": expected_attachments,
             }
             or "provider_binding_fingerprint" in draft
+            or draft.get("mode") != "NEW_MESSAGE"
+            or draft.get("account_key") is not None
+            or draft.get("account_label") is not None
+            or draft.get("reply_context") is not None
+            or draft.get("provider_thread_id") != ""
         ):
             raise RuntimeError(
                 "Packaged mail review manifest or privacy boundary failed"
@@ -267,28 +272,20 @@ def probe(api_url: str) -> None:
             "idempotency_key": "smoke-" + uuid4().hex,
             "confirmed_by": "synthetic-package-probe",
         }
-        request(f"/communications/drafts/{draft_id}/send", confirmation, expected=503)
-        audit = request(f"/communications/drafts/{draft_id}/send", confirmation)
-        if (
-            audit.get("status") != "FAILED"
-            or audit.get("provider_resource_id") is not None
-            or audit.get("error_code") != "ProviderNotConfiguredError"
-        ):
-            raise RuntimeError(
-                "Packaged disabled mail send did not preserve its failed audit"
-            )
+        request(f"/communications/drafts/{draft_id}/send", confirmation, expected=409)
+        request(f"/communications/drafts/{draft_id}/send", confirmation, expected=409)
         request(
             f"/communications/drafts/{draft_id}/send",
             {**confirmation, "idempotency_key": "smoke-" + uuid4().hex},
             expected=409,
         )
     audits = request("/communications/mutation-audits")
-    if len(audits) != 2 or any(audit.get("status") != "FAILED" for audit in audits):
+    if audits:
         raise RuntimeError(
-            "Packaged mail send claims did not prevent duplicate attempts"
+            "Packaged unbound previews must not claim a provider send attempt"
         )
     print(
-        "Packaged PDF/DOCX manifests, encrypted draft round-trip and disabled-provider send admission passed."
+        "Packaged offline PDF/DOCX manifests, encrypted draft round-trip and unbound-send rejection passed."
     )
 
 

@@ -4,8 +4,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260913_0027"
-# Unpublished integration will insert the reserved v059 0026 predecessor.
-down_revision = "20260913_0025"
+down_revision = "20260913_0026"
 branch_labels = None
 depends_on = None
 

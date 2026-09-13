@@ -98,6 +98,14 @@ class _Rig:
             self.repository,
             message_adapters={provider: self.adapter},
             attachment_resolver=self.resolver,
+            provider_configs={
+                provider: ProviderConnectionConfig(
+                    provider=provider,
+                    credential_reference="fixture-epoch",
+                    account_hint="candidate@example.test",
+                )
+            },
+            provider_account_identities={provider: "fixture-account"},
         )
         self.provider = provider
 
@@ -203,7 +211,11 @@ def test_exact_verified_pdf_and_docx_bytes_are_serialized(
             else OutlookMessageProvider(_Tokens(), client=client)
         )
         service = CommunicationService(
-            rig.repository, message_adapters={provider: adapter}, attachment_resolver=rig.resolver
+            rig.repository,
+            message_adapters={provider: adapter},
+            attachment_resolver=rig.resolver,
+            provider_configs=rig.service._provider_configs,
+            provider_account_identities=rig.service._provider_account_identities,
         )
         result = service.send_draft(draft.id, _confirmation(draft))
     assert result.status is MutationStatus.ACCEPTED
@@ -377,6 +389,8 @@ def test_uncertain_send_is_persisted_and_never_resent(
                 IntegrationProvider.GMAIL: GmailMessageProvider(_Tokens(), client=client)
             },
             attachment_resolver=rig.resolver,
+            provider_configs=rig.service._provider_configs,
+            provider_account_identities=rig.service._provider_account_identities,
         )
         confirmation = _confirmation(draft)
         result = service.send_draft(draft.id, confirmation)
@@ -413,9 +427,12 @@ def test_idempotency_rejects_wrong_resource_fingerprint_and_account(
         attachment_resolver=rig.resolver,
         provider_configs={
             IntegrationProvider.GMAIL: ProviderConnectionConfig(
-                provider=IntegrationProvider.GMAIL, credential_reference="oauth:different-account"
+                provider=IntegrationProvider.GMAIL,
+                credential_reference="oauth:different-account",
+                account_hint="other@example.test",
             )
         },
+        provider_account_identities={IntegrationProvider.GMAIL: "other-account"},
     )
     with pytest.raises(ValueError, match="provider account changed"):
         other_account.send_draft(
@@ -426,7 +443,7 @@ def test_idempotency_rejects_wrong_resource_fingerprint_and_account(
 
 
 @pytest.mark.parametrize("has_attachments", [False, True])
-def test_missing_provider_binding_never_sends_and_replays_failure(
+def test_missing_provider_binding_never_sends_or_claims(
     session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, has_attachments: bool
 ) -> None:
     rig = _Rig(session, tmp_path, IntegrationProvider.GMAIL)
@@ -434,13 +451,13 @@ def test_missing_provider_binding_never_sends_and_replays_failure(
     malformed = draft.model_copy(update={"provider_binding_fingerprint": None})
     monkeypatch.setattr(rig.repository, "get_draft", lambda key: malformed)
     confirmation = _confirmation(draft)
-    with pytest.raises(MailAttachmentError, match="provider-bound review"):
+    with pytest.raises(ValueError, match="fresh account-bound draft"):
         rig.service.send_draft(draft.id, confirmation)
     assert rig.adapter.sent == []
     audits = rig.service.list_audits()
-    assert len(audits) == 1
-    assert audits[0].status is MutationStatus.FAILED
-    assert rig.service.send_draft(draft.id, confirmation) == audits[0]
+    assert audits == []
+    with pytest.raises(ValueError, match="fresh account-bound draft"):
+        rig.service.send_draft(draft.id, confirmation)
     assert rig.adapter.sent == []
 
 
@@ -665,7 +682,7 @@ def test_api_reviews_exact_manifest_and_reports_provider_acceptance(
             response = client.post(
                 "/api/v1/communications/drafts",
                 headers=headers,
-                json=command.model_dump(mode="json"),
+                json=command.model_dump(mode="json", exclude_none=True),
             )
             assert response.status_code == 201
             draft = response.json()

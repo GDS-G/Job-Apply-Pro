@@ -4,7 +4,79 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Verified Mail Attachments `v0.55.0-alpha.1`**. Exact-version local integration and unsigned-package evidence are recorded below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities, Gemini processing budgets and durable crash/relaunch restore recovery. Signing and live acceptance alone cannot complete those features. No signed v0.55 release or live-provider acceptance has been established.
+The active source milestone is **Source-Bound Replies `v0.59.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in reviewed qualification/application flows, delivery reconciliation and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation remains a gap. Signing and live acceptance alone cannot complete unfinished features.
+
+### Source-Bound Replies integration
+
+Integrated v0.59 source passes **1,003 collected backend tests**, **85.74% coverage** (13,335 statements, 1,902 missed), **355 default desktop tests** with one opt-in skipped, strict explicit-config mypy **171 files**, Ruff lint/format **199 files**, TypeScript, frozen installation and production build. After updating the packaged helper for truthful offline previews, all **44 helper lifecycle/verifier tests** pass again. ADR-0069 documents source provenance, stable identity, epochs, strict headers, migration 0026, single-request provider wires and review/claim boundaries. Installer validation and protected integration are in progress; no live provider or delivered-window acceptance is claimed.
+
+The offline package probe no longer fabricates a configured sender or expects a provider-attempt audit. It requires two encrypted unbound new-message previews, repeated 409 pre-claim refusal with zero mutation audits, exact draft round-trip through backup/restore and continued refusal. Accepted/uncertain send-history preservation is source-tested; this offline package probe does not exercise it.
+
+### Source-Bound Replies unsigned Windows candidate
+
+Runtime checkpoint `a61029e360e7cda0b79dfc3d19b8323f89827f83` produced the installer and unpacked app. Both full backend-dist and delivered-backend probes pass: migrations/startup, image rejection/normalization, cleanup API, no-network discovery admission, direct/API browser lifecycle, exact PDF/DOCX manifests, encrypted offline draft round-trip, pre-claim send refusal and authenticated backup/offline restore. The separately enabled actual-supervisor test passes two start/stop cycles (8.15 seconds), giving **356 distinct desktop tests** across default and opt-in runs. Node and Python dependency audits report no known vulnerabilities; Python excludes only the editable unpublished local package, with no vulnerability exclusion required.
+
+- `Job-Apply-Pro-0.59.0-alpha.1-x64.exe`: 188730931 bytes; SHA-256 `ADB29D6B7500D4A064A4E70EB27DDA8E423E337E3034D5EE3E8FA643B11B5156`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `3061E9DFAE8E5AC3602F554E964457E3FEC4B95C917642FD8C5C5CEDE35C2BB3`.
+- Bundled backend executable: 18668141 bytes; SHA-256 `8165439152CC6599D7C3CEA900DEAAFE16C7B38011B52B47DB716441C8C6A4EF`.
+- Bundled browser-worker executable: 18672237 bytes; SHA-256 `C443FCA9782C97395BF5165574DE35A055312C9CC0587B289B158E5ADA16CC30`.
+
+Both bundled executable hashes match backend-dist originals. All four distinct artifacts report `NotSigned`; publication metadata rejects the unsigned desktop before creating publication outputs. Local candidate validation is complete within this scope. No live mailbox acceptance, physical Electron-window acceptance, signed update/rollback or production release is claimed. Protected integration remains separately tracked. The prior v0.56 protected merge `129a61cbf20c5a88194715624467f8cd5b169d7d` also passed post-merge main CI `34731255682` and Security `34731255706`.
+
+### Greenhouse Public Discovery integration
+
+Runtime checkpoint `1071ab762f0989016cc9731d1868936d599ba150` passes all **846 collected backend tests** with **85.42% coverage** and **282 default desktop tests** (one opt-in packaged test skipped). Strict explicit-config mypy passes **166 files**, Ruff lint/format **193 files**, and TypeScript, frozen installation and production build pass. ADR-0068 records fixed public GETs, bounded normalized source review, atomic immutable local import and backend-enforced rejection of mock/fabricated transitions on real jobs. Package and protected integration are in progress. No live board or applicant account is used by this evidence.
+
+### Greenhouse Public Discovery unsigned Windows candidate
+
+Runtime checkpoint `1071ab762f0989016cc9731d1868936d599ba150` produced the installer and unpacked app. Later changes add documentation and no-network discovery probes, not packaged application changes. Both backend-dist and delivered-backend full probes pass, including invalid board/posting input and missing-profile import rejection before public transport, image decoding/rejection, cleanup API, direct/API browser lifecycle, PDF/DOCX manifests, encrypted drafts, disabled-provider audit replay, backup and authenticated offline restore. The separately enabled supervisor test passes two real start/stop cycles, giving **283 distinct desktop tests** across default and opt-in runs. All 44 lifecycle/verifier regressions pass after the helper change; both dependency audits are clean, excluding the unpublished local package from public-package lookup.
+
+- `Job-Apply-Pro-0.58.0-alpha.1-x64.exe`: 188687719 bytes; SHA-256 `35B5A04A5C8CCCE934E38C75E4B91B2F34CA89156DA9677A998B072A8205603A`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `89D378730DA1F67CB6D862ACD29437B687B324AC9C19E6E5DA733ADA00C8504A`.
+- Bundled backend executable: 18650327 bytes; SHA-256 `22CC3F199AA4137D846AB223EB1400BD62327165E3E6830CF8A11A77EB0BA4FB`.
+- Bundled browser-worker executable: 18654423 bytes; SHA-256 `AC55D148C275352CFFD70538B6346D0A27C150A73423F15A83AD993D628618D2`.
+
+Backend/worker hashes match backend-dist originals. All four artifacts report `NotSigned`; the metadata signature gate rejects the desktop before publication output. Local verification is complete within this scope; protected integration is separate. No live discovery/provider, actual application, physical release-lab or signed update/rollback acceptance is claimed.
+
+### Gemini Processing Budget integration
+
+Exact v0.57 runtime checkpoint `d9723c3` passes **729 backend tests** at **85.03% coverage**, **231 default desktop tests** with the opt-in packaged test skipped, explicit-config strict mypy for **156 files**, Ruff lint/format for **182 files**, TypeScript, frozen pnpm installation and the production build. Packaged validation and protected integration remain in progress. ADR-0067 shares work time across upload start/finalization, bounded PROCESSING waits/GETs, interaction and response construction. Processing uses only the original durably registered resource; a separate 30-second cleanup network budget still traverses all obligations and preserves terminal retention errors. Independent review closed a post-response-construction expiry gap. These source checks do not establish real provider retention or hard OS/transport cancellation.
+
+### Gemini Processing Budget unsigned Windows candidate
+
+Runtime checkpoint `d9723c34c8e22f916771d42b2faeb1030f4eb662` produced the NSIS installer and unpacked app. Subsequent edits are documentation and canonical temporary-path test fixtures, not packaged application changes. Both backend-dist and the delivered backend pass the full synthetic startup/migration, image decoding/rejection, cleanup API, direct-worker/API browser lifecycle, verified PDF/DOCX mail manifests, encrypted draft, disabled-provider audit replay, backup and offline restore probes. The restore verifier authenticates intent, fresh encrypted preimage and the final database receipt, checks guard removal and replays original failed send outcomes after restart. The separately enabled packaged-supervisor test passes two start/stop cycles with four captured migration/server children, for **232 distinct desktop tests** across default and opt-in commands. Both dependency audits pass; the unpublished editable backend is unavailable to the public-package audit.
+
+- `Job-Apply-Pro-0.57.0-alpha.1-x64.exe`: 188637031 bytes; SHA-256 `1FAB4512F64B340955EA0D84857C08856EE6F35141AB10E1A5EE096D3A5EE6F1`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `DEC6D696E024DFBA3E16D991955A6D164913EE4FC3D8EEC3DA2FF07836CDBE0F`.
+- Bundled backend executable: 18629747 bytes; SHA-256 `4599EFADE564DAF035025FD5733275E32D3FDF656EDBF758B671A04CEC3DAE60`.
+- Bundled browser-worker executable: 18633843 bytes; SHA-256 `144D8906E08B7C87DDEE16D42212781D00A3506EEA44AA1A26EFB805B80E002A`.
+
+Both backend and worker match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before publication metadata generation. Local validation is complete within this documented scope; protected integration remains required. No live Gemini call, real retention acceptance, physical Windows UI/crash acceptance, signed installer/update/rollback or whole-process-tree containment is claimed.
+
+### Durable Restore Admission validation
+
+Exact v0.56 runtime at `72ee4ae02350ecab0433e09e5639d97904112a3b`, with final helper/test checkpoint `f97f405dc45449fd8f1e5d58e0983c8895a4608c`, passes **686 backend tests** at **84.94% coverage**. The **231 default desktop tests** pass with the opt-in packaged test explicitly skipped. That test separately passes against the rebuilt delivered backend, capturing four actual migration/server children across two start/stop cycles, for **232 distinct desktop tests** across the commands. Explicit-config strict mypy passes 155 source/test/helper files, Ruff lint/format passes 181 files, and TypeScript, frozen pnpm installation, production build and both dependency audits pass. The unpublished editable backend is not available to the public-package audit. Subsequent edits are documentation only.
+
+ADR-0066 adds persistent restore admission outside SQLite, exclusive workspace ownership, authenticated intent/receipt records, fresh encrypted database preimages, exact archive/staged-byte validation, single-transaction bookkeeping and missing-key preservation. Independent review reproduced early hot-journal recovery before an invalid plan lookup; the fix checks closed existing storage before restore-specific database imports or reads. A staged-sidecar check prevents preserving send history only in a WAL that replacement would omit. The 4,097-target receipt accommodates 4,096 document inputs plus the changed bookkeeping database. Automated barriers and finalization tests do not establish arbitrary power-loss survival, handle-pinned containment, whole-process-tree ownership or deterministic rollback/resume.
+
+The first PR #89 CI run (`34730271972`) failed 18 path-sensitive desktop assertions because their positive fixtures passed the hosted Windows TEMP spelling directly into strict canonical-path admission. The fixtures now resolve only their newly created synthetic directories with `realpathSync.native`; production admission and explicit redirected-path rejection are unchanged. All 231 desktop tests pass locally after the fixture correction. Required CI must pass for the corrected head before integration; the first failed run is not acceptance evidence. No packaged application code changed.
+
+### Durable Restore Admission unsigned Windows candidate
+
+Runtime checkpoint `72ee4ae02350ecab0433e09e5639d97904112a3b` produced the NSIS installer and unpacked application. Later commits change smoke helpers, tests and documentation only. The final helper uses verified worker identity, exact retained process handles, bounded non-killing command observation and sticky evidence preservation. All 44 focused lifecycle/verifier tests pass, including real Windows PowerShell/Python source-quoting coverage.
+
+Both backend-dist and the delivered unpacked backend pass startup/migration, valid image decoding/malformed rejection, cleanup API, direct-worker and packaged-API Chromium lifecycle, synthetic PDF/DOCX import, exact mail manifest/hash/length checks, encrypted draft round-trip, disabled-provider failed-audit replay, different-key rejection, encrypted backup and offline restore. The probe authenticates the fresh encrypted database preimage, intent and final database receipt, verifies no active guard remains, then restarts and replays both original failed mail outcomes. All storage, files and pages are synthetic; no real provider/account is exercised.
+
+Two initial packaged-probe failures were fixture/harness defects: migration no longer creates the document directory before API startup, and Windows PowerShell's native `-c` argument handling removed quotes from the embedded Python verifier. Explicit owned-directory initialization, terminating PowerShell errors and Python source through stdin fix both. The failed synthetic workspaces were preserved, no captured backend/worker remained running after inspection, and the corrected full runs pass. These failures did not establish a successful probe until the reruns.
+
+- `Job-Apply-Pro-0.56.0-alpha.1-x64.exe`: 188635209 bytes; SHA-256 `96C66D1C91CC9393B774E7236855DA497BFE793283FFEBD2130A438DE8F86FF8`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `9F1A8541BA00FE66C58BA2977852330144C4E4F2EB83EE564BEC648EFE26F771`.
+- Bundled backend executable: 18627541 bytes; SHA-256 `406D9562DB80DAEE4E6529938434023FB8669857731D8B1939DDD5DC19BC34DB`.
+- Bundled browser-worker executable: 18631637 bytes; SHA-256 `57443AD6CF4272AC3265C730C9B82A5787BDFDBF5E0CCF7688B12A4B9D37800B`.
+
+Both backend/worker hashes match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before publication metadata is created. Protected v0.56 integration remains required. No signed publication, live-provider acceptance, physical crash/storage-pressure acceptance, deterministic rollback/resume or whole-process-tree guarantee is claimed.
+
+Protected [PR #89](https://github.com/GDS-G/Job-Apply-Pro/pull/89) passed corrected-head CI `34730631523` and Security `34730631593`, then merged as `129a61cbf20c5a88194715624467f8cd5b169d7d`. The merged tree is identical to checked head `6a0bd0aa09b899d5480d5f4694bb62f63a2a9b61`. This supersedes the pending-integration status above; the first failed fixture run is retained as correction history. Post-merge main CI is tracked separately. No tag or signed release was published.
 
 ### Strict type-check evidence correction
 
@@ -25,7 +97,7 @@ Runtime/helper checkpoint `ca3e41f4f675091685f15cbbacd5302e4a023818` produced th
 - Bundled backend executable: 18601653 bytes; SHA-256 `A444D2157BD5D9BAA599D665574E245471329905DF5EB5ABA52256DDE4B9427D`.
 - Bundled browser-worker executable: 18605749 bytes; SHA-256 `10F3C5ED8ADAAB8FC7A060ED0F29A0177F98FA6E069125734F96495A126B6D5F`.
 
-Backend and worker hashes match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before creating publication metadata. Protected v0.55 PR checks remain required. No tag, signed publication, live mail/provider acceptance, verified reply threading/delivery, durable crash/relaunch restore recovery or physical failure-injection acceptance is claimed.
+Backend and worker hashes match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before creating publication metadata. [PR #88](https://github.com/GDS-G/Job-Apply-Pro/pull/88) passed [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34728604169) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34728604158) at head `5a582e6e9f307e7173ed1536cdd49c179e336223`, then merged as `df608de7f198ad6278006068b846701eeb9892da` with an identical tree. Post-merge [main CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34729164550) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34729164541) also passed. No tag, signed publication, live mail/provider acceptance, verified reply threading/delivery, durable crash/relaunch restore recovery or physical failure-injection acceptance is claimed for v0.55.
 
 ### Bounded Backend Lifecycle validation
 

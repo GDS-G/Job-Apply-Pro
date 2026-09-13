@@ -3,6 +3,8 @@ param(
     [string]$PythonPath = ""
 )
 
+$ErrorActionPreference = "Stop"
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $bundleRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot $BackendDirectory))
 $repoPrefix = $repoRoot.TrimEnd("\", "/") + [IO.Path]::DirectorySeparatorChar
@@ -30,6 +32,7 @@ if (-not $resolvedTestRoot.StartsWith($resolvedTempRoot, [StringComparison]::Ord
 }
 
 New-Item -ItemType Directory -Path $resolvedTestRoot | Out-Null
+$env:JAP_WORKSPACE_ROOT = $resolvedTestRoot
 $env:JAP_DATABASE_URL = "sqlite:///" + (Join-Path $resolvedTestRoot "smoke.db").Replace("\", "/")
 $env:JAP_BROWSER_DATA_DIR = Join-Path $resolvedTestRoot "browser"
 $env:JAP_BROWSER_ARTIFACT_DIR = Join-Path $resolvedTestRoot "artifacts"
@@ -50,30 +53,160 @@ $env:JAP_COMMUNICATION_CONFIG_JSON = '{"providers":[],"oauth_clients":[]}'
 $env:JAP_AUTOMATION_ENABLED = "false"
 $env:JAP_BROWSER_HEADLESS = "true"
 
+function Initialize-SmokeLifecycle {
+    $script:smokeOwnedBackends = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokePinnedBackends = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokeOwnedWorkers = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokeWorkerParents = [Collections.Generic.Dictionary[System.Diagnostics.Process, System.Diagnostics.Process]]::new()
+    $script:smokeOwnedCommands = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokePreserveArtifacts = $false
+}
+
+function Get-SmokeWorker {
+    param([System.Diagnostics.Process]$Parent)
+
+    try {
+        if ($null -eq $Parent -or -not $script:smokeOwnedBackends.Contains($Parent) -or
+            -not $script:smokePinnedBackends.Contains($Parent)) {
+            throw "Worker parent is not a captured backend"
+        }
+        # Reuse only the previously verified handle, even after its parent exits.
+        # This smoke does not request browser work/restart after capture; the old
+        # handle is never evidence for an unobserved replacement worker.
+        if ($script:smokeWorkerParents.ContainsKey($Parent)) {
+            return $script:smokeWorkerParents[$Parent]
+        }
+        $parentHandle = $Parent.Handle
+        if ($null -eq $parentHandle -or $parentHandle -eq 0) { throw "Parent handle could not be pinned" }
+        if ($Parent.HasExited) { throw "Worker parent already exited" }
+        $parentStarted = $Parent.StartTime.ToUniversalTime()
+        $records = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Parent.Id)" -ErrorAction Stop | Where-Object {
+            $_.Name -eq "job-apply-pro-browser-worker.exe"
+        })
+        if ($records.Count -gt 1) { throw "Ambiguous API worker ownership" }
+        if ($records.Count -eq 0) { return $null }
+        $record = $records[0]
+        if ($record.ParentProcessId -ne $Parent.Id -or $record.ExecutablePath -ne $browserWorker -or
+            $record.CreationDate -isnot [datetime] -or $record.CreationDate.Kind -eq [DateTimeKind]::Unspecified) {
+            throw "Incomplete API worker identity"
+        }
+        $candidate = Get-Process -Id $record.ProcessId -ErrorAction Stop
+        if ($null -eq $candidate) { throw "API worker handle unavailable" }
+        # CIM is only a discovery hint: its PID may already have been reused.
+        # Pin first, then compare the actual executable and creation identity.
+        $candidateHandle = $candidate.Handle
+        if ($null -eq $candidateHandle -or $candidateHandle -eq 0) { throw "Worker handle could not be pinned" }
+        if ($candidate.HasExited) { throw "API worker exited before capture" }
+        $actualPath = $candidate.MainModule.FileName
+        $actualStarted = $candidate.StartTime.ToUniversalTime()
+        $recordStarted = $record.CreationDate.ToUniversalTime()
+        # CIM truncates creation time to microseconds; .NET retains 100 ns ticks.
+        $actualTicks = $actualStarted.Ticks - ($actualStarted.Ticks % 10)
+        $recordTicks = $recordStarted.Ticks - ($recordStarted.Ticks % 10)
+        if ($candidate.Id -ne $record.ProcessId -or $actualPath -ne $browserWorker -or
+            $actualTicks -ne $recordTicks -or $actualStarted -lt $parentStarted -or
+            $actualStarted -gt [datetime]::UtcNow -or $candidate.HasExited -or
+            $Parent.HasExited -or $Parent.StartTime.ToUniversalTime() -ne $parentStarted) {
+            throw "API worker identity changed during capture"
+        }
+        # Never register or return an object whose pinned identity was unverified.
+        $script:smokeOwnedWorkers.Add($candidate)
+        $script:smokeWorkerParents.Add($Parent, $candidate)
+        return $candidate
+    }
+    catch {
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged API worker ownership could not be verified. Preserve the synthetic workspace."
+    }
+}
+
+function Wait-SmokeCommand {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [ValidateRange(1, 120000)][int]$TimeoutMilliseconds = 120000
+    )
+
+    try {
+        if ($null -eq $Process -or -not $script:smokeOwnedCommands.Contains($Process)) {
+            throw "Command handle is not owned"
+        }
+        $commandHandle = $Process.Handle
+        if ($null -eq $commandHandle -or $commandHandle -eq 0) { throw "Command handle could not be pinned" }
+        if (-not $Process.WaitForExit($TimeoutMilliseconds) -or $Process.ExitCode -ne 0) {
+            throw "Command did not complete successfully"
+        }
+    }
+    catch {
+        # Migration/restore may have written multiple files. Never kill a writer
+        # on an observation deadline or treat acceptance of a kill as exit proof.
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged command failed or its exit is unproved. Preserve the synthetic workspace and captured writer; do not restart or delete its evidence."
+    }
+}
+
+function Invoke-SmokeCommand {
+    param(
+        [string]$Executable,
+        [string[]]$Arguments,
+        [ValidateRange(1, 120000)][int]$TimeoutMilliseconds = 120000
+    )
+
+    try {
+        $started = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru -ErrorAction Stop
+        if ($null -eq $started) { throw "Command returned no process handle" }
+        # No Start-Process -Wait assignment gap: retain before observing exit.
+        $script:smokeOwnedCommands.Add($started)
+        $commandHandle = $started.Handle
+        if ($null -eq $commandHandle -or $commandHandle -eq 0) { throw "Command handle could not be pinned" }
+        Wait-SmokeCommand -Process $started -TimeoutMilliseconds $TimeoutMilliseconds
+    }
+    catch {
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged command failed or its exit is unproved. Preserve the synthetic workspace and captured writer; do not restart or delete its evidence."
+    }
+}
+
 function Start-SmokeBackend {
     param(
         [string]$Executable,
         [string]$StdoutPath,
-        [string]$StderrPath
+        [string]$StderrPath,
+        [ValidateRange(1, 60000)][int]$StartupTimeoutMilliseconds = 60000
     )
 
-    $started = Start-Process -FilePath $Executable -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    do {
-        Start-Sleep -Milliseconds 250
-        try {
-            $health = Invoke-RestMethod -Uri "$apiRoot/api/v1/health" -TimeoutSec 2
+    $started = $null
+    try {
+        $started = Start-Process -FilePath $Executable -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath -ErrorAction Stop
+        if ($null -eq $started) { throw "No owned backend handle was returned" }
+        # Retain the exact handle even if startup throws before the caller's
+        # assignment completes. Never recover ownership by image-name lookup.
+        $script:smokeOwnedBackends.Add($started)
+        $backendHandle = $started.Handle
+        if ($null -eq $backendHandle -or $backendHandle -eq 0) { throw "Backend handle could not be pinned" }
+        $script:smokePinnedBackends.Add($started)
+        $observation = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            Start-Sleep -Milliseconds 250
+            try {
+                $health = Invoke-RestMethod -Uri "$apiRoot/api/v1/health" -TimeoutSec 2
+            }
+            catch {
+                $health = $null
+            }
+        } while ($null -eq $health -and $observation.ElapsedMilliseconds -lt $StartupTimeoutMilliseconds -and -not $started.HasExited)
+        if ($null -eq $health -or $started.HasExited -or $health.status -ne "ok" -or $health.service -ne "job-apply-pro-backend" -or $health.environment -ne $env:JAP_ENVIRONMENT) {
+            throw "Packaged backend did not report its expected healthy identity"
         }
-        catch {
-            $health = $null
-        }
-    } while ($null -eq $health -and [DateTime]::UtcNow -lt $deadline -and -not $started.HasExited)
-    if ($null -eq $health -or $health.status -ne "ok" -or $health.service -ne "job-apply-pro-backend" -or $health.environment -ne $env:JAP_ENVIRONMENT) {
-        $stderrText = if (Test-Path -LiteralPath $StderrPath) { Get-Content -Raw -LiteralPath $StderrPath } else { "" }
-        if (-not $started.HasExited) { $started.Kill() }
-        throw "Packaged backend did not report healthy before the deadline. $stderrText"
+        return $started
     }
-    return $started
+    catch {
+        $script:smokePreserveArtifacts = $true
+        if ($null -ne $started) {
+            try { Stop-SmokeBackend -Process $started }
+            catch { $script:smokePreserveArtifacts = $true }
+        }
+        throw "Packaged backend startup failed. Preserve the synthetic workspace for review."
+    }
 }
 
 function Stop-SmokeBackend {
@@ -82,35 +215,168 @@ function Stop-SmokeBackend {
         [System.Diagnostics.Process]$WorkerProcess = $null
     )
 
-    if ($null -eq $WorkerProcess -and $null -ne $Process -and -not $Process.HasExited) {
-        $ownedWorkers = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id)" | Where-Object {
-            $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
-        })
-        if ($ownedWorkers.Count -eq 1) {
-            $WorkerProcess = Get-Process -Id $ownedWorkers[0].ProcessId -ErrorAction SilentlyContinue
-            if ($null -ne $WorkerProcess) { $null = $WorkerProcess.Handle }
+    $failed = $false
+    $ownedProcess = $null
+    $ownedWorker = $null
+    try {
+        if ($null -ne $Process) {
+            if (-not $script:smokeOwnedBackends.Contains($Process) -or -not $script:smokePinnedBackends.Contains($Process)) {
+                throw "Backend handle is not owned and pinned"
+            }
+            $ownedProcess = $Process
         }
+        if ($null -ne $WorkerProcess) {
+            if (-not $script:smokeOwnedWorkers.Contains($WorkerProcess)) { throw "Worker handle is not verified" }
+            $ownedWorker = $WorkerProcess
+        } elseif ($null -ne $ownedProcess -and -not $ownedProcess.HasExited) {
+            $ownedWorker = Get-SmokeWorker -Parent $ownedProcess
+        }
+    } catch { $failed = $true }
+    if ($null -ne $ownedProcess) {
+        try { if (-not $ownedProcess.HasExited) { $ownedProcess.Kill() } }
+        catch { $failed = $true }
+        # Kill acceptance (or failure) is never substituted for exit proof.
+        try { if (-not $ownedProcess.WaitForExit(10000)) { $failed = $true } }
+        catch { $failed = $true }
     }
-    if ($null -ne $Process -and -not $Process.HasExited) {
-        $Process.Kill()
-        if (-not $Process.WaitForExit(10000)) { throw "Packaged backend exit could not be verified" }
+    if ($null -ne $ownedWorker) {
+        try {
+            # Workers normally close after backend pipe EOF. This helper neither
+            # force-kills a discovered worker nor claims process-tree containment.
+            if (-not $ownedWorker.WaitForExit(15000)) {
+                $failed = $true
+            } elseif ($ownedWorker.ExitCode -ne 0) {
+                $failed = $true
+            }
+        } catch { $failed = $true }
     }
-    if ($null -ne $WorkerProcess -and -not $WorkerProcess.WaitForExit(15000)) {
-        # Only this previously verified backend child is eligible for cleanup.
-        $WorkerProcess.Kill()
-        if (-not $WorkerProcess.WaitForExit(10000)) { throw "Packaged API-owned worker cleanup could not be verified" }
-        throw "Packaged API-owned worker did not exit after its parent's IPC pipe closed"
-    }
-    if ($null -ne $WorkerProcess -and $WorkerProcess.ExitCode -ne 0) {
-        throw "Packaged API-owned worker exited unsuccessfully after parent shutdown"
+    if ($failed) {
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged smoke shutdown failed or captured process exit is unproved. Preserve the synthetic workspace until recovery is reviewed."
     }
 }
+
+function Complete-SmokeCleanup {
+    param([string]$Directory)
+
+    foreach ($ownedBackend in @($script:smokeOwnedBackends.ToArray())) {
+        try { Stop-SmokeBackend -Process $ownedBackend }
+        catch { $script:smokePreserveArtifacts = $true }
+    }
+    foreach ($ownedWorker in @($script:smokeOwnedWorkers.ToArray())) {
+        try { Stop-SmokeBackend -WorkerProcess $ownedWorker }
+        catch { $script:smokePreserveArtifacts = $true }
+    }
+    foreach ($ownedCommand in @($script:smokeOwnedCommands.ToArray())) {
+        try { Wait-SmokeCommand -Process $ownedCommand -TimeoutMilliseconds 1000 }
+        catch { $script:smokePreserveArtifacts = $true }
+    }
+    if ($script:smokePreserveArtifacts) {
+        throw "Synthetic smoke workspace preserved after smoke verification failure, failed shutdown, or missing exit proof. Do not delete its artifacts until captured processes have exited and the failure is reviewed."
+    }
+    $absoluteDirectory = [IO.Path]::GetFullPath($Directory)
+    $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd("\", "/") + [IO.Path]::DirectorySeparatorChar
+    if (-not $absoluteDirectory.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or -not ([IO.Path]::GetFileName($absoluteDirectory)).StartsWith("job-apply-pro-package-smoke-", [StringComparison]::Ordinal)) {
+        throw "Refusing cleanup outside the owned synthetic smoke workspace"
+    }
+    if (Test-Path -LiteralPath $absoluteDirectory) {
+        Remove-Item -LiteralPath $absoluteDirectory -Recurse -Force -ErrorAction Stop
+    }
+}
+
+Initialize-SmokeLifecycle
+
+# This helper authenticates synthetic restore evidence without opening SQLite or
+# printing keys, decrypted bytes, filesystem paths, or database hashes.
+$restoreEvidenceScript = @'
+import base64
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+from uuid import UUID
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+def verify_restore_evidence(root, operation_id, expected_hash, expected_size, plan_id):
+    root = Path(root).resolve(strict=True)
+    if str(UUID(operation_id)) != operation_id:
+        raise ValueError("Invalid operation identifier")
+    control = root / "restore-control"
+    operation = control / "operations" / operation_id
+    for path in (control, operation.parent, operation):
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("Invalid restore evidence directory")
+    try:
+        (control / "active.guard").lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise ValueError("Restore remains blocked")
+    key = base64.b64decode(os.environ["JAP_MASTER_KEY"], validate=True)
+
+    def decrypt(name, kind):
+        path = operation / name
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 384 * 1024 * 1024:
+            raise ValueError("Invalid restore evidence file")
+        if getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("Invalid restore evidence file")
+        parts = path.read_text(encoding="ascii").split(":", 3)
+        if len(parts) != 4 or parts[:3] != ["jap", "v1", "local-v1"]:
+            raise ValueError("Invalid restore evidence envelope")
+        payload = base64.urlsafe_b64decode(parts[3])
+        return AESGCM(key).decrypt(
+            payload[:12], payload[12:], f"restore:v1:{operation_id}:{kind}".encode()
+        )
+
+    previous = decrypt("database-preimage.enc", "database-preimage")
+    if len(previous) != int(expected_size) or hashlib.sha256(previous).hexdigest() != expected_hash.lower():
+        raise ValueError("Previous database was not preserved exactly")
+    intent = json.loads(decrypt("intent.enc", "intent"))
+    receipt = json.loads(decrypt("receipt.enc", "receipt"))
+    if intent["version"] != 1 or receipt["version"] != 1 or intent["plan"]["id"] != plan_id:
+        raise ValueError("Restore evidence does not match the reviewed plan")
+    if Path(intent["workspace"]) != root:
+        raise ValueError("Restore evidence belongs to another workspace")
+    intent["plan"]["categories"] = sorted(intent["plan"]["categories"])
+    intent["manifest"]["categories"] = sorted(intent["manifest"]["categories"])
+    canonical = json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
+    if hashlib.sha256(canonical).hexdigest() != receipt["intent_sha256"]:
+        raise ValueError("Restore receipt does not authenticate its intent")
+    database_targets = [target for target in receipt["targets"] if target["path"] == intent["database"]]
+    if len(database_targets) != 1:
+        raise ValueError("Restore receipt does not identify the committed database")
+    database = root / intent["database"]
+    if database.parent.resolve(strict=True) != root:
+        raise ValueError("Restore database is outside the smoke workspace")
+    database_info = database.lstat()
+    if not stat.S_ISREG(database_info.st_mode) or database_info.st_nlink != 1 or getattr(database_info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("Invalid committed database file")
+    actual = database.read_bytes()
+    if len(actual) != database_targets[0]["size"] or hashlib.sha256(actual).hexdigest() != database_targets[0]["sha256"]:
+        raise ValueError("Committed database no longer matches its receipt")
+
+
+if __name__ == "__main__":
+    try:
+        verify_restore_evidence(*sys.argv[1:])
+    except Exception:
+        print("Packaged durable restore evidence verification failed.", file=sys.stderr)
+        raise SystemExit(1) from None
+'@
 
 $process = $null
 $apiWorkerProcess = $null
 try {
-    $migration = Start-Process -FilePath $backend -ArgumentList "migrate" -WindowStyle Hidden -Wait -PassThru
-    if ($migration.ExitCode -ne 0) { throw "Packaged backend migration failed" }
+    Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")
+    # Migration need not initialize runtime document storage. This directory is
+    # fixed beneath the newly created, isolated synthetic workspace above.
+    New-Item -ItemType Directory -Path $env:JAP_DOCUMENT_DATA_DIR -Force -ErrorAction Stop | Out-Null
     $documentPath = Join-Path $env:JAP_DOCUMENT_DATA_DIR "restore-smoke.enc"
     $originalDocument = "verified-packaged-restore-fixture"
     Set-Content -LiteralPath $documentPath -Value $originalDocument -Encoding utf8 -NoNewline
@@ -123,6 +389,24 @@ try {
     if (@($cleanup.items).Count -ne 0) { throw "Fresh packaged cleanup journal is not empty" }
     $cleanupRetry = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/ai/media-cleanup/retry" -Headers $headers -TimeoutSec 5
     if (@($cleanupRetry.items).Count -ne 0) { throw "Empty packaged cleanup retry changed state" }
+    # Discovery is present in the frozen router, but all these requests stop
+    # before public transport: invalid tokens/IDs or a nonexistent local profile.
+    $discoveryCases = @(
+        @{ path = "list"; body = @{ board_token = "internal" }; status = 422; detail = "Request validation failed; check required fields and supported values" },
+        @{ path = "review"; body = @{ board_token = "package-smoke-no-network"; posting_id = "0" }; status = 422; detail = "Request validation failed; check required fields and supported values" },
+        @{ path = "import"; body = @{ board_token = "package-smoke-no-network"; posting_id = "1"; review_fingerprint = ("a" * 64); profile_id = "package-smoke-missing-profile" }; status = 409; detail = "Local import conflicted; select an existing profile and refresh" }
+    )
+    foreach ($discoveryCase in $discoveryCases) {
+        try {
+            Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/discovery/greenhouse/$($discoveryCase.path)" -Headers $headers -ContentType "application/json" -Body ($discoveryCase.body | ConvertTo-Json) -TimeoutSec 5 | Out-Null
+            throw "Packaged invalid discovery request unexpectedly succeeded"
+        }
+        catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne $discoveryCase.status) { throw }
+            $discoveryError = $_.ErrorDetails.Message | ConvertFrom-Json
+            if ($discoveryError.detail -ne $discoveryCase.detail) { throw "Packaged discovery admission returned an unexpected error" }
+        }
+    }
     # Synthetic pixels only. The deliberately unknown prompt stops before any
     # route/provider work, but only after successful packaged image decoding.
     $mediaCases = @(
@@ -155,16 +439,14 @@ try {
     }
     & $PythonPath (Join-Path $PSScriptRoot "test_packaged_browser.py") --worker $browserWorker --test-root $resolvedTestRoot --api-url $apiRoot
     if ($LASTEXITCODE -ne 0) { throw "Packaged loopback browser smoke failed" }
-    $workerRecords = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($process.Id)" | Where-Object {
-        $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
-    })
-    if ($workerRecords.Count -ne 1) {
+    $apiWorkerProcess = Get-SmokeWorker -Parent $process
+    if ($null -eq $apiWorkerProcess) {
         throw "Packaged API did not retain exactly one fixed-sibling browser worker"
     }
-    $apiWorkerProcess = Get-Process -Id $workerRecords[0].ProcessId -ErrorAction Stop
-    $null = $apiWorkerProcess.Handle
     & $PythonPath (Join-Path $PSScriptRoot "test_packaged_mail.py") --api-url $apiRoot
     if ($LASTEXITCODE -ne 0) { throw "Packaged verified mail attachment smoke failed" }
+    $originalMailDrafts = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($originalMailDrafts.Count -ne 2) { throw "Packaged offline mail previews are incomplete" }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -179,19 +461,34 @@ try {
     Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     $process = $null
     $apiWorkerProcess = $null
+    $databasePath = Join-Path $resolvedTestRoot "smoke.db"
+    $previousDatabaseHash = (Get-FileHash -LiteralPath $databasePath -Algorithm SHA256).Hash
+    $previousDatabaseSize = (Get-Item -LiteralPath $databasePath).Length
+    $restoreOperationsPath = Join-Path $resolvedTestRoot "restore-control\operations"
+    $previousRestoreOperations = if (Test-Path -LiteralPath $restoreOperationsPath) {
+        @(Get-ChildItem -LiteralPath $restoreOperationsPath -Directory | Select-Object -ExpandProperty Name)
+    } else { @() }
     $restoreArguments = @("restore", "--plan-id", $plan.id, "--fingerprint", $plan.fingerprint)
-    $restore = Start-Process -FilePath $backend -ArgumentList $restoreArguments -WindowStyle Hidden -Wait -PassThru
-    if ($restore.ExitCode -ne 0) { throw "Packaged offline restore failed" }
+    Invoke-SmokeCommand -Executable $backend -Arguments $restoreArguments
     if ((Get-Content -Raw -LiteralPath $documentPath) -ne $originalDocument) {
         throw "Packaged offline restore did not recover the staged document"
     }
-    $databasePath = Join-Path $resolvedTestRoot "smoke.db"
-    if (-not (Test-Path -LiteralPath "$databasePath.pre-restore" -PathType Leaf)) {
-        throw "Packaged offline restore did not retain the previous database"
+    if (-not (Test-Path -LiteralPath $restoreOperationsPath -PathType Container)) {
+        throw "Packaged offline restore did not retain durable recovery evidence"
     }
+    $freshRestoreOperations = @(Get-ChildItem -LiteralPath $restoreOperationsPath -Directory | Where-Object { $_.Name -notin $previousRestoreOperations })
+    if ($freshRestoreOperations.Count -ne 1) {
+        throw "Packaged offline restore did not create exactly one fresh recovery operation"
+    }
+    if (Test-Path -LiteralPath "$databasePath.pre-restore") {
+        throw "Packaged offline restore unexpectedly created a plaintext database recovery copy"
+    }
+    # Windows PowerShell's native -c argument rewriting can strip Python quotes.
+    # Source travels over stdin; only the bounded synthetic values are arguments.
+    $restoreEvidenceScript | & $PythonPath - $resolvedTestRoot $freshRestoreOperations[0].Name $previousDatabaseHash $previousDatabaseSize $plan.id
+    if ($LASTEXITCODE -ne 0) { throw "Packaged offline restore evidence failed authenticated verification" }
 
-    $postRestoreMigration = Start-Process -FilePath $backend -ArgumentList "migrate" -WindowStyle Hidden -Wait -PassThru
-    if ($postRestoreMigration.ExitCode -ne 0) { throw "Post-restore migration failed" }
+    Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")
     $postRestoreStdout = Join-Path $resolvedTestRoot "post-restore.stdout.log"
     $postRestoreStderr = Join-Path $resolvedTestRoot "post-restore.stderr.log"
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $postRestoreStdout -StderrPath $postRestoreStderr
@@ -203,33 +500,45 @@ try {
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
     $restoredCleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    # Windows PowerShell emits a JSON array as one pipeline object; enumerate
-    # it explicitly before checking count and replaying individual audit rows.
+    # Offline previews have no provider identity and cannot reserve/send mail.
+    # Verify their exact encrypted round-trip after restore without manufacturing
+    # fake provider attempts just to preserve an older smoke expectation.
     $restoredMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
-    if ($restoredMailAudits.Count -ne 2) { throw "Restored packaged mail history is incomplete" }
-    foreach ($mailAudit in $restoredMailAudits) {
-        if ($mailAudit.status -ne "FAILED" -or $mailAudit.error_code -ne "ProviderNotConfiguredError" -or $null -ne $mailAudit.provider_resource_id) {
-            throw "Restored packaged mail history changed its failed outcome"
+    if ($restoredMailAudits.Count -ne 0) { throw "Offline mail previews unexpectedly recorded provider attempts" }
+    $restoredMailDrafts = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($restoredMailDrafts.Count -ne $originalMailDrafts.Count) { throw "Restored mail preview inventory changed" }
+    foreach ($originalMailDraft in $originalMailDrafts) {
+        $restoredMailDraft = Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts/$($originalMailDraft.id)" -Headers $headers -TimeoutSec 5
+        if (($restoredMailDraft | ConvertTo-Json -Depth 30 -Compress) -ne ($originalMailDraft | ConvertTo-Json -Depth 30 -Compress)) {
+            throw "Restored offline mail preview changed"
         }
         $mailReplayBody = @{
-            fingerprint = $mailAudit.fingerprint
-            idempotency_key = $mailAudit.idempotency_key
+            fingerprint = $originalMailDraft.fingerprint
+            idempotency_key = "post-restore-offline-" + [guid]::NewGuid().ToString("N")
             confirmed_by = "synthetic-package-probe"
         } | ConvertTo-Json
-        $mailReplay = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($mailAudit.resource_id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5
-        if ($mailReplay.id -ne $mailAudit.id -or $mailReplay.status -ne "FAILED") {
-            throw "Restored packaged mail attempt did not replay its original outcome"
+        try {
+            Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($originalMailDraft.id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5 | Out-Null
+            throw "Restored unbound mail preview unexpectedly allowed sending"
+        }
+        catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 409) { throw }
         }
     }
+    $postRestoreMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($postRestoreMailAudits.Count -ne 0) { throw "Restored unbound previews created provider audit attempts" }
     Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, encrypted backup and offline restore smoke passed."
+}
+catch {
+    # Functional verification failures also need their logs and recovery evidence,
+    # even when every captured process subsequently exits successfully.
+    $script:smokePreserveArtifacts = $true
+    throw
 }
 finally {
     try {
         Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     }
-    finally {
-        if (Test-Path -LiteralPath $resolvedTestRoot) {
-            Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
-        }
-    }
+    catch { $script:smokePreserveArtifacts = $true }
+    Complete-SmokeCleanup -Directory $resolvedTestRoot
 }

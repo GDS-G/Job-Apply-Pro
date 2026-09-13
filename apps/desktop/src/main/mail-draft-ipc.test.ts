@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CommunicationDraftCreate,
   CommunicationMutationAudit,
+  MailReplyContext,
   OutboundDraft,
 } from "@job-apply-pro/contracts";
 
@@ -25,20 +26,58 @@ vi.mock("electron", () => ({
   BrowserWindow: { fromWebContents },
 }));
 
-const create: CommunicationDraftCreate = {
-  analysis_id: "analysis-1",
-  workflow_id: "workflow-1",
+const context: MailReplyContext = {
+  policy_version: "mail-reply-v1",
   provider: "GMAIL",
-  provider_thread_id: "thread-1",
+  account_key: "c".repeat(64),
+  account_label: "candidate@example.invalid",
+  connection_fingerprint: "d".repeat(64),
+  source_record_id: "analysis-1",
+  source_message_id: "message/opaque+1=",
+  source_thread_id: "thread-1",
+  source_id_format: "GMAIL",
   recipient: "recruiter@example.invalid",
   subject: "Reviewed reply",
+  rfc_message_id: "<original@example.invalid>",
+  references: ["<earlier@example.invalid>"],
+  mime_reply_supported: true,
+  fingerprint: "e".repeat(64),
+};
+const create: CommunicationDraftCreate = {
+  mode: "REPLY",
+  analysis_id: "analysis-1",
+  workflow_id: "workflow-1",
+  source_fingerprint: context.fingerprint,
   body_text: "Hello,\nPlease review the attached resume.",
   category: "RECRUITER_INQUIRY",
   policy: "REVIEW_REQUIRED",
   document_version_ids: ["version-1"],
 };
+const newMessage: CommunicationDraftCreate = {
+  mode: "NEW_MESSAGE",
+  analysis_id: create.analysis_id,
+  workflow_id: create.workflow_id,
+  body_text: create.body_text,
+  category: create.category,
+  policy: "REVIEW_REQUIRED",
+  document_version_ids: create.document_version_ids,
+  provider: "GMAIL",
+  recipient: "other@example.invalid",
+  subject: "A new conversation",
+};
 const draft: OutboundDraft = {
-  ...create,
+  mode: "REPLY",
+  analysis_id: create.analysis_id,
+  provider: "GMAIL",
+  provider_thread_id: context.source_thread_id,
+  recipient: context.recipient,
+  subject: context.subject,
+  body_text: create.body_text,
+  category: create.category,
+  document_version_ids: create.document_version_ids,
+  reply_context: context,
+  account_key: context.account_key,
+  account_label: context.account_label,
   id: "draft-1",
   workflow_id: "workflow-1",
   policy: "REVIEW_REQUIRED",
@@ -178,6 +217,22 @@ describe("mail IPC native approval boundary", () => {
     );
     expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
   });
+  it("creates an explicit standalone message without threading or source fingerprint", async () => {
+    await invoke("communications:draft-create", newMessage);
+    expect(client.createCommunicationDraft).toHaveBeenCalledExactlyOnceWith(
+      newMessage,
+    );
+    expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
+  });
+  it("sanitizes backend draft preparation failures without requesting a send", async () => {
+    client.createCommunicationDraft.mockRejectedValueOnce(
+      new Error("private source account headers"),
+    );
+    await expect(invoke("communications:draft-create", create)).rejects.toThrow(
+      "Mail draft could not be prepared. Refresh the source and review again. No send was requested.",
+    );
+    expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
+  });
   it.each([
     null,
     [],
@@ -195,6 +250,31 @@ describe("mail IPC native approval boundary", () => {
     { ...create, document_version_ids: ["duplicate", "duplicate"] },
     { ...create, document_version_ids: ["a", "b", "c", "d", "e"] },
     { ...create, document_version_ids: [42] },
+    ...[
+      "provider",
+      "provider_thread_id",
+      "recipient",
+      "subject",
+      "headers",
+      "account_key",
+      "account_label",
+      "reply_context",
+      "rfc_message_id",
+      "references",
+    ].map((key) => ({ ...create, [key]: "override" })),
+    { ...create, mode: undefined },
+    { ...create, source_fingerprint: "a".repeat(64) + "\n" },
+    { ...create, source_fingerprint: undefined },
+    { ...create, policy: undefined },
+    { ...create, workflow_id: undefined },
+    { ...newMessage, source_fingerprint: context.fingerprint },
+    { ...newMessage, provider_thread_id: "" },
+    { ...newMessage, reply_context: null },
+    { ...newMessage, recipient: "a..b@example.invalid" },
+    { ...newMessage, recipient: "用户@example.invalid" },
+    { ...newMessage, recipient: "a@-example.invalid" },
+    { ...newMessage, subject: "" },
+    { ...newMessage, subject: "bad\r\nBcc: victim@example.invalid" },
   ])(
     "rejects malformed or expanded draft input before backend dispatch (%#)",
     async (value) => {
@@ -216,6 +296,16 @@ describe("mail IPC native approval boundary", () => {
       buttons: ["Cancel", "Send reviewed email"],
     });
     for (const expected of [
+      "REPLY — source-bound reply",
+      context.source_record_id,
+      context.source_message_id,
+      context.source_thread_id,
+      context.account_key,
+      context.account_label,
+      context.connection_fingerprint,
+      context.rfc_message_id!,
+      context.references[0]!,
+      context.fingerprint,
       draft.recipient,
       draft.subject,
       JSON.stringify(draft.body_text),
@@ -251,6 +341,145 @@ describe("mail IPC native approval boundary", () => {
     expect(showMessageBox).toHaveBeenCalledTimes(2);
     expect(client.sendCommunicationDraft).toHaveBeenCalledTimes(1);
   });
+  it("reviews standalone mode with a bound sending account and no thread", async () => {
+    client.getCommunicationDraft.mockResolvedValue({
+      ...draft,
+      ...newMessage,
+      provider_thread_id: "",
+      reply_context: null,
+    });
+    await expect(
+      invoke("communications:draft-send", draft.id, draft.fingerprint),
+    ).resolves.toBe(accepted);
+    const detail = showMessageBox.mock.calls[0]?.[0].detail;
+    expect(detail).toContain("NEW_MESSAGE — standalone message, not a reply");
+    expect(detail).toContain(context.account_label);
+    expect(detail).not.toContain("Source thread:");
+  });
+  it("allows an empty original reply subject and quoted opaque source identifiers", async () => {
+    client.getCommunicationDraft.mockResolvedValue({
+      ...draft,
+      subject: "",
+      reply_context: {
+        ...context,
+        subject: "",
+        source_message_id: "opaque/+=\u202eSource",
+      },
+    });
+    await expect(
+      invoke("communications:draft-send", draft.id, draft.fingerprint),
+    ).resolves.toBe(accepted);
+    const detail = showMessageBox.mock.calls[0]?.[0].detail;
+    expect(detail).toContain('Subject: ""');
+    expect(detail).toContain('Source message: "opaque/+=\\u202eSource"');
+    expect(detail).not.toContain("\u202e");
+  });
+  it("allows text-only Outlook replies without MIME support, but not attachments", async () => {
+    const outlook = {
+      ...draft,
+      provider: "OUTLOOK" as const,
+      reply_context: {
+        ...context,
+        provider: "OUTLOOK" as const,
+        source_id_format: "GRAPH_IMMUTABLE" as const,
+        mime_reply_supported: false,
+        rfc_message_id: null,
+      },
+    };
+    client.getCommunicationDraft.mockResolvedValue(outlook);
+    await expect(
+      invoke("communications:draft-send", draft.id, draft.fingerprint),
+    ).resolves.toEqual(notDispatched);
+    expect(showMessageBox).not.toHaveBeenCalled();
+    client.getCommunicationDraft.mockResolvedValue({
+      ...outlook,
+      document_version_ids: [],
+      attachment_manifest: null,
+    });
+    await expect(
+      invoke("communications:draft-send", draft.id, draft.fingerprint),
+    ).resolves.toBe(accepted);
+  });
+  it.each([
+    { mode: null },
+    { mode: undefined },
+    { account_key: null },
+    { account_label: null },
+    { reply_context: null },
+    { reply_context: { ...context, account_key: "f".repeat(64) } },
+    { reply_context: { ...context, recipient: "different@example.invalid" } },
+    { reply_context: { ...context, source_record_id: "different-record" } },
+    { reply_context: { ...context, rfc_message_id: null } },
+    { reply_context: { ...context, mime_reply_supported: false } },
+    {
+      reply_context: { ...context, headers: { Bcc: "victim@example.invalid" } },
+    },
+    {
+      reply_context: {
+        ...context,
+        references: Array(51).fill("<ref@example.invalid>"),
+      },
+    },
+    {
+      mode: "NEW_MESSAGE",
+      reply_context: null,
+      provider_thread_id: "old-thread",
+    },
+    { mode: "NEW_MESSAGE", provider_thread_id: "" },
+  ])(
+    "blocks legacy or inconsistent reply/account bindings before approval (%#)",
+    async (change) => {
+      client.getCommunicationDraft.mockResolvedValue({
+        ...draft,
+        ...change,
+      } as OutboundDraft);
+      await expect(
+        invoke("communications:draft-send", draft.id, draft.fingerprint),
+      ).resolves.toEqual(notDispatched);
+      expect(showMessageBox).not.toHaveBeenCalled();
+      expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    { policy_version: "mail-reply-v2" },
+    { provider: "OUTLOOK", source_id_format: "GRAPH_IMMUTABLE" },
+    { account_key: "f".repeat(64) },
+    { account_label: "other-account@example.invalid" },
+    { connection_fingerprint: "f".repeat(64) },
+    { source_record_id: "analysis-other" },
+    { source_message_id: "other/opaque+message=" },
+    { source_thread_id: "another-thread" },
+    { source_id_format: "GRAPH_IMMUTABLE" },
+    { recipient: "other-recipient@example.invalid" },
+    { subject: "Different subject" },
+    { rfc_message_id: "<other@example.invalid>" },
+    { references: ["<different@example.invalid>"] },
+    { mime_reply_supported: false },
+    { fingerprint: "f".repeat(64) },
+  ])(
+    "rejects changed reply context after approval even if the draft fingerprint is unchanged (%#)",
+    async (change) => {
+      const changedContext = { ...context, ...change } as MailReplyContext;
+      client.getCommunicationDraft
+        .mockResolvedValueOnce(draft)
+        .mockResolvedValueOnce({
+          ...draft,
+          reply_context: changedContext,
+          provider: changedContext.provider,
+          account_key: changedContext.account_key,
+          account_label: changedContext.account_label,
+          analysis_id: changedContext.source_record_id,
+          provider_thread_id: changedContext.source_thread_id,
+          recipient: changedContext.recipient,
+          subject: changedContext.subject,
+        });
+      await expect(
+        invoke("communications:draft-send", draft.id, draft.fingerprint),
+      ).resolves.toEqual(notDispatched);
+      expect(showMessageBox).toHaveBeenCalledTimes(1);
+      expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
+    },
+  );
   it.each(
     [
       [],

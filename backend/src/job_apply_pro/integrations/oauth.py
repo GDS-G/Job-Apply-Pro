@@ -48,7 +48,7 @@ _GOOGLE_REVOKE = "https://oauth2.googleapis.com/revoke"
 _GOOGLE_PROFILE = "https://openidconnect.googleapis.com/v1/userinfo"
 _MICROSOFT_AUTHORIZATION = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 _MICROSOFT_TOKEN = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-_MICROSOFT_PROFILE = "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName"
+_MICROSOFT_PROFILE = "https://graph.microsoft.com/v1.0/me?$select=id,mail,userPrincipalName"
 
 OAUTH_PROVIDERS: dict[IntegrationProvider, OAuthProviderDefinition] = {
     IntegrationProvider.GMAIL: OAuthProviderDefinition(
@@ -220,8 +220,15 @@ class OAuthConnectionService:
             headers={"Accept": "application/json"},
         )
         payload = self._token_payload(response)
-        account_hint = self._account_hint(definition, str(payload["access_token"]))
-        tokens = self._tokens(payload, session.requested_scopes, account_hint=account_hint)
+        account_hint, account_identity = self._account_profile(
+            definition, str(payload["access_token"])
+        )
+        tokens = self._tokens(
+            payload,
+            session.requested_scopes,
+            account_hint=account_hint,
+            account_identity=account_identity,
+        )
         reference = f"oauth:{session.provider.value.casefold()}:{uuid4()}"
         self._repository.save_tokens(session.provider, reference, tokens, now=self._now())
         return OAuthCallbackResult(
@@ -251,6 +258,7 @@ class OAuthConnectionService:
                 granted_scopes=tokens.granted_scopes,
                 expires_at=tokens.expires_at,
                 account_hint=tokens.account_hint,
+                account_identity=tokens.account_identity,
             )
         return OAuthAuthorizationState(
             provider=provider,
@@ -259,6 +267,7 @@ class OAuthConnectionService:
             granted_scopes=tokens.granted_scopes,
             expires_at=tokens.expires_at,
             account_hint=tokens.account_hint,
+            account_identity=tokens.account_identity,
         )
 
     def revoke(self, provider: IntegrationProvider) -> OAuthAuthorizationState:
@@ -318,7 +327,10 @@ class OAuthConnectionService:
             if "refresh_token" not in payload:
                 payload["refresh_token"] = tokens.refresh_token.get_secret_value()
             refreshed = self._tokens(
-                payload, tokens.granted_scopes, account_hint=tokens.account_hint
+                payload,
+                tokens.granted_scopes,
+                account_hint=tokens.account_hint,
+                account_identity=tokens.account_identity,
             )
         except (httpx.HTTPError, ValueError, OverflowError) as error:
             raise OAuthAuthorizationError("Provider token refresh failed") from error
@@ -349,6 +361,7 @@ class OAuthConnectionService:
         fallback_scopes: list[str],
         *,
         account_hint: str | None,
+        account_identity: str | None = None,
     ) -> OAuthTokenSet:
         expires_in = payload.get("expires_in", 3600)
         if not isinstance(expires_in, int | float) or expires_in <= 0:
@@ -363,20 +376,31 @@ class OAuthConnectionService:
             expires_at=self._now() + timedelta(seconds=float(expires_in)),
             granted_scopes=_scopes(payload.get("scope"), fallback_scopes),
             account_hint=account_hint,
+            account_identity=account_identity,
         )
 
-    def _account_hint(self, definition: OAuthProviderDefinition, access_token: str) -> str | None:
+    def _account_profile(
+        self, definition: OAuthProviderDefinition, access_token: str
+    ) -> tuple[str | None, str | None]:
         response = self._client.get(
             definition.profile_endpoint,
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
         )
         if response.status_code >= 400:
-            return None
+            return None, None
         payload = response.json()
         if not isinstance(payload, dict):
-            return None
+            return None, None
+        identity = payload.get("sub" if definition.profile_endpoint == _GOOGLE_PROFILE else "id")
+        if (
+            not isinstance(identity, str)
+            or not 1 <= len(identity) <= 500
+            or not identity.isascii()
+            or any(ord(char) <= 32 or ord(char) == 127 for char in identity)
+        ):
+            identity = None
         for key in ("email", "mail", "userPrincipalName"):
             value = payload.get(key)
             if isinstance(value, str) and value:
-                return value
-        return None
+                return value, identity
+        return None, identity

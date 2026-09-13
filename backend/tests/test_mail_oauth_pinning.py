@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.communications import (
     IntegrationProvider,
+    MailMode,
     MessageCategory,
     OAuthTokenSet,
     OutboundDraft,
@@ -225,7 +226,10 @@ def test_provider_post_keeps_the_resolved_a_token_when_b_connects_after_resoluti
         id="draft-1",
         analysis_id="analysis-1",
         provider=provider,
-        provider_thread_id="thread-1",
+        provider_thread_id="",
+        mode=MailMode.NEW_MESSAGE,
+        account_key="a" * 64,
+        account_label="owner@example.invalid",
         recipient="recruiter@example.invalid",
         subject="Reviewed fixture",
         body_text="Synthetic body",
@@ -244,7 +248,7 @@ def test_provider_post_keeps_the_resolved_a_token_when_b_connects_after_resoluti
             else OutlookMessageProvider(tokens, client=client)
         )
         adapter.send(draft, idempotency_key="synthetic-send-key")
-        with pytest.raises(ProviderMutationError, match="connection changed"):
+        with pytest.raises(ProviderMutationError, match="authorization is unavailable"):
             adapter.send(draft, idempotency_key="synthetic-second-key")
     assert len(requests) == 1
 

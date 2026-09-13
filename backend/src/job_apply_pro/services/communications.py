@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from datetime import UTC, datetime, timedelta, tzinfo
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -27,6 +28,7 @@ from job_apply_pro.domain.communications import (
     IntegrationHealth,
     IntegrationProvider,
     IntegrationStatus,
+    MailMode,
     MessageCategory,
     MessageClassification,
     MutationAudit,
@@ -48,6 +50,12 @@ from job_apply_pro.domain.mail import (
     ProviderMailResult,
     VerifiedMailAttachment,
     validate_mail_bundle,
+)
+from job_apply_pro.domain.mail_threading import (
+    build_reply_context,
+    reply_context_fingerprint,
+    validate_mailbox,
+    validate_reply_context,
 )
 from job_apply_pro.domain.workbench import WorkflowRunSnapshot
 from job_apply_pro.integrations.communications import (
@@ -103,6 +111,7 @@ class CommunicationService:
         calendar_adapters: dict[IntegrationProvider, CalendarProviderAdapter] | None = None,
         automatic_categories: set[MessageCategory] | None = None,
         provider_configs: dict[IntegrationProvider, ProviderConnectionConfig] | None = None,
+        provider_account_identities: dict[IntegrationProvider, str] | None = None,
         knowledge_repository: CandidateKnowledgeRepositoryProtocol | None = None,
         attachment_resolver: MailAttachmentResolver | None = None,
     ) -> None:
@@ -123,6 +132,7 @@ class CommunicationService:
         self._calendar_adapters.update(calendar_adapters or {})
         self._automatic_categories = automatic_categories or set()
         self._provider_configs = provider_configs or {}
+        self._provider_account_identities = provider_account_identities or {}
         self._knowledge_repository = knowledge_repository
         self._attachment_resolver = attachment_resolver
 
@@ -354,6 +364,18 @@ class CommunicationService:
     def analyze_and_save(
         self, message: NormalizedMessage, workflows: list[WorkflowRunSnapshot]
     ) -> CommunicationRecord:
+        # Public/manual analysis never establishes source/account provenance.
+        return self._analyze_and_save(message, workflows)
+
+    def _analyze_and_save(
+        self,
+        message: NormalizedMessage,
+        workflows: list[WorkflowRunSnapshot],
+        *,
+        source_account_key: str | None = None,
+        connection_fingerprint: str | None = None,
+        account_label: str | None = None,
+    ) -> CommunicationRecord:
         repository = self._require_repository()
         classification = self.classify(message)
         analysis = CommunicationAnalysis(
@@ -365,12 +387,34 @@ class CommunicationService:
             time_proposal_requires_review=True,
         )
         now = datetime.now(UTC)
+        record_id = str(uuid4())
+        reply_context = (
+            build_reply_context(
+                message,
+                record_id=record_id,
+                account_key=source_account_key,
+                account_label=account_label,
+                connection_fingerprint=connection_fingerprint,
+            )
+            if source_account_key is not None
+            and account_label is not None
+            and connection_fingerprint is not None
+            else None
+        )
         return repository.save_record(
             CommunicationRecord(
-                id=str(uuid4()),
+                id=record_id,
                 analysis=analysis,
                 received_at=message.received_at,
                 created_at=now,
+                source_account_key=source_account_key,
+                source_connection_fingerprint=connection_fingerprint,
+                reply_context=reply_context,
+                reply_unavailable_reason=(
+                    None
+                    if reply_context is not None
+                    else "Fresh provider-bound source metadata is required to reply"
+                ),
             )
         )
 
@@ -386,12 +430,29 @@ class CommunicationService:
         if since is not None and (since.tzinfo is None or since.utcoffset() is None):
             raise ValueError("Message synchronization time must include a UTC offset")
         repository = self._require_repository()
+        connection_fingerprint = self._provider_binding_fingerprint(provider)
+        account_key: str | None
+        account_label: str | None
+        try:
+            account_key, account_label = self._mail_account(provider)
+        except ValueError:
+            config = self._provider_configs.get(provider)
+            account_key = (
+                self._fingerprint({"unverified_connection": connection_fingerprint})
+                if config is not None and config.credential_reference
+                else None
+            )
+            account_label = None
         existing_ids = {
             record.analysis.message.provider_message_id
             for record in repository.list_records()
             if record.analysis.message.provider is provider
+            and record.source_account_key == account_key
+            and record.source_connection_fingerprint == connection_fingerprint
         }
-        binding_fingerprint = self._provider_binding_fingerprint(provider)
+        binding_fingerprint = self._fingerprint(
+            {"connection": connection_fingerprint, "account": account_key, "source_version": 1}
+        )
         prior_state = repository.get_sync_state(provider, binding_fingerprint)
         batch = self._message_adapters[provider].sync_messages(
             cursor=prior_state.cursor if prior_state is not None else None,
@@ -406,7 +467,13 @@ class CommunicationService:
                     "Provider returned a message for the wrong account type"
                 )
             is_new = message.provider_message_id not in existing_ids
-            record = self.analyze_and_save(message, workflows)
+            record = self._analyze_and_save(
+                message,
+                workflows,
+                source_account_key=account_key,
+                connection_fingerprint=connection_fingerprint,
+                account_label=account_label,
+            )
             record_ids.append(record.id)
             if is_new:
                 existing_ids.add(message.provider_message_id)
@@ -428,7 +495,50 @@ class CommunicationService:
         )
 
     def list_records(self) -> list[CommunicationRecord]:
-        return self._require_repository().list_records()
+        records = []
+        for record in self._require_repository().list_records():
+            context = record.reply_context
+            if context is not None:
+                try:
+                    account_key, account_label = self._mail_account(context.provider)
+                    current = (
+                        context.account_key == account_key
+                        and context.account_label == account_label
+                        and context.connection_fingerprint
+                        == self._provider_binding_fingerprint(context.provider)
+                        and context.fingerprint == reply_context_fingerprint(context)
+                    )
+                except ValueError:
+                    current = False
+                if not current:
+                    record = record.model_copy(
+                        update={
+                            "reply_context": None,
+                            "reply_unavailable_reason": (
+                                "The source account changed; synchronize and review a fresh source"
+                            ),
+                        }
+                    )
+            records.append(record)
+        return records
+
+    def _mail_account(self, provider: IntegrationProvider) -> tuple[str, str]:
+        identity = self._provider_account_identities.get(provider)
+        config = self._provider_configs.get(provider)
+        if (
+            not identity
+            or config is None
+            or not config.credential_reference
+            or not config.account_hint
+        ):
+            raise ValueError("Verified mail account identity is unavailable; reconnect and review")
+        try:
+            label = validate_mailbox(config.account_hint)
+        except ValueError as error:
+            raise ValueError(
+                "Verified mail account identity is unavailable; reconnect and review"
+            ) from error
+        return self._fingerprint({"provider": provider.value, "identity": identity}), label
 
     def sync_provider_calendar(
         self,
@@ -535,6 +645,8 @@ class CommunicationService:
         return records
 
     def create_draft(self, command: DraftCreate) -> OutboundDraft:
+        if command.policy is not OutboundPolicy.REVIEW_REQUIRED:
+            raise ValueError("Mail drafts require explicit review")
         manifest = None
         if command.document_version_ids:
             if self._attachment_resolver is None:
@@ -544,26 +656,93 @@ class CommunicationService:
                     command.workflow_id, command.document_version_ids
                 )
         repository = self._require_repository()
-        record = repository.get_record(command.analysis_id)
+        try:
+            record = repository.get_record(command.analysis_id)
+        except ValueError as error:
+            raise ValueError("The selected correspondence could not be verified") from error
         if record is None:
-            raise LookupError(f"Communication analysis {command.analysis_id} was not found")
-        if command.provider != record.analysis.message.provider:
-            raise ValueError("Draft provider does not match the selected correspondence")
-        if command.provider_thread_id != record.analysis.message.provider_thread_id:
-            raise ValueError("Draft thread does not match the selected correspondence")
-        policy = command.policy
-        if (
-            policy is OutboundPolicy.AUTOMATIC
-            and command.category not in self._automatic_categories
+            raise LookupError("The selected correspondence is unavailable")
+        context = None
+        provider: IntegrationProvider
+        if command.mode is MailMode.REPLY:
+            context = record.reply_context
+            if (
+                context is None
+                or context.fingerprint != command.source_fingerprint
+                or context.fingerprint != reply_context_fingerprint(context)
+                or context.source_record_id != record.id
+                or context.provider != record.analysis.message.provider
+                or context.source_message_id != record.analysis.message.provider_message_id
+                or context.source_thread_id != record.analysis.message.provider_thread_id
+                or record.source_account_key != context.account_key
+                or record.source_connection_fingerprint != context.connection_fingerprint
+            ):
+                raise ValueError("Fresh provider-bound source review is required to reply")
+            provider = context.provider
+            recipient, subject, thread = (
+                context.recipient,
+                context.subject,
+                context.source_thread_id,
+            )
+        else:
+            assert (
+                command.provider is not None
+                and command.recipient is not None
+                and command.subject is not None
+            )
+            provider = command.provider
+            recipient, subject, thread = validate_mailbox(command.recipient), command.subject, ""
+            if any(
+                unicodedata.category(char).startswith("C") or char in "\u2028\u2029"
+                for char in subject
+            ):
+                raise ValueError("The reviewed subject contains unsupported characters")
+            if provider != record.analysis.message.provider:
+                raise ValueError("Draft provider does not match the selected correspondence")
+        account_key: str | None
+        account_label: str | None
+        try:
+            account_key, account_label = self._mail_account(provider)
+        except ValueError:
+            if command.mode is MailMode.REPLY:
+                raise
+            # An explicit standalone offline preview is local only. Connecting
+            # later must create another draft, never upgrade this one's authority.
+            account_key, account_label = None, None
+        binding = self._provider_binding_fingerprint(provider)
+        if context is not None and (
+            context.account_key != account_key
+            or context.account_label != account_label
+            or context.connection_fingerprint != binding
         ):
-            raise ValueError(f"Automatic sending is not enabled for {command.category.value}")
+            raise ValueError("The source account changed; synchronize and review a fresh source")
+        if (
+            context is not None
+            and command.document_version_ids
+            and not context.mime_reply_supported
+        ):
+            raise ValueError("Attachment replies with this source destination are not supported")
+        policy = command.policy
         now = datetime.now(UTC)
         draft_id = str(uuid4())
         draft = OutboundDraft(
             id=draft_id,
-            **command.model_dump(),
+            analysis_id=command.analysis_id,
+            workflow_id=command.workflow_id,
+            provider=provider,
+            provider_thread_id=thread,
+            recipient=recipient,
+            subject=subject,
+            body_text=command.body_text,
+            category=command.category,
+            policy=policy,
+            document_version_ids=command.document_version_ids,
+            mode=command.mode,
+            account_key=account_key,
+            account_label=account_label,
+            reply_context=context,
             attachment_manifest=manifest,
-            provider_binding_fingerprint=self._provider_binding_fingerprint(command.provider),
+            provider_binding_fingerprint=binding,
             fingerprint="0" * 64,
             created_at=now,
             updated_at=now,
@@ -576,6 +755,12 @@ class CommunicationService:
         return self._fingerprint(
             {
                 "id": draft.id,
+                "mode": draft.mode.value if draft.mode is not None else None,
+                "account_key": draft.account_key,
+                "account_label": draft.account_label,
+                "reply_context": draft.reply_context.model_dump(mode="json")
+                if draft.reply_context
+                else None,
                 "analysis_id": draft.analysis_id,
                 "workflow_id": draft.workflow_id,
                 "provider": draft.provider.value,
@@ -617,6 +802,45 @@ class CommunicationService:
             raise ValueError("Draft changed after review; refresh and confirm the new fingerprint")
         if draft.provider not in {IntegrationProvider.GMAIL, IntegrationProvider.OUTLOOK}:
             raise ValueError("Draft provider must be Gmail or Outlook")
+        if (
+            draft.mode is None
+            or draft.account_key is None
+            or draft.account_label is None
+            or draft.provider_binding_fingerprint is None
+        ):
+            raise ValueError(
+                "An unbound or legacy mail preview requires a fresh account-bound draft"
+            )
+        if draft.mode is not None and (
+            draft.account_key,
+            draft.account_label,
+        ) != self._mail_account(draft.provider):
+            raise ValueError("The reviewed provider account changed; create a new draft")
+        if draft.mode is MailMode.REPLY:
+            try:
+                source = repository.get_record(draft.analysis_id)
+            except ValueError as error:
+                raise ValueError("The reviewed reply source could not be verified") from error
+            context = draft.reply_context
+            if (
+                source is None
+                or context is None
+                or source.reply_context != context
+                or source.source_account_key != context.account_key
+                or source.source_connection_fingerprint != context.connection_fingerprint
+                or context.account_key != draft.account_key
+                or context.account_label != draft.account_label
+                or context.connection_fingerprint != draft.provider_binding_fingerprint
+                or context.provider != draft.provider
+                or context.source_record_id != draft.analysis_id
+                or context.source_thread_id != draft.provider_thread_id
+                or context.recipient != draft.recipient
+                or context.subject != draft.subject
+            ):
+                raise ValueError("The reviewed reply source changed; create a new draft")
+            validate_reply_context(context)
+        elif draft.reply_context is not None or draft.provider_thread_id:
+            raise ValueError("Standalone messages cannot carry reply threading context")
         if draft.provider_binding_fingerprint is not None and (
             draft.provider_binding_fingerprint != self._provider_binding_fingerprint(draft.provider)
             or draft.fingerprint != self._mail_draft_fingerprint(draft)
@@ -644,8 +868,6 @@ class CommunicationService:
                         raise MailAttachmentError(
                             "Attachments changed after review; create a new draft"
                         )
-            if draft.provider_binding_fingerprint is None:
-                raise MailAttachmentError("Legacy mail drafts require a new provider-bound review")
             validate_mail_bundle(draft, attachments)
             result = self._message_adapters[draft.provider].send(
                 draft,

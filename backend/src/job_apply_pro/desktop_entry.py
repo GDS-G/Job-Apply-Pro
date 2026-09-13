@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
-from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 
 
@@ -37,6 +37,14 @@ def _configure_worker_browser_cache() -> None:
 
 
 def migrate() -> None:
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.restore_admission import runtime_access
+
+    with runtime_access(get_settings()):
+        _migrate_owned()
+
+
+def _migrate_owned() -> None:
     from alembic import command
     from alembic.config import Config
 
@@ -46,34 +54,66 @@ def migrate() -> None:
 
 
 def serve() -> None:
-    import uvicorn
-
     from job_apply_pro.config import get_settings
-    from job_apply_pro.main import app
+    from job_apply_pro.restore_admission import runtime_access
 
     settings = get_settings()
-    uvicorn.run(
-        app,
-        host=settings.api_host,
-        port=settings.api_port,
-        log_level=settings.log_level.lower(),
-        access_log=False,
-    )
+    with runtime_access(settings):
+        import uvicorn
+
+        from job_apply_pro.main import app
+
+        uvicorn.run(
+            app,
+            host=settings.api_host,
+            port=settings.api_port,
+            log_level=settings.log_level.lower(),
+            access_log=False,
+        )
 
 
 def restore(plan_id: str, fingerprint: str) -> None:
     """Apply an already-staged restore while the API process is stopped."""
     from job_apply_pro.config import get_settings
-    from job_apply_pro.domain.operations import RestoreConfirmation, RestoreStatus
-    from job_apply_pro.services.backup import BackupError, BackupService
+    from job_apply_pro.restore_admission import closed_restore_database_path, workspace_roots
+    from job_apply_pro.storage.restore_gate_repository import (
+        RestoreAdmissionError,
+        RestoreGateRepository,
+        workspace_access,
+    )
+
+    roots = workspace_roots(get_settings())
+    if len(roots) != 1:
+        raise RestoreAdmissionError(
+            "Restore requires one app-owned SQLite workspace; "
+            "external paths must be reviewed before restoring"
+        )
+    with workspace_access(roots[0], restore=True):
+        RestoreGateRepository(roots[0]).assert_clear()
+        # BackupService imports storage models, so check paths before importing it.
+        closed_restore_database_path(get_settings().database_url)
+        from job_apply_pro.services.backup import BackupError
+
+        try:
+            _restore_owned(plan_id, fingerprint, roots[0])
+        except BackupError as error:
+            raise RestoreAdmissionError(str(error)) from None
+
+
+def _restore_owned(plan_id: str, fingerprint: str, root: Path) -> None:
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.restore_admission import closed_restore_database_path
+
+    settings = get_settings()
+    database = closed_restore_database_path(settings.database_url)
+
+    from job_apply_pro.domain.operations import RestorePlan
+    from job_apply_pro.security.encryption import SensitiveDataCipher
+    from job_apply_pro.security.keys import EnvironmentKeyProvider
+    from job_apply_pro.services.restore_recovery import RestoreRecoveryService
     from job_apply_pro.storage.database import SessionFactory, engine
     from job_apply_pro.storage.operations_repository import OperationsRepository
 
-    settings = get_settings()
-    confirmation = RestoreConfirmation(
-        fingerprint=fingerprint,
-        confirmation_phrase=BackupService.RESTORE_PHRASE,
-    )
     with SessionFactory() as session:
         repository = OperationsRepository(session)
         plan = repository.get_restore_plan(plan_id)
@@ -82,43 +122,83 @@ def restore(plan_id: str, fingerprint: str) -> None:
         raise LookupError(f"Restore plan {plan_id} was not found")
     if manifest is None:
         raise LookupError(f"Backup manifest for restore plan {plan_id} was not found")
-    if confirmation.fingerprint != plan.fingerprint:
+    if fingerprint != plan.fingerprint:
         raise ValueError("Restore plan changed after review")
-
-    staged = Path(plan.staged_path).resolve()
-    staging_root = settings.restore_staging_dir.resolve()
-    if not staged.is_dir() or staging_root not in staged.parents:
-        raise BackupError("Restore staging directory is unavailable")
-
-    # Release every SQLite handle before replacing the database file. The
-    # supervisor guarantees the API server is stopped before this command runs.
     engine.dispose()
-    BackupService.apply_staged_files(
+    recovery = RestoreRecoveryService(root, SensitiveDataCipher(EnvironmentKeyProvider()))
+    intent = recovery.prepare(
         plan,
-        database_url=settings.database_url,
-        document_dir=settings.document_data_dir,
-        staging_dir=settings.restore_staging_dir,
+        manifest,
+        database=database,
+        documents=settings.document_data_dir,
+        staging=settings.restore_staging_dir,
+        backups=settings.backup_data_dir,
     )
 
-    applied = plan.model_copy(
-        update={"status": RestoreStatus.APPLIED, "applied_at": datetime.now(UTC)}
+    def commit_result(applied: RestorePlan) -> None:
+        try:
+            with SessionFactory() as session:
+                OperationsRepository(session).save_restore_result(manifest, applied)
+        finally:
+            engine.dispose()
+
+    recovery.apply(intent, commit_result)
+
+
+def restore_status() -> bool:
+    """Key-free and DB-free: even malformed sentinels remain visibly blocked."""
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.restore_admission import workspace_roots
+    from job_apply_pro.storage.restore_gate_repository import (
+        RestoreAdmissionError,
+        RestoreGateRepository,
     )
-    with SessionFactory() as session:
-        repository = OperationsRepository(session)
-        # The SQLite snapshot is captured immediately before its manifest is
-        # persisted, so restore both records into the recovered database.
-        repository.save_backup(manifest)
-        repository.save_restore_plan(applied)
+
+    try:
+        roots = workspace_roots(get_settings())
+        blocked = any(RestoreGateRepository(root).blocked() for root in roots)
+    except (OSError, RestoreAdmissionError):
+        blocked = True
+    if sys.stdout is not None:
+        print(json.dumps({"restore_recovery_required": blocked}))
+    return blocked
+
+
+def restore_finalize(operation_id: str) -> None:
+    from job_apply_pro.config import get_settings
+    from job_apply_pro.restore_admission import workspace_roots
+    from job_apply_pro.security.encryption import SensitiveDataCipher
+    from job_apply_pro.security.keys import EnvironmentKeyProvider
+    from job_apply_pro.services.restore_recovery import RestoreRecoveryService
+    from job_apply_pro.storage.restore_gate_repository import RestoreAdmissionError
+
+    roots = workspace_roots(get_settings())
+    if len(roots) != 1:
+        raise RestoreAdmissionError("Recovery requires the original app-owned workspace layout")
+    RestoreRecoveryService(roots[0], SensitiveDataCipher(EnvironmentKeyProvider())).finalize(
+        operation_id
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Job Apply Pro packaged backend")
-    parser.add_argument("command", choices=("migrate", "serve", "restore", "browser-worker"))
+    parser.add_argument(
+        "command",
+        choices=(
+            "migrate",
+            "serve",
+            "restore",
+            "restore-status",
+            "restore-finalize",
+            "browser-worker",
+        ),
+    )
     parser.add_argument("--plan-id")
     parser.add_argument("--fingerprint")
+    parser.add_argument("--operation-id")
     arguments = parser.parse_args()
     if arguments.command == "browser-worker":
-        if arguments.plan_id or arguments.fingerprint:
+        if arguments.plan_id or arguments.fingerprint or arguments.operation_id:
             parser.error("browser-worker does not accept restore arguments")
         if sys.stdin is None or sys.stdout is None:
             parser.error("browser-worker requires usable standard input and output")
@@ -131,6 +211,13 @@ def main() -> None:
         from job_apply_pro.browser.worker_process import main as worker_main
 
         worker_main()
+    elif arguments.command == "restore-status":
+        if restore_status():
+            raise SystemExit(3)
+    elif arguments.command == "restore-finalize":
+        if not arguments.operation_id:
+            parser.error("restore-finalize requires --operation-id")
+        restore_finalize(arguments.operation_id)
     elif arguments.command == "migrate":
         migrate()
     elif arguments.command == "serve":
@@ -142,4 +229,26 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from job_apply_pro.security.keys import KeyConfigurationError
+    from job_apply_pro.storage.restore_gate_repository import RestoreAdmissionError
+
+    try:
+        main()
+    except (
+        RestoreAdmissionError,
+        KeyConfigurationError,
+        OSError,
+        ValueError,
+        LookupError,
+        SQLAlchemyError,
+    ):
+        if sys.stderr is not None:
+            print(
+                "Offline restore admission failed. Preserve the original workspace, backup, "
+                "staging files and key. Run restore-status without opening the database; "
+                "authenticated completion or manual recovery review is required.",
+                file=sys.stderr,
+            )
+        raise SystemExit(3) from None
