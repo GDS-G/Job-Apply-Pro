@@ -4,7 +4,11 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Durable Restore Admission `v0.56.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities, Gemini processing budgets and deterministic restore rollback/resume. Signing and live acceptance alone cannot complete those features. No signed v0.56 release or live-provider acceptance has been established.
+The active source milestone is **Gemini Processing Budget `v0.57.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities and deterministic restore rollback/resume. A per-invocation work budget is not a guaranteed hard gateway-wide cancellation deadline. Signing and live acceptance alone cannot complete the unfinished features. No signed v0.57 release or live-provider acceptance has been established.
+
+### Gemini Processing Budget integration
+
+Exact v0.57 runtime checkpoint `d9723c3` passes **729 backend tests** at **85.03% coverage**, **231 default desktop tests** with the opt-in packaged test skipped, explicit-config strict mypy for **156 files**, Ruff lint/format for **182 files**, TypeScript, frozen pnpm installation and the production build. Packaged validation and protected integration remain in progress. ADR-0067 shares work time across upload start/finalization, bounded PROCESSING waits/GETs, interaction and response construction. Processing uses only the original durably registered resource; a separate 30-second cleanup network budget still traverses all obligations and preserves terminal retention errors. Independent review closed a post-response-construction expiry gap. These source checks do not establish real provider retention or hard OS/transport cancellation.
 
 ### Durable Restore Admission validation
 
