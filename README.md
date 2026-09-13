@@ -2,9 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Durable Restore Admission build
+## Gemini Processing Budget build
 
-The active source milestone is **Durable Restore Admission `v0.56.0-alpha.1`**. Offline restore now holds exclusive workspace ownership and writes an encrypted intent plus a persistent startup guard before replacing files. An interrupted operation blocks desktop/backend restart and updates until authenticated completion evidence verifies every final target. The original key and recovery records are preserved. See [ADR-0066](docs/adr/0066-durable-restore-admission.md) for bounds, early SQLite-sidecar checks and limitations; this is not atomic multi-file replacement, automatic rollback or safe resume.
+The active source milestone is **Gemini Processing Budget `v0.57.0-alpha.1`**. One invocation-local work deadline now follows media uploads, processing waits and status reads, inference and validated response construction. Processing polls target only the original durably registered resource; cleanup retains a separate bounded network allowance and terminal retention errors. See [ADR-0067](docs/adr/0067-gemini-processing-budget.md) for exact limits. Synchronous transport timeouts are not a guaranteed hard cancellation deadline, and this does not enable an unconfigured provider.
+
+Offline restore retains exclusive workspace ownership, encrypted intent and persistent startup admission before replacement. An interrupted operation blocks desktop/backend restart and updates until authenticated completion evidence verifies every final target. The original key and recovery records are preserved. See [ADR-0066](docs/adr/0066-durable-restore-admission.md) for bounds, early SQLite-sidecar checks and limitations; this is not atomic multi-file replacement, automatic rollback or safe resume.
 
 Reviewed Gmail/Outlook drafts retain account binding, exact encrypted PDF/DOCX manifests, rechecked bytes and one-attempt reservations. Provider acceptance is not delivery. See [ADR-0065](docs/adr/0065-verified-mail-attachments.md); exact-version validation belongs in the readiness audit.
 

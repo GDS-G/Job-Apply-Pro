@@ -4,7 +4,22 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Durable Restore Admission `v0.56.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities, Gemini processing budgets and deterministic restore rollback/resume. Signing and live acceptance alone cannot complete those features. No signed v0.56 release or live-provider acceptance has been established.
+The active source milestone is **Gemini Processing Budget `v0.57.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities and deterministic restore rollback/resume. A per-invocation work budget is not a guaranteed hard gateway-wide cancellation deadline. Signing and live acceptance alone cannot complete the unfinished features. No signed v0.57 release or live-provider acceptance has been established.
+
+### Gemini Processing Budget integration
+
+Exact v0.57 runtime checkpoint `d9723c3` passes **729 backend tests** at **85.03% coverage**, **231 default desktop tests** with the opt-in packaged test skipped, explicit-config strict mypy for **156 files**, Ruff lint/format for **182 files**, TypeScript, frozen pnpm installation and the production build. Packaged validation and protected integration remain in progress. ADR-0067 shares work time across upload start/finalization, bounded PROCESSING waits/GETs, interaction and response construction. Processing uses only the original durably registered resource; a separate 30-second cleanup network budget still traverses all obligations and preserves terminal retention errors. Independent review closed a post-response-construction expiry gap. These source checks do not establish real provider retention or hard OS/transport cancellation.
+
+### Gemini Processing Budget unsigned Windows candidate
+
+Runtime checkpoint `d9723c34c8e22f916771d42b2faeb1030f4eb662` produced the NSIS installer and unpacked app. Subsequent edits are documentation and canonical temporary-path test fixtures, not packaged application changes. Both backend-dist and the delivered backend pass the full synthetic startup/migration, image decoding/rejection, cleanup API, direct-worker/API browser lifecycle, verified PDF/DOCX mail manifests, encrypted draft, disabled-provider audit replay, backup and offline restore probes. The restore verifier authenticates intent, fresh encrypted preimage and the final database receipt, checks guard removal and replays original failed send outcomes after restart. The separately enabled packaged-supervisor test passes two start/stop cycles with four captured migration/server children, for **232 distinct desktop tests** across default and opt-in commands. Both dependency audits pass; the unpublished editable backend is unavailable to the public-package audit.
+
+- `Job-Apply-Pro-0.57.0-alpha.1-x64.exe`: 188637031 bytes; SHA-256 `1FAB4512F64B340955EA0D84857C08856EE6F35141AB10E1A5EE096D3A5EE6F1`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `DEC6D696E024DFBA3E16D991955A6D164913EE4FC3D8EEC3DA2FF07836CDBE0F`.
+- Bundled backend executable: 18629747 bytes; SHA-256 `4599EFADE564DAF035025FD5733275E32D3FDF656EDBF758B671A04CEC3DAE60`.
+- Bundled browser-worker executable: 18633843 bytes; SHA-256 `144D8906E08B7C87DDEE16D42212781D00A3506EEA44AA1A26EFB805B80E002A`.
+
+Both backend and worker match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before publication metadata generation. Local validation is complete within this documented scope; protected integration remains required. No live Gemini call, real retention acceptance, physical Windows UI/crash acceptance, signed installer/update/rollback or whole-process-tree containment is claimed.
 
 ### Durable Restore Admission validation
 

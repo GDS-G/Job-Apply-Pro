@@ -2,6 +2,16 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.57.0-alpha.1] - Unreleased
+
+### Gemini Processing Budget
+
+- Share one monotonic work allowance across every upload, processing poll, interaction and response-validation phase in a Gemini invocation.
+- Poll only the original registered resource, at most 30 GETs across all invocation files, with bounded waits and current journal ownership.
+- Keep known-resource deletion under a separate 30-second cleanup allowance; still traverse every durable obligation when network time is exhausted.
+- Preserve no-transfer intent abandonment, unknown-finalization manual review and terminal retention-error precedence. Expired work never returns success merely because response construction finished late.
+- Add deterministic clock, streaming, metadata, lease and cleanup-boundary regressions. These are cooperative phase checks, not hard OS cancellation or live retention acceptance.
+
 ## [0.56.0-alpha.1] - Unreleased
 
 ### Durable Restore Admission

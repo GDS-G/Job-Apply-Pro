@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
-from types import SimpleNamespace
+from collections.abc import Callable, Iterator
 
 import httpx
 import pytest
@@ -66,7 +65,9 @@ class _TrackedStream(httpx.SyncByteStream):
 
 
 class _Harness:
-    def __init__(self, uploads: list[object] | None = None) -> None:
+    def __init__(
+        self, uploads: list[object] | None = None, *, clock: Callable[[], float] | None = None
+    ) -> None:
         self.uploads = [_file()] if uploads is None else uploads
         self.events: list[str] = []
         self.start: httpx.Response | None = None
@@ -94,6 +95,7 @@ class _Harness:
             ),
             transport=httpx.MockTransport(self.handle),
             journal_factory=new_test_journal,
+            clock=clock,
         )
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -148,7 +150,7 @@ def test_multiple_uploads_are_deleted_in_reverse_order() -> None:
         ("mimeType", None),
         ("mimeType", "image/jpeg"),
         ("state", None),
-        ("state", "PROCESSING"),
+        ("state", "STATE_UNSPECIFIED"),
         ("state", "FAILED"),
         ("state", {"name": "ACTIVE"}),
     ],
@@ -281,12 +283,8 @@ def test_accepted_deletion_is_not_evidence_of_completed_deletion() -> None:
 @pytest.mark.parametrize("stage", ["start", "finalize", "interaction"])
 def test_slow_trickle_response_respects_deadline_and_preserves_cleanup(
     stage: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     elapsed = [100.0]
-    monkeypatch.setattr(
-        "job_apply_pro.ai.providers.time", SimpleNamespace(monotonic=lambda: elapsed[0])
-    )
 
     class SlowStream(httpx.SyncByteStream):
         closed = False
@@ -301,7 +299,7 @@ def test_slow_trickle_response_respects_deadline_and_preserves_cleanup(
 
     body = SlowStream()
     response = httpx.Response(200, headers={"x-goog-upload-url": _UPLOAD_URL}, stream=body)
-    harness = _Harness([response] if stage == "finalize" else None)
+    harness = _Harness([response] if stage == "finalize" else None, clock=lambda: elapsed[0])
     if stage == "start":
         harness.start = response
     elif stage == "interaction":
