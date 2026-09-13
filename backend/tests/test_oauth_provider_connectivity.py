@@ -302,9 +302,7 @@ def test_official_mail_adapters_normalize_and_send_with_provider_ids() -> None:
                     ]
                 },
             )
-        if path.endswith("/v1.0/me/messages") and request.method == "POST":
-            return httpx.Response(201, json={"id": "outlook-draft-1"})
-        if path.endswith("/v1.0/me/messages/outlook-draft-1/send"):
+        if path.endswith("/v1.0/me/sendMail") and request.method == "POST":
             return httpx.Response(202)
         return httpx.Response(404)
 
@@ -313,12 +311,17 @@ def test_official_mail_adapters_normalize_and_send_with_provider_ids() -> None:
     outlook = OutlookMessageProvider(StaticTokens(), client=client)
     assert gmail.list_messages()[0].body_text == "Choose a time"
     assert outlook.list_messages()[0].provider_thread_id == "outlook-thread-1"
-    assert gmail.send(_draft(IntegrationProvider.GMAIL), idempotency_key="gmail-send-1") == (
-        "gmail-sent-1"
+    assert (
+        gmail.send(
+            _draft(IntegrationProvider.GMAIL), idempotency_key="gmail-send-1"
+        ).provider_resource_id
+        == "gmail-sent-1"
     )
     assert (
-        outlook.send(_draft(IntegrationProvider.OUTLOOK), idempotency_key="outlook-send-1")
-        == "outlook-draft-1"
+        outlook.send(
+            _draft(IntegrationProvider.OUTLOOK), idempotency_key="outlook-send-1"
+        ).provider_resource_id
+        is None
     )
 
 

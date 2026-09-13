@@ -70,6 +70,7 @@ import type {
 } from "@job-apply-pro/contracts";
 
 import { MediaCleanupPanel } from "./MediaCleanupPanel";
+import { MailDraftPanel } from "./MailDraftPanel";
 
 const initialStatus: BackendRuntimeStatus = {
   state: "starting",
@@ -1542,7 +1543,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Bounded Backend Lifecycle v0.54.0-alpha.1</strong>
+              <strong>Verified Mail Attachments v0.55.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for
@@ -3850,6 +3851,11 @@ export function App() {
                 </div>
               )}
             </div>
+            <MailDraftPanel
+              backendReady={status.state === "ready"}
+              records={communications}
+              workflows={workflows}
+            />
           </section>
 
           <section className="panel timeline-panel">

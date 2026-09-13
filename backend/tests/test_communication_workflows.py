@@ -442,7 +442,6 @@ def test_fingerprinted_send_is_audited_and_idempotent(session: Session) -> None:
             subject="Re: Interview availability",
             body_text="Thank you. I am available Thursday at 10:00 UTC.",
             category=MessageCategory.INTERVIEW_REQUEST,
-            document_version_ids=["resume-version-4"],
         )
     )
     command = MutationConfirmation(
@@ -452,7 +451,7 @@ def test_fingerprinted_send_is_audited_and_idempotent(session: Session) -> None:
     )
     first = service.send_draft(draft.id, command)
     replay = service.send_draft(draft.id, command)
-    assert first.status is MutationStatus.CONFIRMED
+    assert first.status is MutationStatus.ACCEPTED
     assert first.provider_resource_id == "fixture-message-1"
     assert replay == first
     assert adapter.sent == [(draft.id, command.idempotency_key)]

@@ -4,7 +4,28 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Bounded Backend Lifecycle `v0.54.0-alpha.1`**. Exact-version validation is recorded below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, verified outgoing attachments, Gemini processing budgets and durable crash/relaunch restore recovery. Signing and live acceptance alone cannot complete those features. No signed v0.54 release or live-provider acceptance has been established.
+The active source milestone is **Verified Mail Attachments `v0.55.0-alpha.1`**. Exact-version local integration and unsigned-package evidence are recorded below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities, Gemini processing budgets and durable crash/relaunch restore recovery. Signing and live acceptance alone cannot complete those features. No signed v0.55 release or live-provider acceptance has been established.
+
+### Strict type-check evidence correction
+
+During v0.55 integration, the repository-root mypy command was found not to load `backend/pyproject.toml`. The v0.52–v0.54 root checks passed, but their description below as strict was overstated. The command now explicitly supplies `--config-file backend/pyproject.toml`, anchors `mypy_path` to `$MYPY_CONFIG_FILE_DIR/src`, and includes both packaged probe helpers. A clean no-incremental explicit-config run passed 148 files before the final recovery regressions. Existing unused test suppressions and an Any-to-object annotation were corrected without changing runtime behavior. Historical builds are not retroactively certified under the stricter configuration. See the [mypy configuration documentation](https://mypy.readthedocs.io/en/stable/config_file.html).
+
+### Verified Mail Attachments validation
+
+Application source tested at `a816f1749d331c9d1ce36cc4691d346f1024abda` passes **580 backend tests**, **85.17% coverage**, and **188 desktop tests**. The packaged-process test is explicitly skipped by the default desktop run; it separately passes with the rebuilt delivered backend, for **189 distinct desktop tests** across both commands. Explicit-config strict mypy passes 149 source/test/helper files; Ruff lint/format checks 175 files; TypeScript, frozen pnpm installation, production build and both dependency audits pass. The unpublished local backend is not available to the public-package audit. No application code changes follow this tested snapshot.
+
+Independent review found and corrected two defects: an old database backup could erase a mail-send reservation, and a pre-dispatch native-review failure was incorrectly treated as an uncertain send. Tests cover actual encrypted backups taken before accepted/uncertain attempts, exact preservation of all recorded statuses/claims, immutable wire bytes/account binding, pre-dispatch refresh, and conservative post-dispatch blocking. No live mail is sent by these tests.
+
+### Verified Mail Attachments unsigned Windows candidate
+
+Runtime/helper checkpoint `ca3e41f4f675091685f15cbbacd5302e4a023818` produced the NSIS installer and unpacked application. Subsequent helper-only commit `6959ee2` corrects Windows PowerShell JSON-array enumeration; it does not change packaged application code. Both backend-dist and the delivered unpacked backend now pass startup/migration, valid image decoding/malformed rejection, cleanup API, direct-worker and packaged-API Chromium lifecycle, synthetic PDF/DOCX import, exact manifest/hash/length checks, encrypted draft round-trip, disabled-provider failed-audit replay, different-key rejection, encrypted backup and offline restore. After restore, both original failed mail audits replay their recorded outcomes. Initial post-restore smoke failure was the helper's array-counting error, not lost database history; the corrected full runs pass.
+
+- `Job-Apply-Pro-0.55.0-alpha.1-x64.exe`: 188579134 bytes; SHA-256 `95EDA7D0AAE3146D545C6BE74EA3BF527880F8A0708D323DC7B0C0651942323A`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `44B38ADC2A17A07E01CF31CEE487B47AA8FC388DECB7A7F2EB6B852FA6F79F70`.
+- Bundled backend executable: 18601653 bytes; SHA-256 `A444D2157BD5D9BAA599D665574E245471329905DF5EB5ABA52256DDE4B9427D`.
+- Bundled browser-worker executable: 18605749 bytes; SHA-256 `10F3C5ED8ADAAB8FC7A060ED0F29A0177F98FA6E069125734F96495A126B6D5F`.
+
+Backend and worker hashes match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before creating publication metadata. Protected v0.55 PR checks remain required. No tag, signed publication, live mail/provider acceptance, verified reply threading/delivery, durable crash/relaunch restore recovery or physical failure-injection acceptance is claimed.
 
 ### Bounded Backend Lifecycle validation
 
@@ -21,7 +42,7 @@ The NSIS installer and unpacked application were rebuilt from runtime source `73
 - Bundled backend executable: 18578713 bytes; SHA-256 `98F49526C78C0AE38A8D80305303679A1562E38125A645B859575D6E4084A55E`.
 - Bundled browser-worker executable: 18582809 bytes; SHA-256 `12340F82C959538FBFDE110FF0A871046943EA039D15C5D22FE754DCB4588156`.
 
-Backend/worker hashes match their backend-dist originals. All four report `NotSigned`; the release-metadata gate correctly rejects the unsigned desktop before creating release metadata. Protected v0.54 PR checks are pending. No tag, signed publication, live integration, durable restore recovery or physical failure-injection acceptance is claimed.
+Backend/worker hashes match their backend-dist originals. All four report `NotSigned`; the release-metadata gate correctly rejects the unsigned desktop before creating release metadata. [PR #87](https://github.com/GDS-G/Job-Apply-Pro/pull/87) passed [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34727029727) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34727029759) at head `59d3cb2453e3e3dddd676036bb749ed12fcc17fe`, then merged as `478c2fedeef711775559b3d4b3a4930a52357cf0` with an identical tree. Post-merge [main CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34727467963) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34727467965) also passed. No tag, signed publication, live integration, durable restore recovery or physical failure-injection acceptance is claimed.
 
 ### Packaged Browser Runtime validation
 
@@ -36,7 +57,7 @@ Application runtime source `7ce3c86b0f8e08ab9d1a3fb61522ec36b8c13bdd` produced t
 - Bundled backend executable: 18578708 bytes; SHA-256 `AF1B1A57BD61DE607954B1E0BF20D48E99793C06CBDA07774F985E7F3270E305`.
 - Bundled browser-worker executable: 18582804 bytes; SHA-256 `C8CC3160BDC1357F1F3E1F49FC90E96CE6701110E96FA7EA4FAC64815C3663A9`.
 
-Both backend/worker source-bundle hashes match their delivered copies. All four executables report `NotSigned`; the metadata script correctly rejects the unsigned desktop payload before generating release metadata. This negative gate test does not verify a valid signing identity. [PR #86](https://github.com/GDS-G/Job-Apply-Pro/pull/86) passed [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726328187) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726328160) at head `277bf30b3c5d9e56785b38720fab11cb0819d667`, then merged as `aeb5906666d6561752c4902c148cbd9db4ce9d3c` with an identical tree. No tag, signed publication, live-provider acceptance or physical process-tree/lifecycle acceptance is claimed. Supervisor migration/start/shutdown/restore ownership is addressed separately in v0.54.
+Both backend/worker source-bundle hashes match their delivered copies. All four executables report `NotSigned`; the metadata script correctly rejects the unsigned desktop payload before generating release metadata. This negative gate test does not verify a valid signing identity. [PR #86](https://github.com/GDS-G/Job-Apply-Pro/pull/86) passed [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726328187) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726328160) at head `277bf30b3c5d9e56785b38720fab11cb0819d667`, then merged as `aeb5906666d6561752c4902c148cbd9db4ce9d3c` with an identical tree. No tag, signed publication, live-provider acceptance or physical process-tree/lifecycle acceptance is claimed. Post-merge [main CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726692800) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726692791) also passed. Supervisor migration/start/shutdown/restore ownership is addressed separately in v0.54.
 
 ### Validated Media Inputs validation
 

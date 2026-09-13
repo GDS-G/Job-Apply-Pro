@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -11,6 +12,11 @@ from job_apply_pro.domain.communications import (
     NormalizedMessage,
     OutboundDraft,
     ProviderSyncMode,
+)
+from job_apply_pro.domain.mail import (
+    ProviderMailResult,
+    VerifiedMailAttachment,
+    validate_mail_bundle,
 )
 
 
@@ -92,6 +98,24 @@ class ProviderMutationError(RuntimeError):
     pass
 
 
+class UnsupportedMailAttachmentsError(ProviderMutationError):
+    def __init__(self) -> None:
+        super().__init__("Sending document attachments is not supported; no message was sent")
+
+
+class ProviderSendUncertainError(ProviderMutationError):
+    def __init__(self) -> None:
+        super().__init__(
+            "Mail send outcome is uncertain; inspect the provider before sending again"
+        )
+
+
+def reject_mail_attachments(document_version_ids: Sequence[str]) -> None:
+    """Do not silently send text when reviewed document selections cannot be delivered."""
+    if document_version_ids:
+        raise UnsupportedMailAttachmentsError()
+
+
 class CredentialBroker(Protocol):
     """Resolves an opaque OS-keychain reference without exposing it to the renderer."""
 
@@ -107,7 +131,13 @@ class MessageProviderAdapter(Protocol):
         self, *, cursor: SecretStr | None, since: datetime | None = None
     ) -> ProviderMessageBatch: ...
 
-    def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str: ...
+    def send(
+        self,
+        draft: OutboundDraft,
+        *,
+        idempotency_key: str,
+        attachments: tuple[VerifiedMailAttachment, ...] = (),
+    ) -> ProviderMailResult: ...
 
 
 class CalendarProviderAdapter(Protocol):
@@ -136,7 +166,16 @@ class DisabledMessageProvider:
         del cursor, since
         raise ProviderNotConfiguredError(f"{self.provider.value} read access is not configured")
 
-    def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str:
+    def send(
+        self,
+        draft: OutboundDraft,
+        *,
+        idempotency_key: str,
+        attachments: tuple[VerifiedMailAttachment, ...] = (),
+    ) -> ProviderMailResult:
+        if not attachments:
+            reject_mail_attachments(draft.document_version_ids)
+        validate_mail_bundle(draft, attachments)
         del draft, idempotency_key
         raise ProviderNotConfiguredError(f"{self.provider.value} write access is not configured")
 
@@ -184,9 +223,18 @@ class FixtureMessageProvider:
             mode=(ProviderSyncMode.INITIAL if cursor is None else ProviderSyncMode.INCREMENTAL),
         )
 
-    def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str:
+    def send(
+        self,
+        draft: OutboundDraft,
+        *,
+        idempotency_key: str,
+        attachments: tuple[VerifiedMailAttachment, ...] = (),
+    ) -> ProviderMailResult:
+        if not attachments:
+            reject_mail_attachments(draft.document_version_ids)
+        validate_mail_bundle(draft, attachments)
         self.sent.append((draft.id, idempotency_key))
-        return f"fixture-message-{len(self.sent)}"
+        return ProviderMailResult(f"fixture-message-{len(self.sent)}")
 
 
 class FixtureCalendarProvider:

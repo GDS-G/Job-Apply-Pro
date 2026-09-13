@@ -1783,3 +1783,32 @@ h1 {
       37px;
   }
 }
+.mail-draft-panel {
+  margin-top: 24px;
+  border-top: 1px solid #e2e7f0;
+  padding-top: 20px;
+}
+
+.mail-draft-panel__wide {
+  grid-column: 1 / -1;
+}
+
+.mail-draft-panel__selection {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.mail-draft-review {
+  overflow-wrap: anywhere;
+}
+
+.mail-draft-review pre {
+  white-space: pre-wrap;
+  font: inherit;
+  unicode-bidi: plaintext;
+}
+
+.mail-draft-review li {
+  margin-bottom: 14px;
+}
