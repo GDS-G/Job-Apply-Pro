@@ -2,7 +2,7 @@
 
 ## Status and reproduced defects
 
-Accepted for Verified Mail Attachments `v0.55.0-alpha.1`, subject to final integrated and packaged validation. Previously, approved drafts fingerprinted `document_version_ids` but Gmail and Outlook transports omitted their content. A message could be reported confirmed while selected attachments were never sent. Outlook also created a draft through an endpoint requiring `Mail.ReadWrite`, although the application permits `Mail.Read` and `Mail.Send`. Neither defect can be fixed solely by supplying account credentials.
+Accepted for Verified Mail Attachments `v0.55.0-alpha.1`. Local integrated and unsigned-package validation passes; exact evidence is recorded in the production readiness audit. Previously, approved drafts fingerprinted `document_version_ids` but Gmail and Outlook transports omitted their content. A message could be reported confirmed while selected attachments were never sent. Outlook also created a draft through an endpoint requiring `Mail.ReadWrite`, although the application permits `Mail.Read` and `Mail.Send`. Neither defect can be fixed solely by supplying account credentials.
 
 ## Immutable review manifest and bytes
 
