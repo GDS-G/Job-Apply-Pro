@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import shutil
 import sqlite3
 import tempfile
 import zipfile
@@ -67,9 +66,9 @@ class BackupService:
         self._repository = repository
         self._cipher = cipher
         self._database_path = self._sqlite_path(database_url)
-        self._document_dir = document_dir.resolve()
-        self._backup_dir = backup_dir.resolve()
-        self._staging_dir = staging_dir.resolve()
+        self._document_dir = document_dir.absolute()
+        self._backup_dir = backup_dir.absolute()
+        self._staging_dir = staging_dir.absolute()
         self._backup_dir.mkdir(parents=True, exist_ok=True)
         self._staging_dir.mkdir(parents=True, exist_ok=True)
 
@@ -209,6 +208,17 @@ class BackupService:
         )
 
     def apply_offline(self, plan_id: str, command: RestoreConfirmation) -> RestorePlan:
+        from job_apply_pro.storage.restore_gate_repository import workspace_access
+
+        with workspace_access(self._database_path.parent, restore=True):
+            return self._apply_documents_owned(plan_id, command)
+
+    def _apply_documents_owned(self, plan_id: str, command: RestoreConfirmation) -> RestorePlan:
+        from job_apply_pro.services.restore_recovery import RestoreRecoveryService
+        from job_apply_pro.storage.restore_gate_repository import RestoreAdmissionError
+
+        recovery = RestoreRecoveryService(self._database_path.parent, self._cipher)
+        recovery.gate.assert_clear()
         plan = self._repository.get_restore_plan(plan_id)
         if plan is None:
             raise LookupError(f"Restore plan {plan_id} was not found")
@@ -216,16 +226,32 @@ class BackupService:
             raise ValueError("Restore plan changed after review")
         if command.confirmation_phrase != self.RESTORE_PHRASE:
             raise ValueError(f"confirmation_phrase must be {self.RESTORE_PHRASE}")
-        self.apply_staged_files(
-            plan,
-            database_url=f"sqlite:///{self._database_path.as_posix()}",
-            document_dir=self._document_dir,
-            staging_dir=self._staging_dir,
-        )
-        applied = plan.model_copy(
-            update={"status": RestoreStatus.APPLIED, "applied_at": datetime.now(UTC)}
-        )
-        return self._repository.save_restore_plan(applied)
+        if BackupCategory.DATABASE in plan.categories:
+            raise BackupError("Database replacement requires the dedicated offline restore command")
+        manifest = self._require_backup(plan.backup_id)
+        self._repository.close_for_offline_restore()
+        try:
+            intent = recovery.prepare(
+                plan,
+                manifest,
+                database=self._database_path,
+                documents=self._document_dir,
+                staging=self._staging_dir,
+                backups=self._backup_dir,
+            )
+
+            def commit_result(applied: RestorePlan) -> None:
+                try:
+                    self._repository.save_restore_result(manifest, applied)
+                finally:
+                    self._repository.close_for_offline_restore()
+
+            return recovery.apply(intent, commit_result)
+        except (OSError, ValueError, RestoreAdmissionError):
+            raise BackupError(
+                "Restore files are missing, changed or require recovery; "
+                "preserve the original workspace and key"
+            ) from None
 
     @classmethod
     def apply_staged_files(
@@ -236,30 +262,12 @@ class BackupService:
         document_dir: Path,
         staging_dir: Path,
     ) -> None:
-        """Apply verified staged files only with the API and media worker stopped.
-
-        The desktop supervisor waits for the API process to exit, then its restore
-        CLI closes database handles before calling here. The journal check below
-        is a read-only offline precondition, not serialization against live writers.
-        """
-        staged = Path(plan.staged_path).resolve()
-        staging_root = staging_dir.resolve()
-        if not staged.is_dir() or staging_root not in staged.parents:
-            raise BackupError("Restore staging directory is unavailable")
-        if BackupCategory.DATABASE in plan.categories:
-            source = staged / "database" / "job_apply_pro.db"
-            target_database = cls._sqlite_path(database_url)
-            cls._require_resolved_media_cleanup(target_database)
-            cls._atomic_restore(source, target_database, preserve_previous=True)
-        if BackupCategory.DOCUMENTS in plan.categories:
-            source_root = staged / "documents"
-            if not source_root.is_dir():
-                raise BackupError("Staged restore documents are missing")
-            target_root = document_dir.resolve()
-            for source in source_root.rglob("*"):
-                if source.is_file() and not source.is_symlink():
-                    relative = source.relative_to(source_root)
-                    cls._atomic_restore(source, target_root / relative, preserve_previous=False)
+        """Legacy write entry point intentionally cannot bypass durable admission."""
+        del cls, plan, database_url, document_dir, staging_dir
+        raise BackupError(
+            "Direct staged-file replacement is disabled; "
+            "use the authenticated offline restore command"
+        )
 
     @staticmethod
     def _require_resolved_media_cleanup(database_path: Path) -> None:
@@ -456,24 +464,15 @@ class BackupService:
         return Path(*pure.parts)
 
     @staticmethod
-    def _atomic_restore(source: Path, target: Path, *, preserve_previous: bool) -> None:
-        if not source.is_file():
-            raise BackupError(f"Staged restore file is missing: {source.name}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if preserve_previous and target.exists():
-            shutil.copy2(target, target.with_suffix(target.suffix + ".pre-restore"))
-        temporary = target.with_suffix(target.suffix + ".restore.tmp")
-        shutil.copy2(source, temporary)
-        temporary.replace(target)
-
-    @staticmethod
     def _fingerprint(value: dict[str, object]) -> str:
         encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
         return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
     def _sqlite_path(database_url: str) -> Path:
-        prefix = "sqlite:///"
-        if not database_url.startswith(prefix) or database_url == "sqlite:///:memory:":
+        from job_apply_pro.restore_admission import sqlite_database_path
+
+        path = sqlite_database_path(database_url)
+        if path is None:
             raise BackupError("Encrypted local backup currently requires a file-backed SQLite URL")
-        return Path(database_url.removeprefix(prefix)).resolve()
+        return path

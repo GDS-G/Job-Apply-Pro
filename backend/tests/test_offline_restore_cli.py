@@ -81,7 +81,10 @@ def test_offline_restore_cli_replaces_closed_database_and_restarts_state(
 
     assert result.returncode == 0, result.stderr
     assert document.read_text(encoding="utf-8") == "verified-encrypted-document"
-    assert database.with_suffix(".db.pre-restore").is_file()
+    preimages = list((tmp_path / "restore-control" / "operations").glob("*/database-preimage.enc"))
+    assert len(preimages) == 1
+    assert preimages[0].read_text("ascii").startswith("jap:v1:local-v1:")
+    assert not (tmp_path / "restore-control" / "active.guard").exists()
     recovered_engine = create_engine(database_url)
     with Session(recovered_engine) as recovered_session:
         repository = OperationsRepository(recovered_session)
