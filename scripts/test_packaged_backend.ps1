@@ -46,6 +46,7 @@ $apiRoot = "http://127.0.0.1:$($env:JAP_API_PORT)"
 $env:JAP_API_TOKEN = "package-smoke-token"
 $env:JAP_MASTER_KEY = [Convert]::ToBase64String([byte[]](1..32))
 $env:JAP_AI_CONFIG_JSON = '{"providers":[],"models":[],"policies":[]}'
+$env:JAP_COMMUNICATION_CONFIG_JSON = '{"providers":[],"oauth_clients":[]}'
 $env:JAP_AUTOMATION_ENABLED = "false"
 $env:JAP_BROWSER_HEADLESS = "true"
 
@@ -162,6 +163,8 @@ try {
     }
     $apiWorkerProcess = Get-Process -Id $workerRecords[0].ProcessId -ErrorAction Stop
     $null = $apiWorkerProcess.Handle
+    & $PythonPath (Join-Path $PSScriptRoot "test_packaged_mail.py") --api-url $apiRoot
+    if ($LASTEXITCODE -ne 0) { throw "Packaged verified mail attachment smoke failed" }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -192,7 +195,7 @@ try {
     $postRestoreStdout = Join-Path $resolvedTestRoot "post-restore.stdout.log"
     $postRestoreStderr = Join-Path $resolvedTestRoot "post-restore.stderr.log"
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $postRestoreStdout -StderrPath $postRestoreStderr
-    $backups = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -TimeoutSec 5)
+    $backups = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
     if ($backups.Count -ne 1 -or $backups[0].id -ne $backup.id) {
         throw "Recovered database did not retain the backup manifest"
     }
@@ -200,7 +203,25 @@ try {
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
     $restoredCleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, encrypted backup and offline restore smoke passed."
+    # Windows PowerShell emits a JSON array as one pipeline object; enumerate
+    # it explicitly before checking count and replaying individual audit rows.
+    $restoredMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($restoredMailAudits.Count -ne 2) { throw "Restored packaged mail history is incomplete" }
+    foreach ($mailAudit in $restoredMailAudits) {
+        if ($mailAudit.status -ne "FAILED" -or $mailAudit.error_code -ne "ProviderNotConfiguredError" -or $null -ne $mailAudit.provider_resource_id) {
+            throw "Restored packaged mail history changed its failed outcome"
+        }
+        $mailReplayBody = @{
+            fingerprint = $mailAudit.fingerprint
+            idempotency_key = $mailAudit.idempotency_key
+            confirmed_by = "synthetic-package-probe"
+        } | ConvertTo-Json
+        $mailReplay = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($mailAudit.resource_id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5
+        if ($mailReplay.id -ne $mailAudit.id -or $mailReplay.status -ne "FAILED") {
+            throw "Restored packaged mail attempt did not replay its original outcome"
+        }
+    }
+    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, encrypted backup and offline restore smoke passed."
 }
 finally {
     try {

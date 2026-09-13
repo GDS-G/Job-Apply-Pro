@@ -14,7 +14,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Bounded Backend Lifecycle v0.54.0-alpha.1"),
+      screen.getByText("Verified Mail Attachments v0.55.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

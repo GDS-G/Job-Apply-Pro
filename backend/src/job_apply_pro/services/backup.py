@@ -31,6 +31,41 @@ from job_apply_pro.domain.operations import (
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.storage.operations_repository import OperationsRepository
 
+_MAIL_RESTORE_MAX_ROWS = 10_000
+_MAIL_AUDIT_COLUMNS = (
+    "id",
+    "kind",
+    "provider",
+    "resource_id",
+    "idempotency_key",
+    "fingerprint",
+    "status",
+    "confirmed_by",
+    "provider_resource_id",
+    "error_code",
+    "occurred_at",
+)
+_MAIL_AUDIT_LIMITS = (100, 40, 40, 100, 200, 64, 30, 200, 500, 100, 64)
+_PRE_MAIL_REVISIONS = {f"20260805_{number:04d}" for number in range(1, 8)}
+_PRE_CLAIM_MAIL_REVISIONS = {
+    "20260805_0008",
+    "20260805_0009",
+    "20260811_0010",
+    "20260811_0011",
+    "20260811_0012",
+    "20260811_0013",
+    "20260811_0014",
+    "20260811_0015",
+    "20260812_0016",
+    "20260812_0017",
+    "20260812_0018",
+    "20260812_0019",
+    "20260812_0020",
+    "20260812_0021",
+    "20260812_0022",
+    "20260814_0023",
+}
+
 
 class BackupError(RuntimeError):
     pass
@@ -51,7 +86,7 @@ class DisabledCloudBackupProvider:
 
 
 class BackupService:
-    SCHEMA_REVISION = "20260814_0023"
+    SCHEMA_REVISION = "20260913_0024"
     RESTORE_PHRASE = "APPLY VERIFIED RESTORE"
 
     def __init__(
@@ -250,6 +285,7 @@ class BackupService:
             source = staged / "database" / "job_apply_pro.db"
             target_database = cls._sqlite_path(database_url)
             cls._require_resolved_media_cleanup(target_database)
+            cls._require_preserved_mail_attempts(target_database, source)
             cls._atomic_restore(source, target_database, preserve_previous=True)
         if BackupCategory.DOCUMENTS in plan.categories:
             source_root = staged / "documents"
@@ -268,7 +304,8 @@ class BackupService:
             if not database_path.is_file():
                 raise OSError("Current database is unavailable")
             # Do not use immutable=1: it can ignore committed journal rows in WAL.
-            # mode=ro prohibits writes and refuses to create a missing database.
+            # mode=ro prohibits main-database writes and refuses a missing main database;
+            # SQLite may still use shared-memory coordination sidecars.
             with closing(
                 sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True, timeout=1.0)
             ) as connection:
@@ -295,6 +332,135 @@ class BackupService:
                 "Database restore is blocked by unresolved provider media cleanup; "
                 "complete recovery or verified manual review before restoring"
             )
+
+    @classmethod
+    def _require_preserved_mail_attempts(
+        cls, current_database: Path, staged_database: Path
+    ) -> None:
+        """Offline precondition: a restore must not reopen an already attempted mail draft.
+
+        All recorded outcomes are retained exactly, including legacy CONFIRMED,
+        failed and unconfirmed reservations. This is not a merge or a lock against
+        live writers. A valid current database with no mail evidence has nothing
+        for this guard to preserve; staged-file integrity remains a separate check.
+        """
+        try:
+            current_audits, current_claims = cls._mail_restore_evidence(current_database)
+            if not current_audits and not current_claims:
+                return
+            staged_audits, staged_claims = cls._mail_restore_evidence(staged_database)
+        except (OSError, ValueError, sqlite3.Error):
+            raise BackupError(
+                "Mail send history cannot be inspected safely; restore was not applied"
+            ) from None
+        if any(staged_audits.get(key) != row for key, row in current_audits.items()) or not (
+            current_claims <= staged_claims
+        ):
+            raise BackupError(
+                "Database restore would discard or change recorded mail send attempts; "
+                "use a backup containing the same send history"
+            )
+
+    @staticmethod
+    def _mail_restore_evidence(
+        database_path: Path,
+    ) -> tuple[dict[str, tuple[str | None, ...]], set[tuple[str, str]]]:
+        if not database_path.is_file():
+            raise OSError("Database unavailable")
+        # mode=ro (not immutable=1) includes committed WAL evidence and refuses creation
+        # of a missing main database; SQLite may use shared-memory coordination sidecars.
+        with closing(
+            sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)
+        ) as connection:
+            # Bound each SQLite value/row before Python materializes it. Individual
+            # audit values are checked more narrowly below; no bytes/content are read.
+            connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 65_536)
+
+            def table_exists(name: str) -> bool:
+                rows = connection.execute(
+                    "SELECT type FROM sqlite_master WHERE name = ? COLLATE NOCASE", (name,)
+                ).fetchmany(2)
+                if rows and rows != [("table",)]:
+                    raise ValueError("Invalid history schema")
+                return bool(rows)
+
+            revision = None
+            if table_exists("alembic_version"):
+                revisions = connection.execute("SELECT version_num FROM alembic_version").fetchmany(
+                    2
+                )
+                if len(revisions) != 1 or not isinstance(revisions[0][0], str):
+                    raise ValueError("Invalid schema revision")
+                revision = revisions[0][0]
+            has_audits = table_exists("communication_mutation_audits")
+            has_claims = table_exists("mail_send_claims")
+            if not has_audits:
+                if has_claims or (revision is not None and revision not in _PRE_MAIL_REVISIONS):
+                    raise ValueError("Missing history table")
+                return {}, set()
+            if not has_claims and revision not in _PRE_CLAIM_MAIL_REVISIONS:
+                raise ValueError("Missing claim table")
+
+            audits: dict[str, tuple[str | None, ...]] = {}
+            seen_ids: set[str] = set()
+            seen_keys: set[str] = set()
+            rows = connection.execute(
+                f"SELECT {', '.join(_MAIL_AUDIT_COLUMNS)} FROM communication_mutation_audits "
+                "LIMIT ?",
+                (_MAIL_RESTORE_MAX_ROWS + 1,),
+            )
+            for index, row in enumerate(rows):
+                if index >= _MAIL_RESTORE_MAX_ROWS:
+                    raise ValueError("History inspection exceeds the bounded limit")
+                values: list[str | None] = []
+                for column, (value, limit) in enumerate(zip(row, _MAIL_AUDIT_LIMITS, strict=True)):
+                    if value is None and column in {7, 8, 9}:
+                        values.append(None)
+                    elif not isinstance(value, str) or not value or len(value) > limit:
+                        raise ValueError("Invalid history value")
+                    else:
+                        values.append(value)
+                audit_id, kind, _, _, key = values[:5]
+                assert audit_id is not None and key is not None
+                if (
+                    audit_id in seen_ids
+                    or key in seen_keys
+                    or kind
+                    not in {"SEND_MESSAGE", "CREATE_CALENDAR_EVENT", "UPDATE_CALENDAR_EVENT"}
+                ):
+                    raise ValueError("Ambiguous history identity")
+                seen_ids.add(audit_id)
+                seen_keys.add(key)
+                if kind == "SEND_MESSAGE":
+                    audits[audit_id] = tuple(values)
+            claims: set[tuple[str, str]] = set()
+            if has_claims:
+                seen_drafts: set[str] = set()
+                seen_audits: set[str] = set()
+                for index, row in enumerate(
+                    connection.execute(
+                        "SELECT draft_id, audit_id FROM mail_send_claims LIMIT ?",
+                        (_MAIL_RESTORE_MAX_ROWS + 1,),
+                    )
+                ):
+                    if index >= _MAIL_RESTORE_MAX_ROWS:
+                        raise ValueError("Claim inspection exceeds the bounded limit")
+                    draft_id, audit_id = row
+                    if (
+                        not isinstance(draft_id, str)
+                        or not 0 < len(draft_id) <= 100
+                        or not isinstance(audit_id, str)
+                        or not 0 < len(audit_id) <= 100
+                        or draft_id in seen_drafts
+                        or audit_id in seen_audits
+                        or audit_id not in audits
+                        or audits[audit_id][3] != draft_id
+                    ):
+                        raise ValueError("Invalid claim evidence")
+                    seen_drafts.add(draft_id)
+                    seen_audits.add(audit_id)
+                    claims.add((draft_id, audit_id))
+            return audits, claims
 
     def list_backups(self) -> list[BackupManifest]:
         return self._repository.list_backups()

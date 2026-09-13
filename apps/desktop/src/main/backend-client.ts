@@ -30,6 +30,9 @@ import type {
   ChallengeSessionCreate,
   ChallengeSessionSnapshot,
   CommunicationRecord,
+  CommunicationDraftCreate,
+  CommunicationMutationAudit,
+  OutboundDraft,
   DailyCommunicationSummary,
   DocumentSelectionAudit,
   DocumentSelectionPreview,
@@ -649,6 +652,44 @@ export class BackendClient {
 
   listCommunicationRecords(): Promise<CommunicationRecord[]> {
     return this.request("/communications/records");
+  }
+
+  listCommunicationDrafts(): Promise<OutboundDraft[]> {
+    return this.request("/communications/drafts");
+  }
+
+  getCommunicationDraft(id: string): Promise<OutboundDraft> {
+    return this.request(`/communications/drafts/${encodeURIComponent(id)}`);
+  }
+
+  createCommunicationDraft(
+    input: CommunicationDraftCreate,
+  ): Promise<OutboundDraft> {
+    return this.request("/communications/drafts", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  sendCommunicationDraft(
+    id: string,
+    confirmation: {
+      fingerprint: string;
+      idempotency_key: string;
+      confirmed_by: "desktop-user";
+    },
+  ): Promise<CommunicationMutationAudit> {
+    return this.request(
+      `/communications/drafts/${encodeURIComponent(id)}/send`,
+      {
+        method: "POST",
+        body: JSON.stringify(confirmation),
+      },
+    );
+  }
+
+  listCommunicationAudits(): Promise<CommunicationMutationAudit[]> {
+    return this.request("/communications/mutation-audits");
   }
 
   listFollowUps(): Promise<FollowUp[]> {

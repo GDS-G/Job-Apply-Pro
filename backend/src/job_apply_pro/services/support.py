@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Bounded Backend Lifecycle"
+    BUILD_NAME = "Verified Mail Attachments"
 
     def __init__(
         self,

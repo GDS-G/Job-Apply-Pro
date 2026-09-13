@@ -16,6 +16,7 @@ import type {
   ChallengeAnswerCommand,
   ChallengeSessionCreate,
   IntegrationProvider,
+  CommunicationDraftCreate,
   MockWorkflowCreate,
   ReferencePortalRunCreate,
   SupervisedPortalRunCreate,
@@ -212,6 +213,14 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("communications:calendar-events"),
     listCommunicationRecords: () =>
       ipcRenderer.invoke("communications:records"),
+    listCommunicationDrafts: () =>
+      ipcRenderer.invoke("communications:drafts-list"),
+    createCommunicationDraft: (input: CommunicationDraftCreate) =>
+      ipcRenderer.invoke("communications:draft-create", input),
+    sendCommunicationDraft: (id: string, fingerprint: string) =>
+      ipcRenderer.invoke("communications:draft-send", id, fingerprint),
+    listCommunicationAudits: () =>
+      ipcRenderer.invoke("communications:audits-list"),
     getDailyCommunicationSummary: () =>
       ipcRenderer.invoke("communications:daily-summary"),
     getDesktopNotificationStatus: () =>

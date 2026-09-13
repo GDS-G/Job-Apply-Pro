@@ -754,6 +754,15 @@ class CommunicationMutationAuditRow(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class MailSendClaimRow(Base):
+    __tablename__ = "mail_send_claims"
+
+    draft_id: Mapped[str] = mapped_column(ForeignKey("outbound_drafts.id"), primary_key=True)
+    audit_id: Mapped[str] = mapped_column(
+        ForeignKey("communication_mutation_audits.id"), unique=True
+    )
+
+
 class FollowUpRow(Base):
     __tablename__ = "communication_follow_ups"
     __table_args__ = (
