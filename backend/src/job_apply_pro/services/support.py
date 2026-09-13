@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Verified Mail Attachments"
+    BUILD_NAME = "Durable Restore Admission"
 
     def __init__(
         self,

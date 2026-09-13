@@ -2,6 +2,17 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.56.0-alpha.1] - Unreleased
+
+### Durable Restore Admission
+
+- Persist encrypted restore intent and a startup guard before candidate replacement; verify authenticated final-target receipts before clearing admission.
+- Coordinate normal runtime and offline restore with OS-backed exclusive ownership, bounded file inventories and supported local-path checks.
+- Refuse original or staged SQLite sidecars before restore reads; missing databases, linked files and redirected paths cannot trigger an implicit empty database or hot-journal recovery.
+- Preserve a fresh encrypted database preimage, mail-send history and media-cleanup obligations; commit restore bookkeeping in one transaction.
+- Block desktop startup and updates after an incomplete restore; never regenerate a missing key for an existing workspace. Add database-free status and evidence-only finalization commands.
+- Retain explicit limits: no deterministic rollback, automatic resume, multi-file atomicity, arbitrary cloud/external layouts or physical power-loss guarantee.
+
 ## [0.55.0-alpha.1] - Unreleased
 
 ### Verified Mail Attachments
