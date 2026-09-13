@@ -4,7 +4,22 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Gemini Processing Budget `v0.57.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities and deterministic restore rollback/resume. A per-invocation work budget is not a guaranteed hard gateway-wide cancellation deadline. Signing and live acceptance alone cannot complete the unfinished features. No signed v0.57 release or live-provider acceptance has been established.
+The active source milestone is **Greenhouse Public Discovery `v0.58.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in reviewed qualification/application flows, broader mail/reply capability and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation is a newly identified gap. Signing and live acceptance alone cannot complete the unfinished features.
+
+### Greenhouse Public Discovery integration
+
+Runtime checkpoint `1071ab762f0989016cc9731d1868936d599ba150` passes all **846 collected backend tests** with **85.42% coverage** and **282 default desktop tests** (one opt-in packaged test skipped). Strict explicit-config mypy passes **166 files**, Ruff lint/format **193 files**, and TypeScript, frozen installation and production build pass. ADR-0068 records fixed public GETs, bounded normalized source review, atomic immutable local import and backend-enforced rejection of mock/fabricated transitions on real jobs. Package and protected integration are in progress. No live board or applicant account is used by this evidence.
+
+### Greenhouse Public Discovery unsigned Windows candidate
+
+Runtime checkpoint `1071ab762f0989016cc9731d1868936d599ba150` produced the installer and unpacked app. Later changes add documentation and no-network discovery probes, not packaged application changes. Both backend-dist and delivered-backend full probes pass, including invalid board/posting input and missing-profile import rejection before public transport, image decoding/rejection, cleanup API, direct/API browser lifecycle, PDF/DOCX manifests, encrypted drafts, disabled-provider audit replay, backup and authenticated offline restore. The separately enabled supervisor test passes two real start/stop cycles, giving **283 distinct desktop tests** across default and opt-in runs. All 44 lifecycle/verifier regressions pass after the helper change; both dependency audits are clean, excluding the unpublished local package from public-package lookup.
+
+- `Job-Apply-Pro-0.58.0-alpha.1-x64.exe`: 188687719 bytes; SHA-256 `35B5A04A5C8CCCE934E38C75E4B91B2F34CA89156DA9677A998B072A8205603A`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `89D378730DA1F67CB6D862ACD29437B687B324AC9C19E6E5DA733ADA00C8504A`.
+- Bundled backend executable: 18650327 bytes; SHA-256 `22CC3F199AA4137D846AB223EB1400BD62327165E3E6830CF8A11A77EB0BA4FB`.
+- Bundled browser-worker executable: 18654423 bytes; SHA-256 `AC55D148C275352CFFD70538B6346D0A27C150A73423F15A83AD993D628618D2`.
+
+Backend/worker hashes match backend-dist originals. All four artifacts report `NotSigned`; the metadata signature gate rejects the desktop before publication output. Local verification is complete within this scope; protected integration is separate. No live discovery/provider, actual application, physical release-lab or signed update/rollback acceptance is claimed.
 
 ### Gemini Processing Budget integration
 
@@ -43,6 +58,8 @@ Two initial packaged-probe failures were fixture/harness defects: migration no l
 - Bundled browser-worker executable: 18631637 bytes; SHA-256 `57443AD6CF4272AC3265C730C9B82A5787BDFDBF5E0CCF7688B12A4B9D37800B`.
 
 Both backend/worker hashes match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before publication metadata is created. Protected v0.56 integration remains required. No signed publication, live-provider acceptance, physical crash/storage-pressure acceptance, deterministic rollback/resume or whole-process-tree guarantee is claimed.
+
+Protected [PR #89](https://github.com/GDS-G/Job-Apply-Pro/pull/89) passed corrected-head CI `34730631523` and Security `34730631593`, then merged as `129a61cbf20c5a88194715624467f8cd5b169d7d`. The merged tree is identical to checked head `6a0bd0aa09b899d5480d5f4694bb62f63a2a9b61`. This supersedes the pending-integration status above; the first failed fixture run is retained as correction history. Post-merge main CI is tracked separately. No tag or signed release was published.
 
 ### Strict type-check evidence correction
 

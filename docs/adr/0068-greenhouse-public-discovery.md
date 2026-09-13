@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-Accepted for Greenhouse Public Discovery `v0.58.0-alpha.1`, subject to exact-version integrated and packaged validation. This manually initiated public-read and local-import slice does not log in, open a browser, transmit candidate data, score qualifications, choose documents, upload, submit, or enable production portal automation.
+Accepted for Greenhouse Public Discovery `v0.58.0-alpha.1`. Exact-version local integrated and unsigned-package checks pass; protected integration is tracked separately. This manually initiated public-read and local-import slice does not log in, open a browser, transmit candidate data, score qualifications, choose documents, upload, submit, or enable production portal automation.
 
 The official [Greenhouse Job Board API](https://docs.greenhouse.io/job-board.html) documents unauthenticated public GET endpoints and distinct posting identifiers. Submission is a separate authenticated endpoint. This release implements only public reads; public API availability is not permission for automated applications or evidence of live acceptance.
 
