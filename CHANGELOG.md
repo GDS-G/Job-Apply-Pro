@@ -2,6 +2,30 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.56.0-alpha.1] - Unreleased
+
+### Durable Restore Admission
+
+- Persist encrypted restore intent and a startup guard before candidate replacement; verify authenticated final-target receipts before clearing admission.
+- Coordinate normal runtime and offline restore with OS-backed exclusive ownership, bounded file inventories and supported local-path checks.
+- Refuse original or staged SQLite sidecars before restore reads; missing databases, linked files and redirected paths cannot trigger an implicit empty database or hot-journal recovery.
+- Preserve a fresh encrypted database preimage, mail-send history and media-cleanup obligations; commit restore bookkeeping in one transaction.
+- Block desktop startup and updates after an incomplete restore; never regenerate a missing key for an existing workspace. Add database-free status and evidence-only finalization commands.
+- Retain explicit limits: no deterministic rollback, automatic resume, multi-file atomicity, arbitrary cloud/external layouts or physical power-loss guarantee.
+
+## [0.55.0-alpha.1] - Unreleased
+
+### Verified Mail Attachments
+
+- Resolve encrypted candidate PDF/DOCX originals through owning workflows, bound file/container limits, and immutable ordered review manifests; recheck exact bytes before provider access.
+- Deliver selected bytes as Gmail MIME or inline Outlook attachments using `Mail.Send`; distinguish provider acceptance, explicit failure and transport uncertainty without invented delivery evidence.
+- Bind drafts and token refresh to the reviewed OAuth connection, reserve each draft atomically before sending, and preserve exact-key replay while rejecting a second attempt under a new key.
+- Block database restore that would discard or change existing mail attempts or claims, including legacy, failed and uncertain outcomes; keep staged snapshots from reopening already attempted drafts.
+- Add a native-confirmed mail review panel with strict IPC validation and no plaintext attachment bytes in the renderer.
+- Separate proven pre-dispatch review failures from uncertain sends; permit another manual review only after an explicit successful refresh for the former.
+- Exercise synthetic PDF/DOCX manifests, encrypted draft round-trip and disabled-provider send admission through the packaged API.
+- Explicitly load backend strict mypy configuration in local/CI checks; earlier root runs did not load that configuration despite historical documentation describing them as strict.
+
 ## [0.54.0-alpha.1] - Unreleased
 
 ### Fixed

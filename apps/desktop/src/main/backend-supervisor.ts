@@ -5,6 +5,10 @@ import { join } from "node:path";
 import type { BackendRuntimeStatus } from "@job-apply-pro/contracts";
 
 import { BackendClient } from "./backend-client.js";
+import {
+  assertRestoreAdmission,
+  RestoreAdmissionError,
+} from "./restore-admission.js";
 
 type StatusListener = (status: BackendRuntimeStatus) => void;
 type ChildKind = "migration" | "serve" | "restore";
@@ -85,6 +89,11 @@ export class BackendSupervisor {
   }
 
   start(): Promise<void> {
+    try {
+      this.assertAdmission();
+    } catch (error) {
+      return Promise.reject(error);
+    }
     if (this.closing)
       return Promise.reject(
         new Error(
@@ -124,17 +133,24 @@ export class BackendSupervisor {
   }
 
   async prepareUpdate(): Promise<void> {
+    this.assertAdmission();
     // Updating automatically relaunches; unlike deliberate quit it must not reset
     // the session-local uncertainty guard after a possibly partial restore.
     if (this.restoreRecoveryRequired)
       throw new Error(RESTORE_RECOVERY_REQUIRED);
     if (this.restoring !== null) throw new Error(RESTORE_STILL_RUNNING);
     await this.shutdown();
+    this.assertAdmission();
     if (this.restoreRecoveryRequired)
       throw new Error(RESTORE_RECOVERY_REQUIRED);
   }
 
   applyOfflineRestore(planId: string, fingerprint: string): Promise<void> {
+    try {
+      this.assertAdmission();
+    } catch (error) {
+      return Promise.reject(error);
+    }
     if (this.closing)
       return Promise.reject(
         new Error(
@@ -197,6 +213,7 @@ export class BackendSupervisor {
     this.update("starting", "Preparing the encrypted local workspace…");
     try {
       if (!this.isCurrent(generation, controller)) return;
+      this.assertAdmission();
       const migration = this.launch(
         "migration",
         generation,
@@ -215,6 +232,7 @@ export class BackendSupervisor {
         throw new Error("Database migration did not complete successfully.");
       }
       if (!this.isCurrent(generation, controller)) return;
+      this.assertAdmission();
       const serving = this.launch(
         "serve",
         generation,
@@ -237,9 +255,11 @@ export class BackendSupervisor {
       if (!this.isCurrent(generation, controller)) return;
       this.stopBackupScheduler();
       const message =
-        error instanceof Error && error.message === STOP_UNCONFIRMED
-          ? STOP_UNCONFIRMED
-          : "Local backend startup failed or timed out. Open diagnostics before retrying.";
+        error instanceof RestoreAdmissionError
+          ? error.message
+          : error instanceof Error && error.message === STOP_UNCONFIRMED
+            ? STOP_UNCONFIRMED
+            : "Local backend startup failed or timed out. Open diagnostics before retrying.";
       this.update("degraded", message);
       throw new Error(message);
     }
@@ -428,6 +448,7 @@ export class BackendSupervisor {
       );
     let owner: OwnedChild;
     try {
+      this.assertAdmission();
       owner = this.launch(
         "restore",
         generation,
@@ -461,6 +482,8 @@ export class BackendSupervisor {
       this.update("degraded", message);
       throw new Error(message);
     }
+    // Exit zero alone cannot override a durable guard left by a writer.
+    this.assertAdmission();
     if (!this.isCurrent(generation, controller)) {
       this.update(
         "stopped",
@@ -576,6 +599,7 @@ export class BackendSupervisor {
       JAP_API_TOKEN: this.options.apiToken,
       JAP_MASTER_KEY: this.options.masterKey,
       JAP_DATABASE_URL: this.options.databaseUrl,
+      JAP_WORKSPACE_ROOT: this.options.dataRoot,
       JAP_BROWSER_DATA_DIR: join(this.options.dataRoot, "browser"),
       JAP_BROWSER_ARTIFACT_DIR: join(
         this.options.dataRoot,
@@ -595,6 +619,21 @@ export class BackendSupervisor {
       join(this.options.projectRoot, ".venv", "Scripts", "python.exe"),
     ];
     return candidates.find((candidate) => existsSync(candidate)) ?? "python";
+  }
+
+  private assertAdmission(): void {
+    try {
+      assertRestoreAdmission(this.options);
+    } catch (error) {
+      this.stopBackupScheduler();
+      if (
+        error instanceof RestoreAdmissionError &&
+        (this.currentStatus.state !== "degraded" ||
+          this.currentStatus.message !== error.message)
+      )
+        this.update("degraded", error.message);
+      throw error;
+    }
   }
 
   private update(state: BackendRuntimeStatus["state"], message: string): void {

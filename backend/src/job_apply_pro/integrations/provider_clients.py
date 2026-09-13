@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.message import EmailMessage
+from email.policy import SMTP
 from typing import cast
 from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -18,7 +20,19 @@ from job_apply_pro.domain.communications import (
     OutboundDraft,
     ProviderSyncMode,
 )
-from job_apply_pro.integrations.communications import ProviderMessageBatch, ProviderMutationError
+from job_apply_pro.domain.mail import (
+    MAX_MAIL_WIRE_BYTES,
+    MailAttachmentError,
+    ProviderMailResult,
+    VerifiedMailAttachment,
+    validate_mail_bundle,
+)
+from job_apply_pro.integrations.communications import (
+    ProviderMessageBatch,
+    ProviderMutationError,
+    ProviderSendUncertainError,
+    reject_mail_attachments,
+)
 from job_apply_pro.integrations.oauth import AccessTokenProvider, OAuthAuthorizationError
 
 MAX_PROVIDER_RESPONSE_BYTES = 5_000_000
@@ -31,6 +45,44 @@ MAX_CONTINUATION_TOKEN_CHARACTERS = 8_000
 MAX_GMAIL_MIME_PARTS = 500
 MAX_ENCODED_MESSAGE_BODY_CHARACTERS = 200_000
 MAX_MESSAGE_BODY_CHARACTERS = 100_000
+
+
+def _mail_post(
+    client: httpx.Client,
+    url: str,
+    payload: dict[str, object],
+    tokens: AccessTokenProvider,
+    provider: IntegrationProvider,
+) -> httpx.Response:
+    encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > MAX_MAIL_WIRE_BYTES:
+        raise MailAttachmentError("The encoded message exceeds the supported size limit")
+    try:
+        headers = _token_headers(tokens, provider)
+    except OAuthAuthorizationError as error:
+        raise ProviderMutationError("Mail provider authorization is unavailable") from error
+    try:
+        with client.stream(
+            "POST",
+            url,
+            content=encoded,
+            headers={**headers, "Content-Type": "application/json"},
+            follow_redirects=False,
+        ) as response:
+            if response.status_code in {400, 401, 403, 413, 415, 422, 429}:
+                raise ProviderMutationError("The mail provider rejected the send request")
+            if response.status_code not in {200, 202}:
+                raise ProviderSendUncertainError()
+            chunks: list[bytes] = []
+            size = 0
+            for chunk in response.iter_bytes(chunk_size=16_384):
+                size += len(chunk)
+                if size > 65_536:
+                    raise ProviderSendUncertainError()
+                chunks.append(chunk)
+            return httpx.Response(response.status_code, content=b"".join(chunks))
+    except httpx.HTTPError as error:
+        raise ProviderSendUncertainError() from error
 
 
 def _json(response: httpx.Response, action: str) -> dict[str, object]:
@@ -397,25 +449,50 @@ class GmailMessageProvider:
             )
         return messages
 
-    def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str:
-        message = EmailMessage()
-        message["To"] = draft.recipient
-        message["Subject"] = draft.subject
-        message["X-Job-Apply-Pro-Idempotency-Key"] = idempotency_key
-        message.set_content(draft.body_text)
+    def send(
+        self,
+        draft: OutboundDraft,
+        *,
+        idempotency_key: str,
+        attachments: tuple[VerifiedMailAttachment, ...] = (),
+    ) -> ProviderMailResult:
+        if not attachments:
+            reject_mail_attachments(draft.document_version_ids)
+        validate_mail_bundle(draft, attachments)
+        try:
+            message = EmailMessage(policy=SMTP)
+            message["To"] = draft.recipient
+            message["Subject"] = draft.subject
+            message["X-Job-Apply-Pro-Idempotency-Key"] = idempotency_key
+            message.set_content(draft.body_text)
+            for attachment in attachments:
+                maintype, subtype = attachment.metadata.media_type.split("/", 1)
+                message.add_attachment(
+                    attachment.data,
+                    maintype=maintype,
+                    subtype=subtype,
+                    filename=attachment.metadata.file_name,
+                )
+        except (ValueError, TypeError) as error:
+            raise ProviderMutationError("The reviewed message headers are invalid") from error
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
-        payload = _json(
-            self._client.post(
-                f"{self._base}/messages/send",
-                json={"raw": raw, "threadId": draft.provider_thread_id},
-                headers=_token_headers(self._tokens, self.provider),
-            ),
-            "Gmail send",
+        response = _mail_post(
+            self._client,
+            f"{self._base}/messages/send",
+            {"raw": raw, "threadId": draft.provider_thread_id},
+            self._tokens,
+            self.provider,
         )
+        if response.status_code != 200:
+            raise ProviderSendUncertainError()
+        try:
+            payload = _json(response, "Gmail send")
+        except ProviderMutationError as error:
+            raise ProviderSendUncertainError() from error
         message_id = payload.get("id")
-        if not isinstance(message_id, str) or not message_id:
-            raise ProviderMutationError("Gmail send did not return a message identifier")
-        return message_id
+        if not isinstance(message_id, str) or not 1 <= len(message_id) <= 500:
+            raise ProviderSendUncertainError()
+        return ProviderMailResult(message_id)
 
 
 class OutlookMessageProvider:
@@ -616,30 +693,48 @@ class OutlookMessageProvider:
             "Outlook attachment listing",
         )
 
-    def send(self, draft: OutboundDraft, *, idempotency_key: str) -> str:
-        headers = _token_headers(self._tokens, self.provider)
-        headers["X-Job-Apply-Pro-Idempotency-Key"] = idempotency_key
-        created = _json(
-            self._client.post(
-                f"{self._base}/messages",
-                json={
+    def send(
+        self,
+        draft: OutboundDraft,
+        *,
+        idempotency_key: str,
+        attachments: tuple[VerifiedMailAttachment, ...] = (),
+    ) -> ProviderMailResult:
+        if not attachments:
+            reject_mail_attachments(draft.document_version_ids)
+        validate_mail_bundle(draft, attachments)
+        response = _mail_post(
+            self._client,
+            f"{self._base}/sendMail",
+            {
+                "message": {
                     "subject": draft.subject,
                     "body": {"contentType": "Text", "content": draft.body_text},
                     "toRecipients": [{"emailAddress": {"address": draft.recipient}}],
-                },
-                headers=headers,
-            ),
-            "Outlook draft creation",
+                    "internetMessageHeaders": [
+                        {
+                            "name": "X-Job-Apply-Pro-Idempotency-Key",
+                            "value": idempotency_key,
+                        }
+                    ],
+                    "attachments": [
+                        {
+                            "@odata.type": "#microsoft.graph.fileAttachment",
+                            "name": item.metadata.file_name,
+                            "contentType": item.metadata.media_type,
+                            "isInline": False,
+                            "contentBytes": base64.b64encode(item.data).decode("ascii"),
+                        }
+                        for item in attachments
+                    ],
+                }
+            },
+            self._tokens,
+            self.provider,
         )
-        message_id = created.get("id")
-        if not isinstance(message_id, str) or not message_id:
-            raise ProviderMutationError("Outlook draft did not return a message identifier")
-        response = self._client.post(
-            f"{self._base}/messages/{_path_segment(message_id)}/send", headers=headers
-        )
-        if response.status_code >= 400:
-            raise ProviderMutationError(f"Outlook send failed with HTTP {response.status_code}")
-        return message_id
+        if response.status_code != 202:
+            raise ProviderSendUncertainError()
+        return ProviderMailResult()
 
 
 class GoogleCalendarProvider:

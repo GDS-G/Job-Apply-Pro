@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from pydantic import SecretStr
 from sqlalchemy import and_, delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.communications import (
@@ -14,6 +15,7 @@ from job_apply_pro.domain.communications import (
     FollowUp,
     FollowUpStatus,
     IntegrationProvider,
+    MailAttachmentManifest,
     MessageCategory,
     MutationAudit,
     MutationKind,
@@ -29,6 +31,7 @@ from job_apply_pro.storage.models import (
     CommunicationMutationAuditRow,
     CommunicationRecordRow,
     FollowUpRow,
+    MailSendClaimRow,
     OutboundDraftRow,
     ProviderCalendarEventRow,
     ProviderSyncStateRow,
@@ -264,6 +267,12 @@ class CommunicationRepository:
                         "recipient": draft.recipient,
                         "subject": draft.subject,
                         "body_text": draft.body_text,
+                        "attachment_manifest": (
+                            draft.attachment_manifest.model_dump(mode="json")
+                            if draft.attachment_manifest
+                            else None
+                        ),
+                        "provider_binding_fingerprint": draft.provider_binding_fingerprint,
                     },
                     context=f"communication-draft:{draft.id}:payload",
                 ),
@@ -364,6 +373,14 @@ class CommunicationRepository:
             )
             self._session.add(row)
         else:
+            if (
+                row.id != audit.id
+                or row.kind != audit.kind.value
+                or row.provider != audit.provider.value
+                or row.resource_id != audit.resource_id
+                or row.fingerprint != audit.fingerprint
+            ):
+                raise ValueError("Idempotency key is already bound to a different mutation")
             row.status = audit.status.value
             row.confirmed_by = audit.confirmed_by
             row.provider_resource_id = audit.provider_resource_id
@@ -379,6 +396,52 @@ class CommunicationRepository:
             )
         )
         return self._audit(row) if row else None
+
+    def find_mail_audit(self, draft_id: str) -> MutationAudit | None:
+        row = self._session.scalar(
+            select(CommunicationMutationAuditRow)
+            .where(
+                CommunicationMutationAuditRow.kind == MutationKind.SEND_MESSAGE.value,
+                CommunicationMutationAuditRow.resource_id == draft_id,
+            )
+            .order_by(CommunicationMutationAuditRow.occurred_at.desc())
+        )
+        return self._audit(row) if row else None
+
+    def claim_mail_send(self, audit: MutationAudit) -> tuple[MutationAudit, bool]:
+        if (
+            audit.kind is not MutationKind.SEND_MESSAGE
+            or audit.status is not MutationStatus.PLANNED
+        ):
+            raise ValueError("Invalid mail send reservation")
+        prior = self.find_mail_audit(audit.resource_id)
+        if prior is not None:
+            return prior, False
+        try:
+            self._session.add(
+                CommunicationMutationAuditRow(
+                    id=audit.id,
+                    kind=audit.kind.value,
+                    provider=audit.provider.value,
+                    resource_id=audit.resource_id,
+                    idempotency_key=audit.idempotency_key,
+                    fingerprint=audit.fingerprint,
+                    status=audit.status.value,
+                    confirmed_by=audit.confirmed_by,
+                    occurred_at=audit.occurred_at,
+                )
+            )
+            self._session.add(MailSendClaimRow(draft_id=audit.resource_id, audit_id=audit.id))
+            self._session.commit()
+            return audit, True
+        except IntegrityError:
+            self._session.rollback()
+            winner = self.find_mail_audit(audit.resource_id) or self.find_audit_by_idempotency(
+                audit.idempotency_key
+            )
+            if winner is None:
+                raise ValueError("Mail send reservation could not be verified") from None
+            return winner, False
 
     def list_audits(self) -> list[MutationAudit]:
         rows = self._session.scalars(
@@ -441,6 +504,12 @@ class CommunicationRepository:
             category=MessageCategory(row.category),
             policy=OutboundPolicy(row.policy),
             document_version_ids=row.document_version_ids_json,
+            attachment_manifest=(
+                MailAttachmentManifest.model_validate(payload["attachment_manifest"])
+                if payload.get("attachment_manifest") is not None
+                else None
+            ),
+            provider_binding_fingerprint=payload.get("provider_binding_fingerprint"),
             fingerprint=row.fingerprint,
             created_at=_utc(row.created_at),
             updated_at=_utc(row.updated_at),
