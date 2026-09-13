@@ -1833,3 +1833,64 @@ h1 {
   max-height: 420px;
   overflow: auto;
 }
+
+.job-readiness-panel {
+  padding: 18px;
+  overflow-wrap: anywhere;
+}
+
+.job-readiness-panel .panel__header {
+  margin: -18px -18px 18px;
+}
+
+.job-readiness-panel fieldset {
+  min-width: 0;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid #d6dce7;
+  border-radius: 8px;
+}
+
+.job-readiness-panel legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+
+.job-readiness-panel label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.job-readiness-panel .checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.job-readiness-panel input:not([type="checkbox"]),
+.job-readiness-panel select {
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid #c4ccdc;
+  border-radius: 6px;
+  color: inherit;
+  background: #fff;
+}
+
+.job-readiness-panel .answer-entry {
+  margin: 12px 0;
+  padding: 12px;
+}
+
+.job-readiness-panel pre {
+  white-space: pre-wrap;
+  font: inherit;
+  unicode-bidi: plaintext;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.job-readiness-panel h3 {
+  margin-top: 24px;
+}

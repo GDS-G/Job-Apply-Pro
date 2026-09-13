@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Source-Bound Replies",
-  version: "0.59.0-alpha.1",
+  name: "Reviewed Job Readiness",
+  version: "0.60.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -122,6 +122,153 @@ export interface GreenhouseImportResult {
   job: Job | null;
   workflow: WorkflowRunSnapshot | null;
   notice: string;
+}
+
+export type RequirementClassification = "MANDATORY" | "PREFERRED" | "AMBIGUOUS";
+export type FindingStatus = "SUPPORTED" | "CONTRADICTED" | "UNKNOWN";
+export interface SourceSpan {
+  id: string;
+  text: string;
+}
+export interface RequirementChoice {
+  span_id: string;
+  classification: RequirementClassification;
+}
+export interface RequirementsRequest {
+  application_id: string;
+  source_fingerprint: string;
+  items: RequirementChoice[];
+}
+export interface ReviewedRequirement extends RequirementChoice {
+  id: string;
+  text: string;
+}
+export interface RequirementsPreview {
+  application_id: string;
+  job_id: string;
+  source_fingerprint: string;
+  requirements: ReviewedRequirement[];
+  requirements_fingerprint: string;
+  review_fingerprint: string;
+  notice: string;
+}
+export interface RequirementsApproval extends RequirementsRequest {
+  review_fingerprint: string;
+  confirmation_phrase: string;
+}
+export interface RequirementsReview extends RequirementsPreview {
+  id: string;
+  revision: number;
+  created_at: string;
+}
+export interface RequirementFinding {
+  requirement_id: string;
+  status: FindingStatus;
+  claim_ids: string[];
+}
+export interface QualificationRequest {
+  application_id: string;
+  requirements_review_id: string;
+  findings: RequirementFinding[];
+}
+export interface ReviewedFinding extends RequirementFinding {
+  text: string;
+  classification: RequirementClassification;
+}
+export interface QualificationPreview {
+  application_id: string;
+  requirements_review_id: string;
+  requirements_fingerprint: string;
+  candidate_fingerprint: string;
+  policy_version: string;
+  findings: ReviewedFinding[];
+  mandatory_supported: number;
+  mandatory_count: number;
+  preferred_supported: number;
+  preferred_count: number;
+  coverage_score: number | null;
+  evaluable: boolean;
+  eligible: boolean;
+  review_fingerprint: string;
+  notice: string;
+}
+export interface QualificationApproval extends QualificationRequest {
+  review_fingerprint: string;
+  approve_eligibility: boolean;
+  confirmation_phrase: string;
+}
+export interface QualificationReview extends QualificationPreview {
+  id: string;
+  revision: number;
+  created_at: string;
+  eligibility_approved: boolean;
+}
+export interface ReadinessSelectionPreview {
+  selection: DocumentSelectionPreview;
+  requirements_review_id: string;
+  qualification_review_id: string;
+  review_fingerprint: string;
+  notice: string;
+}
+export interface ReadinessSelectionReview {
+  id: string;
+  revision: number;
+  created_at: string;
+  application_id: string;
+  requirements_review_id: string;
+  qualification_review_id: string;
+  requirements_fingerprint: string;
+  candidate_fingerprint: string;
+  document_fingerprint: string;
+  document_version_id: string;
+  review_fingerprint: string;
+  policy_version: string;
+}
+export interface JobReadinessSnapshot {
+  application_id: string;
+  job_id: string;
+  profile_id: string;
+  workflow_id: string;
+  state: WorkflowState;
+  supported: boolean;
+  status:
+    | "UNSUPPORTED"
+    | "REQUIREMENTS_REVIEW"
+    | "QUALIFICATION_REVIEW"
+    | "ELIGIBILITY_REVIEW"
+    | "RESUME_REVIEW"
+    | "READY"
+    | "STALE";
+  source: GreenhouseJobReview | null;
+  source_fingerprint: string | null;
+  spans: SourceSpan[];
+  evidence_claims: CandidateClaim[];
+  requirements_review: RequirementsReview | null;
+  qualification_review: QualificationReview | null;
+  selection_review: ReadinessSelectionReview | null;
+  allowed_actions: (
+    "REVIEW_REQUIREMENTS" | "REVIEW_QUALIFICATION" | "SELECT_RESUME"
+  )[];
+  notice: string;
+}
+export interface ReadinessRequirementsApprovalInput {
+  input: RequirementsRequest;
+  review_fingerprint: string;
+}
+export interface ReadinessQualificationApprovalInput {
+  input: QualificationRequest;
+  review_fingerprint: string;
+  approve_eligibility: boolean;
+}
+export interface ReadinessResumeApprovalInput {
+  input: DocumentSelectionRequest;
+  review_fingerprint: string;
+  document_version_id: string;
+}
+export interface ReadinessResumeApproval extends DocumentSelectionRequest {
+  review_fingerprint: string;
+  document_version_id: string;
+  confirmation_phrase: string;
 }
 
 export interface Application {
@@ -1694,6 +1841,25 @@ export interface DesktopBridge {
   workbench: {
     getStatus(): Promise<BackendRuntimeStatus>;
     listWorkflows(): Promise<WorkflowRunSnapshot[]>;
+    getJobReadiness(applicationId: string): Promise<JobReadinessSnapshot>;
+    previewJobRequirements(
+      input: RequirementsRequest,
+    ): Promise<RequirementsPreview>;
+    approveJobRequirements(
+      input: ReadinessRequirementsApprovalInput,
+    ): Promise<JobReadinessSnapshot | null>;
+    previewJobQualification(
+      input: QualificationRequest,
+    ): Promise<QualificationPreview>;
+    approveJobQualification(
+      input: ReadinessQualificationApprovalInput,
+    ): Promise<JobReadinessSnapshot | null>;
+    previewJobResume(
+      input: DocumentSelectionRequest,
+    ): Promise<ReadinessSelectionPreview>;
+    approveJobResume(
+      input: ReadinessResumeApprovalInput,
+    ): Promise<JobReadinessSnapshot | null>;
     listGreenhouseJobs(
       input: GreenhouseJobListInput,
     ): Promise<GreenhouseJobList>;

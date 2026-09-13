@@ -180,6 +180,24 @@ class JobRequirementRow(Base):
     evidence_json: Mapped[dict[str, object]] = mapped_column(JSON)
 
 
+class JobReadinessReviewRow(Base):
+    __tablename__ = "job_readiness_reviews"
+    __table_args__ = (
+        UniqueConstraint("application_id", "kind", "revision", name="uq_readiness_review_revision"),
+        UniqueConstraint(
+            "application_id", "kind", "request_fingerprint", name="uq_readiness_review_request"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    revision: Mapped[int] = mapped_column(Integer)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class FitScoreRow(Base):
     __tablename__ = "fit_scores"
 

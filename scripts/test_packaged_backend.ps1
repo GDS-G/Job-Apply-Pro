@@ -372,6 +372,7 @@ if __name__ == "__main__":
 
 $process = $null
 $apiWorkerProcess = $null
+$primarySmokeFailure = $null
 try {
     Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")
     # Migration need not initialize runtime document storage. This directory is
@@ -447,6 +448,28 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Packaged verified mail attachment smoke failed" }
     $originalMailDrafts = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
     if ($originalMailDrafts.Count -ne 2) { throw "Packaged offline mail previews are incomplete" }
+    # Verify the frozen readiness routes without fetching a real board or
+    # manufacturing a trusted public source. Simulator jobs cannot qualify.
+    $readinessWorkflow = $originalMailDrafts[0].workflow_id
+    if ($readinessWorkflow -notmatch '^mock-[a-f0-9-]{36}$' -or $originalMailDrafts[1].workflow_id -ne $readinessWorkflow) { throw "Packaged mail workflow identity changed" }
+    $syntheticWorkflow = Invoke-RestMethod -Uri "$apiRoot/api/v1/workbench/workflows/$readinessWorkflow" -Headers $headers -TimeoutSec 5
+    $readinessApplication = $syntheticWorkflow.application_id
+    if ($readinessApplication -notmatch '^[a-zA-Z0-9_-]{1,100}$') { throw "Packaged readiness application identity is invalid" }
+    $readinessUrl = "$apiRoot/api/v1/applications/$readinessApplication/job-review"
+    $originalReadiness = Invoke-RestMethod -Uri $readinessUrl -Headers $headers -TimeoutSec 5
+    if ($originalReadiness.supported -ne $false -or $originalReadiness.status -ne "UNSUPPORTED" -or @($originalReadiness.allowed_actions).Count -ne 0 -or $null -ne $originalReadiness.source) {
+        throw "Packaged simulator workflow unexpectedly gained real-job readiness authority"
+    }
+    $unsupportedReadinessBody = @{ application_id = $readinessApplication; source_fingerprint = ("a" * 64); items = @() } | ConvertTo-Json
+    try {
+        Invoke-RestMethod -Method Post -Uri "$readinessUrl/requirements/preview" -Headers $headers -ContentType "application/json" -Body $unsupportedReadinessBody -TimeoutSec 5 | Out-Null
+        throw "Packaged simulator requirements preview unexpectedly succeeded"
+    }
+    catch {
+        if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 409) { throw }
+        $readinessError = $_.ErrorDetails.Message | ConvertFrom-Json
+        if ($readinessError.detail -ne "Only saved public Greenhouse jobs before portal execution support this local review") { throw "Packaged readiness admission returned an unexpected error" }
+    }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -527,12 +550,17 @@ try {
     }
     $postRestoreMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
     if ($postRestoreMailAudits.Count -ne 0) { throw "Restored unbound previews created provider audit attempts" }
-    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, encrypted backup and offline restore smoke passed."
+    $restoredReadiness = Invoke-RestMethod -Uri $readinessUrl -Headers $headers -TimeoutSec 5
+    if (($restoredReadiness | ConvertTo-Json -Depth 30 -Compress) -ne ($originalReadiness | ConvertTo-Json -Depth 30 -Compress)) {
+        throw "Restored simulator workflow changed its real-job readiness authority"
+    }
+    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, conservative job-readiness admission, encrypted backup and offline restore smoke passed."
 }
 catch {
     # Functional verification failures also need their logs and recovery evidence,
     # even when every captured process subsequently exits successfully.
     $script:smokePreserveArtifacts = $true
+    $primarySmokeFailure = $_
     throw
 }
 finally {
@@ -540,5 +568,10 @@ finally {
         Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     }
     catch { $script:smokePreserveArtifacts = $true }
-    Complete-SmokeCleanup -Directory $resolvedTestRoot
+    try { Complete-SmokeCleanup -Directory $resolvedTestRoot }
+    catch {
+        if ($null -eq $primarySmokeFailure) { throw }
+        # Keep the original verification exception; cleanup's preservation error
+        # must not hide which synthetic assertion failed. Evidence stays retained.
+    }
 }

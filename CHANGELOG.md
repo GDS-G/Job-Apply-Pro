@@ -2,6 +2,16 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.60.0-alpha.1] - Unreleased
+
+### Reviewed Job Readiness
+
+- Review exact saved Greenhouse source lines as mandatory, preferred or ambiguous requirements, with no generated employer claims.
+- Link each finding to current locked application-permitted evidence; keep coverage separate from explicit eligibility approval.
+- Require current source/evidence before immutable resume selection, with full metadata/byte/extraction fingerprints and encrypted append-only reviews.
+- Commit approvals, legitimate workflow milestones and selection audits atomically; deny generic selection bypass and stale/concurrent approvals.
+- Add migration 0027, strict IPC, cancel-default native review, stale-safe UI and adversarial regressions. No browser, provider, upload or submission action occurs.
+
 ## [0.59.0-alpha.1] - Unreleased
 
 ### Source-Bound Replies

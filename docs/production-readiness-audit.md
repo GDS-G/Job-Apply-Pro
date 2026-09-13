@@ -4,7 +4,24 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Source-Bound Replies `v0.59.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in reviewed qualification/application flows, delivery reconciliation and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation remains a gap. Signing and live acceptance alone cannot complete unfinished features.
+The active source milestone is **Reviewed Job Readiness `v0.60.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in named-portal application flows, delivery reconciliation and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation remains a gap. Signing and live acceptance alone cannot complete unfinished features.
+
+### Reviewed Job Readiness integration
+
+The combined v0.60 tree passes **1,057 backend tests** at **86.06% coverage** (13,892 statements, 1,936 missed), **386 default desktop tests** with one opt-in packaged test skipped, explicit strict mypy **179 files**, Ruff format/lint **208 files**, TypeScript, frozen installation and production build. All **44 helper lifecycle/verifier tests** pass after adding no-network frozen readiness admission and post-restore checks. The separately enabled packaged-supervisor test passes two real start/stop cycles, giving **387 distinct desktop tests** across the default and opt-in commands. Production migration order is 0025 → 0026 → 0027; the corrected discovery, mail and readiness migration regressions all pass.
+
+ADR-0070 records source-exact requirement/evidence/eligibility review and immutable resume selection. Effective readiness is independent of historical workflow state. The offline package probe deliberately checks unsupported simulator jobs and restored authority; positive public-source qualification is fixture-tested, without fabricating source authority in a deployed package. Real portal actions and future consumer checks remain separate work.
+
+### Reviewed Job Readiness unsigned Windows candidate
+
+Runtime checkpoint `88665f1c78a14b85d3d2fdc3b590bd0f6b1d3cde` produced the installer and unpacked application. Later changes are package-verifier diagnostics, regressions and documentation, not packaged application changes. Both backend-dist and the exact delivered backend pass the complete synthetic probe: migration/startup, image decoding/rejection, cleanup API, direct/API browser lifecycle, PDF/DOCX manifests, encrypted offline mail previews, conservative simulator-job readiness admission, authenticated backup and offline restore, and exact post-restore authority. Node and Python dependency audits report no known vulnerabilities; Python excludes only the unpublished editable local package.
+
+- `Job-Apply-Pro-0.60.0-alpha.1-x64.exe`: 188806221 bytes; SHA-256 `075C09B9BC52FB7E20D459BA40E08D2B52C14000BB46856B519A2D372D86DFA1`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `D14B8FDF87EBF92D374EE6DC92950AB060039B8A1928895EE1F6B2FCF6AC4C90`.
+- Bundled backend executable: 18697800 bytes; SHA-256 `22DAC174A7C99805D3D0B1C5AEEB38F5F25EE37FACBCB51C671F944704779646`.
+- Bundled browser-worker executable: 18701896 bytes; SHA-256 `D152040C86490E0BC957C4E5727AEDDEAE6B7A32A69A2202A01361397A227825`.
+
+Both bundled executable hashes match the backend-dist originals. All four artifacts report `NotSigned`, and the publication metadata gate rejects the unsigned desktop before creating release outputs. Local candidate verification is complete within this synthetic scope. No named-portal application, live provider write, physical Electron-window acceptance, signed installer/update/rollback or production release is claimed.
 
 ### Source-Bound Replies integration
 

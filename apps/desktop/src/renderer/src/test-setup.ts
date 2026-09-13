@@ -12,6 +12,21 @@ const bridge: DesktopBridge = {
       checked_at: new Date(0).toISOString(),
     }),
     listWorkflows: async () => [],
+    getJobReadiness: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    previewJobRequirements: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    approveJobRequirements: async () => null,
+    previewJobQualification: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    approveJobQualification: async () => null,
+    previewJobResume: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    approveJobResume: async () => null,
     listGreenhouseJobs: async () => {
       throw new Error("Not implemented in this test.");
     },

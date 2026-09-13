@@ -138,7 +138,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Source-Bound Replies v0.59.0-alpha.1"),
+      screen.getByText("Reviewed Job Readiness v0.60.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -203,6 +203,81 @@ describe("App", () => {
       ),
     ).toEqual([]);
   });
+
+  it.each([
+    { matchedRequirementIds: [] },
+    { matchedRequirementIds: ["legacy-match"] },
+  ])(
+    "does not infer qualification from an empty missing-requirements list ($matchedRequirementIds)",
+    async ({ matchedRequirementIds }) => {
+      const api = window.jobApplyPro.workbench;
+      vi.spyOn(api, "listWorkflows").mockResolvedValue([
+        { ...discoveredWorkflow, state: "DEDUPLICATED", allowed_controls: [] },
+      ]);
+      vi.spyOn(api, "getCandidateKnowledge").mockResolvedValue({
+        profile_id: discoveredWorkflow.profile_id,
+        documents: [],
+        answers: [],
+        claims: [
+          {
+            id: "reviewed-claim",
+            profile_id: discoveredWorkflow.profile_id,
+            canonical_key: "python",
+            statement: "User-reviewed Python experience",
+            claim_type: "skill",
+            value: {},
+            context: {},
+            confidence: 1,
+            verification_status: "VERIFIED",
+            permitted_use: "APPLICATIONS",
+            sensitivity: "PERSONAL",
+            locked: true,
+            created_at: discoveredWorkflow.updated_at,
+            updated_at: discoveredWorkflow.updated_at,
+          },
+        ],
+      });
+      vi.spyOn(api, "previewTailoredDocument").mockResolvedValue({
+        application_id: discoveredWorkflow.application_id,
+        profile_id: discoveredWorkflow.profile_id,
+        job_id: "imported-job",
+        employer: discoveredWorkflow.employer,
+        title: discoveredWorkflow.title,
+        kind: "RESUME",
+        output_format: "DOCX",
+        variant_label: "Tailored evidence",
+        template: "PROFESSIONAL",
+        ranking_mode: "DETERMINISTIC",
+        ranking_method: "deterministic-v1",
+        sections: [],
+        selected_claim_ids: ["reviewed-claim"],
+        matched_requirement_ids: matchedRequirementIds,
+        missing_required_requirements: [],
+        review_fingerprint: "a".repeat(64),
+      });
+      const generate = vi.spyOn(api, "generateTailoredDocument");
+      const qualification = vi.spyOn(api, "approveJobQualification");
+      render(<App />);
+      const button = screen.getByRole("button", { name: "Preview evidence" });
+      await waitFor(() => expect(button).not.toBeDisabled());
+      fireEvent.click(button);
+      expect(
+        await screen.findByText(
+          /Requirements may be absent or unreviewed; eligibility is not established/,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /For imported Greenhouse jobs, use Reviewed job readiness to review qualification against the saved source/,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("No required qualification is unmatched."),
+      ).not.toBeInTheDocument();
+      expect(generate).not.toHaveBeenCalled();
+      expect(qualification).not.toHaveBeenCalled();
+    },
+  );
 
   it("syncs connected provider messages and reports bounded counts", async () => {
     vi.spyOn(
