@@ -55,10 +55,11 @@ These controls are source capability, not provider permission. `production_enabl
 
 ## Next source-controlled implementation order
 
-1. Use the v0.46 visibility-, accessibility-, constraint-, structured-topology-, native/inherited-disabled-, invalid-, readonly-, busy-, inert-, and accessibility-hidden-state-aware required-field review to surface page-valid, missing, stale, ambiguous, repeated, custom-widget, manual-only, and already-verified visible controls before submission; add only individually reviewed provider adapters with exact postconditions.
-2. The dedicated frozen browser-worker path in ADR-0063 now passes direct-worker and packaged-API loopback smoke in both delivered locations. Next repair backend supervisor lifecycle ownership (coalesced startup, bounded migrations, awaited shutdown and exclusive restore). Finish external acceptance of durable, privacy-safe media recovery before expanding live visual review; add processing-state polling and aggregate deadline policy where required. Validate with consented real-world acceptance evidence under an approved provider, privacy, and retention plan. Preserve evidence IDs, deterministic fallbacks, preview fingerprints, and explicit approval; do not treat unknown-resource acknowledgement or unreadable ciphertext as confirmed provider deletion.
-3. Add portal-specific custom-widget mappings only after explicit widget-level locator contracts and authorized supervised evidence with terms, limits, ownership, and stop conditions.
-4. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist.
+1. Finish exact v0.54 packaged lifecycle validation, then implement verified outgoing attachment delivery and scope-compatible Outlook sending. Preserve approval-bound immutable versions and distinguish provider acceptance from delivery or transport uncertainty.
+2. Extend session-local restore ownership with durable crash/relaunch admission and verified recovery. A marker alone is not atomic replacement, deterministic rollback or safe resume; retain backups and enforce byte/path ownership checks across every interrupted phase.
+3. Add bounded Gemini processing-state polling and a shared invocation work budget, retaining durable cleanup ownership, separate cleanup obligations and terminal retention errors. A synchronous transport timeout is not guaranteed hard aggregate cancellation. Validate real retention only under approved provider/privacy terms; do not treat unknown-resource acknowledgement or unreadable ciphertext as confirmed deletion.
+4. Build named-portal discovery-through-review/confirmation vertical slices with explicit navigation, upload and custom-widget contracts, executable sanitized fixtures and verified postconditions. Reuse existing evidence-backed native-field review without treating it as complete end-to-end orchestration. Enable live capabilities only after authorized terms, origins, limits, ownership and regression evidence exist.
+5. Complete signed Windows release, update/rollback, and physical failure-injection acceptance when the external prerequisites exist. Keep roadmap-deferred features explicitly separate.
 
 ## External evidence that cannot be replaced by source tests
 
@@ -69,4 +70,4 @@ These controls are source capability, not provider permission. `production_enabl
 - Authorized, sanitized portal fingerprints and outcomes captured during an approved validation window.
 - Physical Windows release-lab evidence for native dialogs, sleep/resume, network loss, storage pressure, installer, updater, and rollback behavior.
 
-Passwords pasted into chat, source files, documentation, CI variables, replay fixtures, or application configuration are not provider connection configuration and must never be consumed by automation.
+Account passwords are not OAuth client-registration metadata. Do not copy them into source files, development documentation, CI variables, replay fixtures or application configuration. Authorized account sign-in uses the provider's secure login surface; MFA, security codes and legal attestations remain explicit user-controlled boundaries.

@@ -8,7 +8,20 @@ The active source milestone is **Bounded Backend Lifecycle `v0.54.0-alpha.1`**. 
 
 ### Bounded Backend Lifecycle validation
 
-ADR-0064 defines coalesced and generation-owned startup/shutdown, tracked child exit, bounded migration/readiness, non-killing restore observation, and awaited quit/update preparation. The focused frontend suite passes 126 tests before the opt-in packaged-supervisor test is added. Final integrated checks, rebuilt v0.54 artifacts and delivered-process evidence are pending; do not reuse the v0.53 artifact hashes as v0.54 acceptance. Restore recovery-required state remains session-local and does not replace a durable crash/relaunch marker.
+Runtime source `732bc89ee833579d8cfc15e8bea15a3217f819a1` passes 432 backend tests at 84.77% coverage and 126 desktop tests. The default desktop run explicitly skips the opt-in packaged-process test; that test separately passes against the rebuilt delivered v0.54 backend, for 127 distinct desktop tests across both commands. Ruff lint/format, strict mypy (141 source/test files plus the packaged-browser helper), TypeScript, frozen pnpm installation, production build and both dependency audits pass. The unpublished local backend package is excluded from the public-package audit. Subsequent changes are documentation only.
+
+ADR-0064 defines coalesced and generation-owned startup/shutdown, tracked child exit, bounded migration/readiness, non-killing restore observation, and awaited quit/update preparation. Deterministic tests cover failure/reentrancy/restore-timeout/update-bypass cases. The opt-in test captures four actual migration/server children across two start/stop cycles, verifies concurrent-start coalescing, authenticated readiness/build identity, and observed exit before restart. It exercises the source supervisor with the exact delivered backend; it is not a physical Electron-window or signed-update test. Restore recovery-required state remains session-local and does not replace a durable crash/relaunch marker.
+
+### Bounded Backend Lifecycle unsigned Windows candidate
+
+The NSIS installer and unpacked application were rebuilt from runtime source `732bc89ee833579d8cfc15e8bea15a3217f819a1`. Both backend-dist and the delivered unpacked backend pass startup/migration, valid-image decoding/malformed rejection, cleanup API, direct-worker and packaged-API Chromium lifecycle, encrypted backup and offline restore smoke. Isolated synthetic loopback pages/storage and no configured providers are used throughout.
+
+- `Job-Apply-Pro-0.54.0-alpha.1-x64.exe`: 188521652 bytes; SHA-256 `9BC943F85AC8322DD8BF3D3D3EB78D5E536FF8E0FA31D3F5F46674D44905A264`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `FA90C4B922DCBEBCAE43E941138D55E2F06E1C69F3C96EA4DD6DFAE8FA7BDEC5`.
+- Bundled backend executable: 18578713 bytes; SHA-256 `98F49526C78C0AE38A8D80305303679A1562E38125A645B859575D6E4084A55E`.
+- Bundled browser-worker executable: 18582809 bytes; SHA-256 `12340F82C959538FBFDE110FF0A871046943EA039D15C5D22FE754DCB4588156`.
+
+Backend/worker hashes match their backend-dist originals. All four report `NotSigned`; the release-metadata gate correctly rejects the unsigned desktop before creating release metadata. Protected v0.54 PR checks are pending. No tag, signed publication, live integration, durable restore recovery or physical failure-injection acceptance is claimed.
 
 ### Packaged Browser Runtime validation
 
@@ -23,7 +36,7 @@ Application runtime source `7ce3c86b0f8e08ab9d1a3fb61522ec36b8c13bdd` produced t
 - Bundled backend executable: 18578708 bytes; SHA-256 `AF1B1A57BD61DE607954B1E0BF20D48E99793C06CBDA07774F985E7F3270E305`.
 - Bundled browser-worker executable: 18582804 bytes; SHA-256 `C8CC3160BDC1357F1F3E1F49FC90E96CE6701110E96FA7EA4FAC64815C3663A9`.
 
-Both backend/worker source-bundle hashes match their delivered copies. All four executables report `NotSigned`; the metadata script correctly rejects the unsigned desktop payload before generating release metadata. This negative gate test does not verify a valid signing identity. Protected PR checks remain pending. No tag, signed publication, live-provider acceptance or physical process-tree/lifecycle acceptance is claimed. Supervisor migration/start/shutdown/restore ownership remains a separate open work item.
+Both backend/worker source-bundle hashes match their delivered copies. All four executables report `NotSigned`; the metadata script correctly rejects the unsigned desktop payload before generating release metadata. This negative gate test does not verify a valid signing identity. [PR #86](https://github.com/GDS-G/Job-Apply-Pro/pull/86) passed [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726328187) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34726328160) at head `277bf30b3c5d9e56785b38720fab11cb0819d667`, then merged as `aeb5906666d6561752c4902c148cbd9db4ce9d3c` with an identical tree. No tag, signed publication, live-provider acceptance or physical process-tree/lifecycle acceptance is claimed. Supervisor migration/start/shutdown/restore ownership is addressed separately in v0.54.
 
 ### Validated Media Inputs validation
 
@@ -31,7 +44,7 @@ Runtime source commit `2f65eebee63e300f1977934ec9337716b86934af` passes 402 back
 
 ### Validated Media Inputs unsigned Windows candidate
 
-Protected integration passed at final PR head `464e068d0b25efb9e98be0637d018cead59edef5`: [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319369) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319361). [PR #85](https://github.com/GDS-G/Job-Apply-Pro/pull/85) merged as `2f7448e745ce7faa5f20cbb7ca7b14e616b0667a`; the merged tree matches the tested head. Post-merge main runs are separate evidence.
+Protected integration passed at final PR head `464e068d0b25efb9e98be0637d018cead59edef5`: [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319369) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725319361). [PR #85](https://github.com/GDS-G/Job-Apply-Pro/pull/85) merged as `2f7448e745ce7faa5f20cbb7ca7b14e616b0667a`; the merged tree matches the tested head. Post-merge [main CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725815303) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34725815304) also passed.
 
 The NSIS installer, unpacked desktop and bundled backend were produced from runtime commit `2f65eebee63e300f1977934ec9337716b86934af`. Packaged startup, migration, valid synthetic image decoding, malformed image rejection, cleanup API, encrypted backup and offline restore smoke pass with no configured AI provider. Artifact evidence:
 
