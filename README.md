@@ -2,9 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Source-Bound Replies build
+## Reviewed Job Readiness build
 
-The active source milestone is **Source-Bound Replies `v0.59.0-alpha.1`**. Reviewed Gmail/Outlook replies bind a verified synchronized source, stable provider account, connection epoch and immutable content. Explicit new messages cannot inherit reply authority; offline previews remain unsendable until a fresh connected review. No automatic replies or delivery claims are added. See [ADR-0069](docs/adr/0069-source-bound-replies.md).
+The active source milestone is **Reviewed Job Readiness `v0.60.0-alpha.1`**. Saved public Greenhouse jobs support exact requirement classification, locked-evidence findings, separate eligibility approval and immutable resume selection. Missing or ambiguous requirements cannot produce a perfect score. Changed source, claims or document bytes invalidate current readiness without rewriting history. No portal action occurs. See [ADR-0070](docs/adr/0070-reviewed-job-readiness.md).
+
+Reviewed Gmail/Outlook replies retain verified source/account/connection binding and immutable content. Offline previews stay unsendable until a fresh connected review; no automatic replies or delivery claims are added. See [ADR-0069](docs/adr/0069-source-bound-replies.md).
 
 Public Greenhouse discovery remains available: manually preview a board, review one exact posting and import it for a local candidate profile. Fixed-origin unauthenticated reads send no candidate data; snapshots and deduplication are atomic and immutable. Imported jobs remain not evaluated, without mock advancement controls or a submission. See [ADR-0068](docs/adr/0068-greenhouse-public-discovery.md) for contracts, limits and remaining real-portal work.
 

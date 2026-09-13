@@ -39,7 +39,7 @@ def test_snapshot_migration_round_trip_preserves_existing_jobs(
         with engine.connect() as connection:
             assert (
                 connection.scalar(text("SELECT version_num FROM alembic_version"))
-                == "20260913_0026"
+                == "20260913_0025"
             )
         command.downgrade(config, "20260913_0024")
         assert "job_discovery_snapshots" not in inspect(engine).get_table_names()

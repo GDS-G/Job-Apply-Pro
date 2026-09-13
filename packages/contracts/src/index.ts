@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Source-Bound Replies",
-  version: "0.59.0-alpha.1",
+  name: "Reviewed Job Readiness",
+  version: "0.60.0-alpha.1",
   channel: "alpha",
 } as const;
 

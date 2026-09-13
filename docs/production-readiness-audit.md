@@ -4,7 +4,13 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Source-Bound Replies `v0.59.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in reviewed qualification/application flows, delivery reconciliation and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation remains a gap. Signing and live acceptance alone cannot complete unfinished features.
+The active source milestone is **Reviewed Job Readiness `v0.60.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in named-portal application flows, delivery reconciliation and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation remains a gap. Signing and live acceptance alone cannot complete unfinished features.
+
+### Reviewed Job Readiness integration
+
+The combined v0.60 tree passes **386 default desktop tests** with one opt-in packaged test skipped, explicit strict mypy **179 files**, Ruff format/lint **208 files**, TypeScript, frozen installation and production build. All **44 helper lifecycle/verifier tests** pass after adding no-network frozen readiness admission and post-restore checks. Initial full backend run had 1,056 passes and one merged-test assertion mismatch: the discovery migration fixture explicitly upgraded to 0025 but inherited a 0026 expectation. The test-only expectation was corrected to 0025; all three discovery/mail/readiness migration tests passed, and the complete suite is being rerun. Production migration order is 0025 → 0026 → 0027. No completed combined-backend or exact-version package result is claimed until those runs finish.
+
+ADR-0070 records source-exact requirement/evidence/eligibility review and immutable resume selection. Effective readiness is independent of historical workflow state. The offline package probe deliberately checks unsupported simulator jobs and restored authority; positive public-source qualification is fixture-tested, without fabricating source authority in a deployed package. Real portal actions and future consumer checks remain separate work.
 
 ### Source-Bound Replies integration
 

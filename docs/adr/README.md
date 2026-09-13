@@ -2,6 +2,8 @@
 
 ADRs capture durable decisions that affect architecture, security, contracts, persistence, or delivery. Accepted records are immutable; supersede them with a new ADR rather than rewriting history.
 
+- [ADR-0070: Reviewed job readiness](0070-reviewed-job-readiness.md)
+
 - [ADR-0069: Source-bound replies](0069-source-bound-replies.md)
 
 - [ADR-0001: Modular local-first process architecture](0001-modular-local-first-architecture.md)
