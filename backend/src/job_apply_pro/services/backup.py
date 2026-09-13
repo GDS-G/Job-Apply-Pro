@@ -51,7 +51,7 @@ class DisabledCloudBackupProvider:
 
 
 class BackupService:
-    SCHEMA_REVISION = "20260814_0023"
+    SCHEMA_REVISION = "20260913_0024"
     RESTORE_PHRASE = "APPLY VERIFIED RESTORE"
 
     def __init__(

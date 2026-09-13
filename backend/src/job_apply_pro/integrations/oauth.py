@@ -4,7 +4,7 @@ import base64
 import hashlib
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from urllib.parse import urlencode
@@ -124,6 +124,23 @@ def _scopes(value: object, fallback: list[str]) -> list[str]:
 
 class AccessTokenProvider(Protocol):
     def access_token(self, provider: IntegrationProvider) -> str: ...
+
+
+@dataclass(frozen=True)
+class BoundMailTokenProvider:
+    """Resolve only the connection selected for this mail provider invocation."""
+
+    oauth: OAuthConnectionService = field(repr=False)
+    provider: IntegrationProvider
+    expected_reference: str = field(repr=False)
+
+    def access_token(self, provider: IntegrationProvider) -> str:
+        if provider != self.provider or provider not in {
+            IntegrationProvider.GMAIL,
+            IntegrationProvider.OUTLOOK,
+        }:
+            raise OAuthAuthorizationError("The reviewed mail provider does not match")
+        return self.oauth.access_token_bound(provider, self.expected_reference)
 
 
 class OAuthConnectionService:
@@ -262,30 +279,53 @@ class OAuthConnectionService:
         return self.state(provider)
 
     def access_token(self, provider: IntegrationProvider) -> str:
+        return self._access_token(provider, expected_credential_reference=None)
+
+    def access_token_bound(
+        self, provider: IntegrationProvider, expected_credential_reference: str
+    ) -> str:
+        if not expected_credential_reference:
+            raise OAuthAuthorizationError("The reviewed provider connection is unavailable")
+        return self._access_token(provider, expected_credential_reference)
+
+    def _access_token(
+        self, provider: IntegrationProvider, expected_credential_reference: str | None
+    ) -> str:
         stored = self._repository.load_tokens(provider)
         if stored is None:
-            raise OAuthAuthorizationError(f"{provider.value} authorization is required")
+            raise OAuthAuthorizationError("Provider authorization is required")
         reference, tokens = stored
+        if expected_credential_reference is not None and reference != expected_credential_reference:
+            raise OAuthAuthorizationError("The reviewed provider connection changed")
         if tokens.expires_at > self._now() + timedelta(seconds=60):
             return tokens.access_token.get_secret_value()
         if tokens.refresh_token is None:
-            raise OAuthAuthorizationError(f"{provider.value} authorization has expired")
+            raise OAuthAuthorizationError("Provider authorization has expired")
         config = self._config(provider)
-        response = self._client.post(
-            OAUTH_PROVIDERS[provider].token_endpoint,
-            data={
-                "client_id": config.client_id,
-                "refresh_token": tokens.refresh_token.get_secret_value(),
-                "grant_type": "refresh_token",
-                "scope": " ".join(tokens.granted_scopes),
-            },
-            headers={"Accept": "application/json"},
-        )
-        payload = self._token_payload(response)
-        if "refresh_token" not in payload:
-            payload["refresh_token"] = tokens.refresh_token.get_secret_value()
-        refreshed = self._tokens(payload, tokens.granted_scopes, account_hint=tokens.account_hint)
-        self._repository.save_tokens(provider, reference, refreshed, now=self._now())
+        try:
+            response = self._client.post(
+                OAUTH_PROVIDERS[provider].token_endpoint,
+                data={
+                    "client_id": config.client_id,
+                    "refresh_token": tokens.refresh_token.get_secret_value(),
+                    "grant_type": "refresh_token",
+                    "scope": " ".join(tokens.granted_scopes),
+                },
+                headers={"Accept": "application/json"},
+                follow_redirects=False,
+            )
+            payload = self._token_payload(response)
+            if "refresh_token" not in payload:
+                payload["refresh_token"] = tokens.refresh_token.get_secret_value()
+            refreshed = self._tokens(
+                payload, tokens.granted_scopes, account_hint=tokens.account_hint
+            )
+        except (httpx.HTTPError, ValueError, OverflowError) as error:
+            raise OAuthAuthorizationError("Provider token refresh failed") from error
+        if not self._repository.refresh_tokens_if_current(
+            provider, reference, refreshed, now=self._now()
+        ):
+            raise OAuthAuthorizationError("The reviewed provider connection changed")
         return refreshed.access_token.get_secret_value()
 
     def _config(self, provider: IntegrationProvider) -> OAuthClientConfig:

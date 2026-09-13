@@ -43,6 +43,12 @@ from job_apply_pro.domain.communications import (
     SchedulingRequest,
     SyncedCalendarEvent,
 )
+from job_apply_pro.domain.mail import (
+    MailAttachmentError,
+    ProviderMailResult,
+    VerifiedMailAttachment,
+    validate_mail_bundle,
+)
 from job_apply_pro.domain.workbench import WorkflowRunSnapshot
 from job_apply_pro.integrations.communications import (
     CalendarProviderAdapter,
@@ -51,8 +57,11 @@ from job_apply_pro.integrations.communications import (
     MessageProviderAdapter,
     ProviderMutationError,
     ProviderNotConfiguredError,
+    ProviderSendUncertainError,
+    reject_mail_attachments,
 )
 from job_apply_pro.integrations.configuration import ProviderConnectionConfig
+from job_apply_pro.services.mail_attachments import MailAttachmentResolver
 from job_apply_pro.storage.repository_contracts import (
     CandidateKnowledgeRepositoryProtocol,
     CommunicationRepositoryProtocol,
@@ -95,6 +104,7 @@ class CommunicationService:
         automatic_categories: set[MessageCategory] | None = None,
         provider_configs: dict[IntegrationProvider, ProviderConnectionConfig] | None = None,
         knowledge_repository: CandidateKnowledgeRepositoryProtocol | None = None,
+        attachment_resolver: MailAttachmentResolver | None = None,
     ) -> None:
         self._repository = repository
         self._message_adapters: dict[IntegrationProvider, MessageProviderAdapter] = {
@@ -114,6 +124,7 @@ class CommunicationService:
         self._automatic_categories = automatic_categories or set()
         self._provider_configs = provider_configs or {}
         self._knowledge_repository = knowledge_repository
+        self._attachment_resolver = attachment_resolver
 
     def health(self) -> list[IntegrationHealth]:
         health: list[IntegrationHealth] = []
@@ -524,19 +535,22 @@ class CommunicationService:
         return records
 
     def create_draft(self, command: DraftCreate) -> OutboundDraft:
-        repository = self._require_repository()
-        if repository.get_record(command.analysis_id) is None:
-            raise LookupError(f"Communication analysis {command.analysis_id} was not found")
-        if self._knowledge_repository is not None:
-            missing_versions = [
-                version_id
-                for version_id in command.document_version_ids
-                if self._knowledge_repository.get_version_record(version_id) is None
-            ]
-            if missing_versions:
-                raise LookupError(
-                    f"Attachment document versions were not found: {', '.join(missing_versions)}"
+        manifest = None
+        if command.document_version_ids:
+            if self._attachment_resolver is None:
+                reject_mail_attachments(command.document_version_ids)
+            else:
+                manifest, _ = self._attachment_resolver.resolve(
+                    command.workflow_id, command.document_version_ids
                 )
+        repository = self._require_repository()
+        record = repository.get_record(command.analysis_id)
+        if record is None:
+            raise LookupError(f"Communication analysis {command.analysis_id} was not found")
+        if command.provider != record.analysis.message.provider:
+            raise ValueError("Draft provider does not match the selected correspondence")
+        if command.provider_thread_id != record.analysis.message.provider_thread_id:
+            raise ValueError("Draft thread does not match the selected correspondence")
         policy = command.policy
         if (
             policy is OutboundPolicy.AUTOMATIC
@@ -545,27 +559,50 @@ class CommunicationService:
             raise ValueError(f"Automatic sending is not enabled for {command.category.value}")
         now = datetime.now(UTC)
         draft_id = str(uuid4())
-        fingerprint = self._fingerprint(
-            {
-                "id": draft_id,
-                "analysis_id": command.analysis_id,
-                "provider": command.provider.value,
-                "thread": command.provider_thread_id,
-                "recipient": command.recipient,
-                "subject": command.subject,
-                "body": command.body_text,
-                "documents": command.document_version_ids,
-            }
+        draft = OutboundDraft(
+            id=draft_id,
+            **command.model_dump(),
+            attachment_manifest=manifest,
+            provider_binding_fingerprint=self._provider_binding_fingerprint(command.provider),
+            fingerprint="0" * 64,
+            created_at=now,
+            updated_at=now,
         )
         return repository.save_draft(
-            OutboundDraft(
-                id=draft_id,
-                **command.model_dump(),
-                fingerprint=fingerprint,
-                created_at=now,
-                updated_at=now,
-            )
+            draft.model_copy(update={"fingerprint": self._mail_draft_fingerprint(draft)})
         )
+
+    def _mail_draft_fingerprint(self, draft: OutboundDraft) -> str:
+        return self._fingerprint(
+            {
+                "id": draft.id,
+                "analysis_id": draft.analysis_id,
+                "workflow_id": draft.workflow_id,
+                "provider": draft.provider.value,
+                "thread": draft.provider_thread_id,
+                "recipient": draft.recipient,
+                "subject": draft.subject,
+                "body": draft.body_text,
+                "documents": draft.document_version_ids,
+                "attachment_manifest": (
+                    draft.attachment_manifest.model_dump(mode="json")
+                    if draft.attachment_manifest
+                    else None
+                ),
+                "provider_binding": draft.provider_binding_fingerprint,
+                "category": draft.category.value,
+                "policy": draft.policy.value,
+            }
+        )
+
+    def get_draft(self, draft_id: str) -> OutboundDraft:
+        try:
+            draft = self._require_repository().get_draft(draft_id)
+        except ValueError as error:
+            raise ValueError("The stored mail draft could not be verified") from error
+        if draft is None:
+            raise LookupError("The selected mail draft is unavailable")
+        return draft
 
     def list_drafts(self) -> list[OutboundDraft]:
         return self._require_repository().list_drafts()
@@ -574,26 +611,60 @@ class CommunicationService:
         repository = self._require_repository()
         replay = repository.find_audit_by_idempotency(command.idempotency_key)
         if replay is not None:
-            return replay
-        draft = repository.get_draft(draft_id)
-        if draft is None:
-            raise LookupError(f"Outbound draft {draft_id} was not found")
+            return self._mail_replay(replay, draft_id, command)
+        draft = self.get_draft(draft_id)
         if command.fingerprint != draft.fingerprint:
             raise ValueError("Draft changed after review; refresh and confirm the new fingerprint")
         if draft.provider not in {IntegrationProvider.GMAIL, IntegrationProvider.OUTLOOK}:
             raise ValueError("Draft provider must be Gmail or Outlook")
+        if draft.provider_binding_fingerprint is not None and (
+            draft.provider_binding_fingerprint != self._provider_binding_fingerprint(draft.provider)
+            or draft.fingerprint != self._mail_draft_fingerprint(draft)
+        ):
+            raise ValueError("The reviewed draft or provider account changed; create a new draft")
         audit = self._new_audit(
             kind=MutationKind.SEND_MESSAGE,
             provider=draft.provider,
             resource_id=draft.id,
             command=command,
         )
-        repository.add_audit(audit)
+        audit, claimed = repository.claim_mail_send(audit)
+        if not claimed:
+            return self._mail_replay(audit, draft_id, command)
         try:
-            provider_id = self._message_adapters[draft.provider].send(
-                draft, idempotency_key=command.idempotency_key
+            attachments: tuple[VerifiedMailAttachment, ...] = ()
+            if draft.document_version_ids:
+                if self._attachment_resolver is None or draft.attachment_manifest is None:
+                    reject_mail_attachments(draft.document_version_ids)
+                else:
+                    manifest, attachments = self._attachment_resolver.resolve(
+                        draft.workflow_id, draft.document_version_ids
+                    )
+                    if manifest != draft.attachment_manifest:
+                        raise MailAttachmentError(
+                            "Attachments changed after review; create a new draft"
+                        )
+            if draft.provider_binding_fingerprint is None:
+                raise MailAttachmentError("Legacy mail drafts require a new provider-bound review")
+            validate_mail_bundle(draft, attachments)
+            result = self._message_adapters[draft.provider].send(
+                draft,
+                idempotency_key=command.idempotency_key,
+                attachments=attachments,
             )
-        except (ProviderNotConfiguredError, ProviderMutationError) as error:
+            if not isinstance(result, ProviderMailResult):
+                raise ProviderSendUncertainError()
+        except ProviderSendUncertainError:
+            return repository.add_audit(
+                audit.model_copy(
+                    update={
+                        "status": MutationStatus.UNCERTAIN,
+                        "error_code": "ProviderSendUncertainError",
+                        "occurred_at": datetime.now(UTC),
+                    }
+                )
+            )
+        except (ProviderNotConfiguredError, ProviderMutationError, MailAttachmentError) as error:
             failed = audit.model_copy(
                 update={
                     "status": MutationStatus.FAILED,
@@ -603,14 +674,38 @@ class CommunicationService:
             )
             repository.add_audit(failed)
             raise
-        confirmed = audit.model_copy(
+        except Exception:
+            # A post-reservation unexpected failure cannot prove that no provider effect occurred.
+            return repository.add_audit(
+                audit.model_copy(
+                    update={
+                        "status": MutationStatus.UNCERTAIN,
+                        "error_code": "ProviderSendUncertainError",
+                        "occurred_at": datetime.now(UTC),
+                    }
+                )
+            )
+        accepted = audit.model_copy(
             update={
-                "status": MutationStatus.CONFIRMED,
-                "provider_resource_id": provider_id,
+                "status": MutationStatus.ACCEPTED,
+                "provider_resource_id": result.provider_resource_id,
                 "occurred_at": datetime.now(UTC),
             }
         )
-        return repository.add_audit(confirmed)
+        return repository.add_audit(accepted)
+
+    @staticmethod
+    def _mail_replay(
+        audit: MutationAudit, draft_id: str, command: MutationConfirmation
+    ) -> MutationAudit:
+        if (
+            audit.kind is not MutationKind.SEND_MESSAGE
+            or audit.resource_id != draft_id
+            or audit.fingerprint != command.fingerprint
+            or audit.idempotency_key != command.idempotency_key
+        ):
+            raise ValueError("This draft or idempotency key already has a different send attempt")
+        return audit
 
     def plan_calendar_mutation(self, command: CalendarMutationCreate) -> CalendarMutationPlan:
         repository = self._require_repository()
@@ -654,6 +749,13 @@ class CommunicationService:
         repository = self._require_repository()
         replay = repository.find_audit_by_idempotency(command.idempotency_key)
         if replay is not None:
+            if (
+                replay.kind
+                not in {MutationKind.CREATE_CALENDAR_EVENT, MutationKind.UPDATE_CALENDAR_EVENT}
+                or replay.resource_id != plan_id
+                or replay.fingerprint != command.fingerprint
+            ):
+                raise ValueError("Idempotency key is already bound to a different mutation")
             return replay
         plan = repository.get_calendar_plan(plan_id)
         if plan is None:

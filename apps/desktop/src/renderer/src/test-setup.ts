@@ -155,6 +155,12 @@ const bridge: DesktopBridge = {
     }),
     listSyncedCalendarEvents: async () => [],
     listCommunicationRecords: async () => [],
+    listCommunicationDrafts: async () => [],
+    listCommunicationAudits: async () => [],
+    createCommunicationDraft: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    sendCommunicationDraft: async () => null,
     getDailyCommunicationSummary: async () => ({
       generated_at: new Date(0).toISOString(),
       analyzed_messages: 0,

@@ -659,6 +659,64 @@ export interface ProviderMessageSyncResult {
   cursor_updated_at: string;
 }
 
+export interface MailAttachmentManifest {
+  profile_id: string;
+  attachments: {
+    document_version_id: string;
+    document_id: string;
+    file_name: string;
+    media_type: string;
+    sha256: string;
+    size_bytes: number;
+  }[];
+  policy_version: "mail-attachments-v1";
+}
+
+export interface CommunicationDraftCreate {
+  analysis_id: string;
+  workflow_id?: string | null;
+  provider: "GMAIL" | "OUTLOOK";
+  provider_thread_id: string;
+  recipient: string;
+  subject: string;
+  body_text: string;
+  category: MessageCategory;
+  policy?: "REVIEW_REQUIRED";
+  document_version_ids: string[];
+}
+
+export interface OutboundDraft {
+  id: string;
+  analysis_id: string;
+  workflow_id: string | null;
+  provider: "GMAIL" | "OUTLOOK";
+  provider_thread_id: string;
+  recipient: string;
+  subject: string;
+  body_text: string;
+  category: MessageCategory;
+  policy: "REVIEW_REQUIRED" | "AUTOMATIC";
+  document_version_ids: string[];
+  attachment_manifest: MailAttachmentManifest | null;
+  fingerprint: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommunicationMutationAudit {
+  id: string;
+  kind: "SEND_MESSAGE" | "CREATE_CALENDAR_EVENT" | "UPDATE_CALENDAR_EVENT";
+  provider: IntegrationProvider;
+  resource_id: string;
+  idempotency_key: string;
+  fingerprint: string;
+  status: "PLANNED" | "CONFIRMED" | "FAILED" | "ACCEPTED" | "UNCERTAIN";
+  confirmed_by: string | null;
+  provider_resource_id: string | null;
+  error_code: string | null;
+  occurred_at: string;
+}
+
 export interface CalendarEventSnapshot {
   provider_event_id: string;
   title: string;
@@ -1684,6 +1742,15 @@ export interface DesktopBridge {
     ): Promise<ProviderCalendarSyncResult>;
     listSyncedCalendarEvents(): Promise<SyncedCalendarEvent[]>;
     listCommunicationRecords(): Promise<CommunicationRecord[]>;
+    listCommunicationDrafts(): Promise<OutboundDraft[]>;
+    createCommunicationDraft(
+      input: CommunicationDraftCreate,
+    ): Promise<OutboundDraft>;
+    sendCommunicationDraft(
+      id: string,
+      fingerprint: string,
+    ): Promise<CommunicationMutationAudit | null>;
+    listCommunicationAudits(): Promise<CommunicationMutationAudit[]>;
     getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
     getDesktopNotificationStatus(): Promise<DesktopNotificationStatus>;
     refreshDesktopNotifications(): Promise<DesktopNotificationStatus>;

@@ -70,6 +70,7 @@ import type {
 } from "@job-apply-pro/contracts";
 
 import { MediaCleanupPanel } from "./MediaCleanupPanel";
+import { MailDraftPanel } from "./MailDraftPanel";
 
 const initialStatus: BackendRuntimeStatus = {
   state: "starting",
@@ -3850,6 +3851,11 @@ export function App() {
                 </div>
               )}
             </div>
+            <MailDraftPanel
+              backendReady={status.state === "ready"}
+              records={communications}
+              workflows={workflows}
+            />
           </section>
 
           <section className="panel timeline-panel">

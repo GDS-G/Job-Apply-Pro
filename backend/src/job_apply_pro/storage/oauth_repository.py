@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.communications import IntegrationProvider, OAuthTokenSet
@@ -93,21 +93,7 @@ class OAuthRepository:
             self._session.delete(existing)
             self._session.flush()
             existing = None
-        payload: dict[str, object] = {
-            "access_token": tokens.access_token.get_secret_value(),
-            "refresh_token": (
-                tokens.refresh_token.get_secret_value()
-                if tokens.refresh_token is not None
-                else None
-            ),
-            "token_type": tokens.token_type,
-            "expires_at": tokens.expires_at.isoformat(),
-            "granted_scopes": tokens.granted_scopes,
-            "account_hint": tokens.account_hint,
-        }
-        encrypted = self._cipher.encrypt_json(
-            payload, context=f"oauth-credential:{credential_reference}:tokens"
-        )
+        encrypted = self._encrypt_tokens(credential_reference, tokens)
         if existing is None:
             existing = OAuthCredentialRow(
                 credential_reference=credential_reference,
@@ -126,6 +112,51 @@ class OAuthRepository:
             existing.expires_at = tokens.expires_at
             existing.updated_at = now
         self._session.commit()
+
+    def refresh_tokens_if_current(
+        self,
+        provider: IntegrationProvider,
+        credential_reference: str,
+        tokens: OAuthTokenSet,
+        *,
+        now: datetime,
+    ) -> bool:
+        """Refresh an existing connection only; never recreate or replace a login."""
+        matched = self._session.scalar(
+            update(OAuthCredentialRow)
+            .where(
+                OAuthCredentialRow.provider == provider.value,
+                OAuthCredentialRow.credential_reference == credential_reference,
+            )
+            .values(
+                encrypted_token_set=self._encrypt_tokens(credential_reference, tokens),
+                granted_scopes_json=tokens.granted_scopes,
+                account_hint=tokens.account_hint,
+                expires_at=tokens.expires_at,
+                updated_at=now,
+            )
+            .returning(OAuthCredentialRow.credential_reference)
+            .execution_options(synchronize_session="fetch")
+        )
+        self._session.commit()
+        return matched == credential_reference
+
+    def _encrypt_tokens(self, credential_reference: str, tokens: OAuthTokenSet) -> str:
+        payload: dict[str, object] = {
+            "access_token": tokens.access_token.get_secret_value(),
+            "refresh_token": (
+                tokens.refresh_token.get_secret_value()
+                if tokens.refresh_token is not None
+                else None
+            ),
+            "token_type": tokens.token_type,
+            "expires_at": tokens.expires_at.isoformat(),
+            "granted_scopes": tokens.granted_scopes,
+            "account_hint": tokens.account_hint,
+        }
+        return self._cipher.encrypt_json(
+            payload, context=f"oauth-credential:{credential_reference}:tokens"
+        )
 
     def load_tokens(self, provider: IntegrationProvider) -> tuple[str, OAuthTokenSet] | None:
         row = self._session.scalar(
