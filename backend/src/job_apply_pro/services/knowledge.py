@@ -34,6 +34,7 @@ from job_apply_pro.domain.applications import (
     SubmittedDocumentEvidence,
 )
 from job_apply_pro.domain.candidate import CandidateBackup, ContactDetails
+from job_apply_pro.domain.jobs import JobRequirement
 from job_apply_pro.domain.knowledge import (
     AnswerLibraryCreate,
     AnswerLibraryEntry,
@@ -242,7 +243,10 @@ class CandidateKnowledgeService:
         return self._repository.list_documents(profile_id)
 
     def preview_document_selection(
-        self, command: DocumentSelectionRequest
+        self,
+        command: DocumentSelectionRequest,
+        *,
+        _reviewed_requirements: list[JobRequirement] | None = None,
     ) -> DocumentSelectionPreview:
         application = self._applications.get(command.application_id)
         if application is None:
@@ -251,7 +255,16 @@ class CandidateKnowledgeService:
         if job is None:
             raise LookupError(f"Job {application.job_id} was not found")
         self._profile(application.profile_id)
-        requirements = self._jobs.list_requirements(job.id)
+        if job.source == "greenhouse-public" and _reviewed_requirements is None:
+            raise CandidateKnowledgeConflictError(
+                "Use Reviewed Job Readiness to approve source requirements and "
+                "qualification before selecting a resume"
+            )
+        requirements = (
+            self._jobs.list_requirements(job.id)
+            if _reviewed_requirements is None
+            else _reviewed_requirements
+        )
         preferred_tags = sorted(
             {
                 " ".join(value.casefold().split())

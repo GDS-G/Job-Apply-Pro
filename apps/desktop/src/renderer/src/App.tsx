@@ -72,6 +72,7 @@ import type {
 import { MediaCleanupPanel } from "./MediaCleanupPanel";
 import { MailDraftPanel } from "./MailDraftPanel";
 import { GreenhouseDiscoveryPanel } from "./GreenhouseDiscoveryPanel";
+import { JobReadinessPanel } from "./JobReadinessPanel";
 
 const initialStatus: BackendRuntimeStatus = {
   state: "starting",
@@ -503,7 +504,7 @@ export function App() {
         value: workflows.length,
         detail: "Stored in local SQLite",
       },
-      { label: "Active", value: active, detail: "Supervised mock runs" },
+      { label: "Active", value: active, detail: "Saved local workflows" },
       {
         label: "Claims to review",
         value: proposedClaims,
@@ -1730,7 +1731,8 @@ export function App() {
                     <BriefcaseBusiness size={24} />
                     <strong>No workflows yet</strong>
                     <span>
-                      Create a secure profile, then start a mock application.
+                      Create a secure profile, then import a public job or start
+                      a mock application.
                     </span>
                   </div>
                 ) : (
@@ -1914,6 +1916,14 @@ export function App() {
               setSelectedId(workflow.workflow_id);
               await refreshWorkflows();
             }}
+          />
+
+          <JobReadinessPanel
+            key={`${selected?.application_id ?? "none"}:${selected?.profile_id ?? "none"}`}
+            backendReady={status.state === "ready"}
+            applicationId={selected?.application_id ?? null}
+            profileId={selected?.profile_id ?? null}
+            onChanged={refreshWorkflows}
           />
 
           <section className="panel knowledge-panel">
@@ -2802,6 +2812,11 @@ export function App() {
                   Rank immutable variants against the job, requirements, tags,
                   and your primary preference; selection always requires review
                 </p>
+                <p>
+                  For imported Greenhouse jobs, use Reviewed job readiness above
+                  to review requirements and eligibility before selecting a
+                  resume.
+                </p>
               </div>
               <ListChecks size={18} />
             </div>
@@ -3035,8 +3050,16 @@ export function App() {
                         )}
                       </small>
                     ) : (
-                      <small>No required qualification is unmatched.</small>
+                      <small>
+                        No missing requirements are reported by this document
+                        preview. Requirements may be absent or unreviewed;
+                        eligibility is not established.
+                      </small>
                     )}
+                    <small>
+                      For imported Greenhouse jobs, use Reviewed job readiness
+                      to review qualification against the saved source.
+                    </small>
                     <div aria-label="Exact generated document preview">
                       {tailoredDocument.preview.sections.map(
                         (section, sectionIndex) => (

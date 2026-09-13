@@ -9,6 +9,7 @@ from job_apply_pro.api.routes import (
     dashboard,
     health,
     job_discovery,
+    job_readiness,
     knowledge,
     operations,
     portals,
@@ -23,6 +24,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(workflows.router)
 api_router.include_router(core.router)
 api_router.include_router(job_discovery.router)
+api_router.include_router(job_readiness.router)
 api_router.include_router(runtime.router)
 api_router.include_router(workbench.router)
 api_router.include_router(browser.router)

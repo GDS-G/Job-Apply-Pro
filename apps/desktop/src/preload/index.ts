@@ -25,6 +25,11 @@ import type {
   SupervisedPortalRunCreate,
   TailoredDocumentRequest,
   WorkflowControlAction,
+  RequirementsRequest,
+  QualificationRequest,
+  ReadinessRequirementsApprovalInput,
+  ReadinessQualificationApprovalInput,
+  ReadinessResumeApprovalInput,
 } from "@job-apply-pro/contracts";
 
 contextBridge.exposeInMainWorld("jobApplyPro", {
@@ -37,6 +42,20 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
   workbench: {
     getStatus: () => ipcRenderer.invoke("workbench:get-status"),
     listWorkflows: () => ipcRenderer.invoke("workbench:list-workflows"),
+    getJobReadiness: (applicationId: string) =>
+      ipcRenderer.invoke("job-readiness:get", applicationId),
+    previewJobRequirements: (input: RequirementsRequest) =>
+      ipcRenderer.invoke("job-readiness:requirements-preview", input),
+    approveJobRequirements: (input: ReadinessRequirementsApprovalInput) =>
+      ipcRenderer.invoke("job-readiness:requirements-approve", input),
+    previewJobQualification: (input: QualificationRequest) =>
+      ipcRenderer.invoke("job-readiness:qualification-preview", input),
+    approveJobQualification: (input: ReadinessQualificationApprovalInput) =>
+      ipcRenderer.invoke("job-readiness:qualification-approve", input),
+    previewJobResume: (input: DocumentSelectionRequest) =>
+      ipcRenderer.invoke("job-readiness:resume-preview", input),
+    approveJobResume: (input: ReadinessResumeApprovalInput) =>
+      ipcRenderer.invoke("job-readiness:resume-approve", input),
     listGreenhouseJobs: (input: GreenhouseJobListInput) =>
       ipcRenderer.invoke("discovery:greenhouse-list", input),
     reviewGreenhouseJob: (input: GreenhouseJobReviewInput) =>

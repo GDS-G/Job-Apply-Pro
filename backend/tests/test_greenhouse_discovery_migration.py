@@ -29,7 +29,7 @@ def test_snapshot_migration_round_trip_preserves_existing_jobs(
                 {"digest": "a" * 64},
             )
         for _ in range(2):
-            command.upgrade(config, "head")
+            command.upgrade(config, "20260913_0025")
         inspector = inspect(engine)
         assert "job_discovery_snapshots" in inspector.get_table_names()
         assert inspector.get_pk_constraint("job_discovery_snapshots")["constrained_columns"] == [
@@ -48,7 +48,7 @@ def test_snapshot_migration_round_trip_preserves_existing_jobs(
                 connection.scalar(text("SELECT title FROM jobs WHERE id='existing-job'"))
                 == "Existing job"
             )
-        command.upgrade(config, "head")
+        command.upgrade(config, "20260913_0025")
     finally:
         engine.dispose()
         get_settings.cache_clear()
