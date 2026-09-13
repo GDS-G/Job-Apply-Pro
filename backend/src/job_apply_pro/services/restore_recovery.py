@@ -1,4 +1,4 @@
-"""Authenticated completion admission, intentionally without rollback/resume."""
+"""Authenticated legacy completion and v2 interrupted-restore rollback entrypoints."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ import json
 import os
 import stat
 import zipfile
-from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
@@ -24,7 +22,6 @@ from job_apply_pro.domain.operations import (
 )
 from job_apply_pro.restore_admission import (
     assert_no_sqlite_sidecars,
-    assert_restore_source_closed,
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.storage.restore_gate_repository import (
@@ -32,11 +29,9 @@ from job_apply_pro.storage.restore_gate_repository import (
     RestoreAdmissionError,
     RestoreGateRepository,
     checked_path,
-    owns_restore,
     safe_relative,
     sync_directory,
     workspace_access,
-    write_exclusive,
 )
 
 MAX_RESTORE_FILES = 4096
@@ -283,76 +278,45 @@ class RestoreRecoveryService:
             inputs=inputs,
         )
 
-    def apply(self, intent: Intent, commit_result: Callable[[RestorePlan], None]) -> RestorePlan:
-        root = self.gate.root
-        if not owns_restore(root):
-            raise RestoreAdmissionError("Offline restore requires exclusive workspace ownership")
-        self.gate.assert_clear()
-        database = checked_path(root / safe_relative(intent.database), root=root)
-        # Do not open SQLite at all while unknown journal sidecars exist. A
-        # read-only SQLite connection is not an authorization to discard them.
-        assert_no_sqlite_sidecars(database)
-        hash_file(database)
-        if BackupCategory.DATABASE in intent.plan.categories:
-            from job_apply_pro.services.backup import BackupService
+    def apply(self, intent: Intent) -> RestorePlan:
+        from job_apply_pro.services.restore_rollback import RestoreRollback
 
-            BackupService._require_resolved_media_cleanup(database)
-            staged_database = checked_path(
-                root / safe_relative(intent.staged) / "database" / "job_apply_pro.db", root=root
-            )
-            assert_restore_source_closed(staged_database)
-            # Local admission does not replace durable external-effect evidence.
-            # A snapshot must preserve every current immutable mail attempt/claim.
-            BackupService._require_preserved_mail_attempts(database, staged_database)
-        operation_id = self.gate.begin(intent.model_dump(mode="json"), self.cipher)
-        if BackupCategory.DATABASE in intent.plan.categories:
-            # Unique encrypted DB preimage; never overwrite/delete a prior recovery copy.
-            preimage = self.cipher.encrypt_bytes(
-                database.read_bytes(), context=f"restore:v1:{operation_id}:database-preimage"
-            )
-            write_exclusive(
-                self.gate.operation_path(operation_id) / "database-preimage.enc",
-                preimage.encode("ascii"),
-            )
-        for source in intent.inputs:
-            target = self._destination(intent, source)
-            self._replace(
-                root / safe_relative(intent.staged) / safe_relative(source.path),
-                target,
-                source,
-                operation_id,
-            )
-        applied = intent.plan.model_copy(
-            update={"status": RestoreStatus.APPLIED, "applied_at": datetime.now(UTC)}
-        )
-        commit_result(applied)
-        targets = []
-        for source in intent.inputs:
-            target = self._destination(intent, source)
-            digest, size = hash_file(target)
-            if source.path != "database/job_apply_pro.db" and (
-                digest != source.sha256 or size != source.size
-            ):
+        return RestoreRollback(self).apply(intent)
+
+    def inspect(self, operation_id: str) -> dict[str, object]:
+        from job_apply_pro.services.restore_rollback import RestoreRollback
+
+        if self.gate.has_v2_record(operation_id, "intent"):
+            return RestoreRollback(self).inspect(operation_id)
+        # v1 did not retain complete document before-images. Never infer a
+        # reversible operation from missing progress or a database preimage alone.
+        with workspace_access(self.gate.root, restore=True):
+            if self.gate.active_id() != operation_id:
                 raise RestoreAdmissionError(RECOVERY_MESSAGE)
-            if source.path == "database/job_apply_pro.db":
-                assert_no_sqlite_sidecars(target)
-            targets.append(
-                Target(path=target.relative_to(root).as_posix(), sha256=digest, size=size)
+            Intent.model_validate(self.gate.read_record(operation_id, "intent", self.cipher))
+            return {
+                "operation_id": operation_id,
+                "version": 1,
+                "state": "LEGACY_COMPLETION_OR_MANUAL_RECOVERY",
+                "rollback_supported": False,
+                "review_fingerprint": None,
+            }
+
+    def rollback(self, operation_id: str, review_fingerprint: str) -> None:
+        from job_apply_pro.services.restore_rollback import RestoreRollback
+
+        if not self.gate.has_v2_record(operation_id, "intent"):
+            raise RestoreAdmissionError(
+                "Legacy restore requires verified completion or manual recovery"
             )
-        # Even document-only restores update their manifest/plan in this database.
-        # Completion therefore always proves the committed database bytes too.
-        if BackupCategory.DATABASE not in intent.plan.categories:
-            assert_no_sqlite_sidecars(database)
-            digest, size = hash_file(database)
-            targets.append(Target(path=intent.database, sha256=digest, size=size))
-        receipt = Receipt(intent_sha256=_intent_hash(intent), targets=targets)
-        self.gate.write_record(
-            operation_id, "receipt", receipt.model_dump(mode="json"), self.cipher
-        )
-        self.finalize(operation_id)
-        return applied
+        RestoreRollback(self).rollback(operation_id, review_fingerprint)
 
     def finalize(self, operation_id: str) -> None:
+        if self.gate.has_v2_record(operation_id, "intent"):
+            from job_apply_pro.services.restore_rollback import RestoreRollback
+
+            RestoreRollback(self).finalize(operation_id)
+            return
         with workspace_access(self.gate.root, restore=True):
             if self.gate.active_id() != operation_id:
                 raise RestoreAdmissionError(RECOVERY_MESSAGE)

@@ -277,13 +277,7 @@ class BackupService:
                 backups=self._backup_dir,
             )
 
-            def commit_result(applied: RestorePlan) -> None:
-                try:
-                    self._repository.save_restore_result(manifest, applied)
-                finally:
-                    self._repository.close_for_offline_restore()
-
-            return recovery.apply(intent, commit_result)
+            return recovery.apply(intent)
         except (OSError, ValueError, RestoreAdmissionError):
             raise BackupError(
                 "Restore files are missing, changed or require recovery; "

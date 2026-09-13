@@ -200,14 +200,6 @@ class _Restore:
         )
         recovery = RestoreRecoveryService(root, self.cipher)
 
-        def commit_result(applied: RestorePlan) -> None:
-            result_engine = create_engine(f"sqlite:///{self.current.as_posix()}")
-            try:
-                with Session(result_engine) as session:
-                    OperationsRepository(session).save_restore_result(manifest, applied)
-            finally:
-                result_engine.dispose()
-
         with workspace_access(root, restore=True):
             intent = recovery.prepare(
                 plan,
@@ -217,7 +209,7 @@ class _Restore:
                 staging=Path(plan.staged_path).parent,
                 backups=root / "backups",
             )
-            recovery.apply(intent, commit_result)
+            recovery.apply(intent)
 
     def assert_applied(self, original: bytes | None = None) -> None:
         gate = RestoreGateRepository(self.current.parent)
@@ -248,12 +240,21 @@ class _Restore:
                     )
             assert current.execute("SELECT status FROM restore_plans").fetchone() == ("APPLIED",)
         if original is not None:
-            preimages = list((gate.control / "operations").glob("*/database-preimage.enc"))
-            assert len(preimages) == 1
+            from job_apply_pro.services.restore_rollback import PreparedRestore
+
+            intents = list((gate.control / "operations").glob("*/intent.v2.enc"))
+            assert len(intents) == 1
+            operation_id = intents[0].parent.name
+            prepared = PreparedRestore.model_validate(
+                gate.read_v2_record(operation_id, "intent", self.cipher)
+            )
+            before = prepared.targets[-1].before
+            assert before
+            preimage = intents[0].parent / "objects" / before.name
             assert (
                 self.cipher.decrypt_bytes(
-                    preimages[0].read_text("ascii"),
-                    context=f"restore:v1:{preimages[0].parent.name}:database-preimage",
+                    preimage.read_text("ascii"),
+                    context=f"restore:v2:{operation_id}:object:{before.name}",
                 )
                 == original
             )
@@ -584,7 +585,7 @@ def test_real_encrypted_backup_before_send_preserves_current_attempt(
             backups=tmp_path / "backups",
         )
         with pytest.raises(BackupError, match="recorded mail send attempts"):
-            recovery.apply(intent, lambda _plan: pytest.fail("Refusal must precede commit"))
+            recovery.apply(intent)
     assert database.read_bytes() == before
     assert not database.with_suffix(".db.pre-restore").exists()
     assert not recovery.gate.blocked()

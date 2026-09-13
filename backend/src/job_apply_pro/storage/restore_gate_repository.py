@@ -93,6 +93,49 @@ def write_exclusive(path: Path, data: bytes) -> None:
     sync_directory(path.parent)
 
 
+def atomic_write_exclusive(path: Path, data: bytes) -> None:
+    """Publish complete bytes under the cooperative exclusive workspace lease.
+
+    Failed or interrupted pending siblings are retained as recovery evidence.
+    This does not add handle-pinned protection against non-cooperating path races.
+    """
+    root = _restore_owner.get()
+    if root is None:
+        raise RestoreAdmissionError("An exclusive restore workspace lease is required")
+    _require_restore_lease(root)
+    try:
+        final = checked_path(path, root=root)
+        if not stat.S_ISDIR(final.parent.lstat().st_mode):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        try:
+            final.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise RestoreAdmissionError("A published restore object already exists")
+        pending = checked_path(final.with_name(f".{final.name}.{uuid4()}.pending"), root=root)
+        with pending.open("xb") as stream:
+            if stream.write(data) != len(data):
+                raise RestoreAdmissionError("Restore object could not be written completely")
+            stream.flush()
+            os.fsync(stream.fileno())
+        _require_restore_lease(root)
+        checked_path(pending, root=root)
+        checked_path(final, root=root)
+        try:
+            final.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise RestoreAdmissionError("A published restore object already exists")
+        # The lease excludes cooperative writers between the final existence
+        # check and rename. Windows rename also refuses an existing destination.
+        pending.rename(final)
+        sync_directory(final.parent)
+    except OSError:
+        raise RestoreAdmissionError("Restore object could not be published safely") from None
+
+
 class RestoreGateRepository:
     def __init__(self, workspace_root: Path) -> None:
         self.root = checked_path(workspace_root)
@@ -167,6 +210,80 @@ class RestoreGateRepository:
         write_exclusive(self.guard, operation_id.encode("ascii"))
         return operation_id
 
+    def allocate_operation(self) -> str:
+        _require_restore_lease(self.root)
+        self.assert_clear()
+        operation_id = str(uuid4())
+        directory = self.operation_path(operation_id)
+        try:
+            directory.parent.mkdir(parents=True, exist_ok=True)
+            sync_directory(directory.parent.parent)
+            checked_path(directory, root=self.root)
+            directory.mkdir(exist_ok=False)
+            sync_directory(directory.parent)
+        except OSError:
+            raise RestoreAdmissionError("Restore operation could not be allocated safely") from None
+        return operation_id
+
+    def activate_prepared(self, operation_id: str) -> None:
+        _require_restore_lease(self.root)
+        self.assert_clear()
+        if not self.has_v2_record(operation_id, "intent"):
+            raise RestoreAdmissionError("A prepared v2 restore intent is required")
+        # Presence publishes a fail-closed gate, never proof of authenticated
+        # completion. The service authenticates the intent before target writes.
+        atomic_write_exclusive(self.guard, operation_id.encode("ascii"))
+
+    def _v2_record_path(self, operation_id: str, kind: str) -> Path:
+        if not isinstance(kind, str) or kind not in {"intent", "decision", "receipt"}:
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        try:
+            return checked_path(
+                self.operation_path(operation_id) / f"{kind}.v2.enc", root=self.root
+            )
+        except (ValueError, TypeError, AttributeError):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE) from None
+
+    def has_v2_record(self, operation_id: str, kind: str) -> bool:
+        path = self._v2_record_path(operation_id, kind)
+        try:
+            path.lstat()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            raise RestoreAdmissionError(RECOVERY_MESSAGE) from None
+
+    def read_v2_record(
+        self, operation_id: str, kind: str, cipher: SensitiveDataCipher
+    ) -> dict[str, object]:
+        path = self._v2_record_path(operation_id, kind)
+        try:
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            with path.open("rb") as stream:
+                encoded = stream.read(MAX_RECORD_BYTES + 1)
+            if len(encoded) > MAX_RECORD_BYTES:
+                raise ValueError
+            return cipher.decrypt_json(
+                encoded.decode("ascii"), context=f"restore:v2:{operation_id}:{kind}"
+            )
+        except (OSError, ValueError, UnicodeError):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE) from None
+
+    def write_v2_record(
+        self, operation_id: str, kind: str, value: dict[str, object], cipher: SensitiveDataCipher
+    ) -> None:
+        _require_restore_lease(self.root)
+        path = self._v2_record_path(operation_id, kind)
+        encoded = cipher.encrypt_json(value, context=f"restore:v2:{operation_id}:{kind}").encode(
+            "ascii"
+        )
+        if len(encoded) > MAX_RECORD_BYTES:
+            raise RestoreAdmissionError("Restore metadata exceeds the supported bound")
+        atomic_write_exclusive(path, encoded)
+
     def finish_verified(self, operation_id: str) -> None:
         # Called only after authenticated receipt and all targets have been rechecked.
         if self.active_id() != operation_id:
@@ -182,6 +299,13 @@ _restore_owner: ContextVar[Path | None] = ContextVar("restore_owner", default=No
 
 def owns_restore(root: Path) -> bool:
     return _restore_owner.get() == root
+
+
+def _require_restore_lease(root: Path) -> None:
+    with _mutex:
+        lease = _leases.get(root)
+        if not owns_restore(root) or lease is None or lease[1] != "restore":
+            raise RestoreAdmissionError("An exclusive restore workspace lease is required")
 
 
 @contextmanager

@@ -5,6 +5,10 @@ import json
 import os
 import sys
 from pathlib import Path, PureWindowsPath
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from job_apply_pro.services.restore_recovery import RestoreRecoveryService
 
 
 def _resource_path(name: str) -> Path:
@@ -107,7 +111,6 @@ def _restore_owned(plan_id: str, fingerprint: str, root: Path) -> None:
     settings = get_settings()
     database = closed_restore_database_path(settings.database_url)
 
-    from job_apply_pro.domain.operations import RestorePlan
     from job_apply_pro.security.encryption import SensitiveDataCipher
     from job_apply_pro.security.keys import EnvironmentKeyProvider
     from job_apply_pro.services.restore_recovery import RestoreRecoveryService
@@ -135,14 +138,7 @@ def _restore_owned(plan_id: str, fingerprint: str, root: Path) -> None:
         backups=settings.backup_data_dir,
     )
 
-    def commit_result(applied: RestorePlan) -> None:
-        try:
-            with SessionFactory() as session:
-                OperationsRepository(session).save_restore_result(manifest, applied)
-        finally:
-            engine.dispose()
-
-    recovery.apply(intent, commit_result)
+    recovery.apply(intent)
 
 
 def restore_status() -> bool:
@@ -164,7 +160,8 @@ def restore_status() -> bool:
     return blocked
 
 
-def restore_finalize(operation_id: str) -> None:
+def _restore_recovery_service() -> RestoreRecoveryService:
+    """Load only recovery metadata support, never a database or a replacement key."""
     from job_apply_pro.config import get_settings
     from job_apply_pro.restore_admission import workspace_roots
     from job_apply_pro.security.encryption import SensitiveDataCipher
@@ -175,9 +172,22 @@ def restore_finalize(operation_id: str) -> None:
     roots = workspace_roots(get_settings())
     if len(roots) != 1:
         raise RestoreAdmissionError("Recovery requires the original app-owned workspace layout")
-    RestoreRecoveryService(roots[0], SensitiveDataCipher(EnvironmentKeyProvider())).finalize(
-        operation_id
-    )
+    return RestoreRecoveryService(roots[0], SensitiveDataCipher(EnvironmentKeyProvider()))
+
+
+def restore_finalize(operation_id: str) -> None:
+    _restore_recovery_service().finalize(operation_id)
+
+
+def restore_inspect(operation_id: str) -> None:
+    inspection = _restore_recovery_service().inspect(operation_id)
+    if sys.stdout is not None:
+        print(json.dumps(inspection))
+
+
+def restore_rollback(operation_id: str, fingerprint: str) -> None:
+    # The service returns only after authenticating and verifying a terminal rollback.
+    _restore_recovery_service().rollback(operation_id, fingerprint)
 
 
 def main() -> None:
@@ -190,6 +200,8 @@ def main() -> None:
             "restore",
             "restore-status",
             "restore-finalize",
+            "restore-inspect",
+            "restore-rollback",
             "browser-worker",
         ),
     )
@@ -197,6 +209,19 @@ def main() -> None:
     parser.add_argument("--fingerprint")
     parser.add_argument("--operation-id")
     arguments = parser.parse_args()
+    recovery_arguments = {
+        "restore-status": set(),
+        "restore-finalize": {"operation_id"},
+        "restore-inspect": {"operation_id"},
+        "restore-rollback": {"operation_id", "fingerprint"},
+    }
+    if arguments.command in recovery_arguments:
+        for name in ("plan_id", "fingerprint", "operation_id"):
+            if (
+                getattr(arguments, name) is not None
+                and name not in recovery_arguments[arguments.command]
+            ):
+                parser.error(f"{arguments.command} does not accept --{name.replace('_', '-')}")
     if arguments.command == "browser-worker":
         if arguments.plan_id or arguments.fingerprint or arguments.operation_id:
             parser.error("browser-worker does not accept restore arguments")
@@ -218,6 +243,14 @@ def main() -> None:
         if not arguments.operation_id:
             parser.error("restore-finalize requires --operation-id")
         restore_finalize(arguments.operation_id)
+    elif arguments.command == "restore-inspect":
+        if not arguments.operation_id:
+            parser.error("restore-inspect requires --operation-id")
+        restore_inspect(arguments.operation_id)
+    elif arguments.command == "restore-rollback":
+        if not arguments.operation_id or not arguments.fingerprint:
+            parser.error("restore-rollback requires --operation-id and --fingerprint")
+        restore_rollback(arguments.operation_id, arguments.fingerprint)
     elif arguments.command == "migrate":
         migrate()
     elif arguments.command == "serve":
