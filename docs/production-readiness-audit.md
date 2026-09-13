@@ -4,7 +4,13 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Verified Mail Attachments `v0.55.0-alpha.1`**. Exact-version local integration and unsigned-package evidence are recorded below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities, Gemini processing budgets and durable crash/relaunch restore recovery. Signing and live acceptance alone cannot complete those features. No signed v0.55 release or live-provider acceptance has been established.
+The active source milestone is **Durable Restore Admission `v0.56.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. First-party source work remains in named-portal end-to-end adapters, broader mail/reply capabilities, Gemini processing budgets and deterministic restore rollback/resume. Signing and live acceptance alone cannot complete those features. No signed v0.56 release or live-provider acceptance has been established.
+
+### Durable Restore Admission integration checkpoint
+
+Integrated source checkpoint `dd539d5169d51ad6d1fe6a42d809cc2ca5ee0355`, before the v0.56 version bump and subsequent smoke-helper hardening, passes 642 backend tests at 84.95% coverage, 231 default desktop tests with the opt-in packaged test skipped, explicit strict mypy across 154 files, Ruff lint/format across 180 files, TypeScript and production build. This is not yet exact-version v0.56 packaged acceptance. Final validation must follow the version bump and helper changes.
+
+ADR-0066 adds persistent restore admission outside SQLite, exclusive workspace ownership, authenticated intent/receipt records, fresh encrypted database preimages, exact archive/staged-byte validation, single-transaction bookkeeping and missing-key preservation. Independent review reproduced early hot-journal recovery before an invalid plan lookup; the fix checks closed existing storage before restore-specific database imports or reads. A staged-sidecar check prevents preserving send history only in a WAL that replacement would omit. The 4,097-target receipt accommodates 4,096 document inputs plus the changed bookkeeping database. Automated barriers and finalization tests do not establish arbitrary power-loss survival, handle-pinned containment, whole-process-tree ownership or deterministic rollback/resume.
 
 ### Strict type-check evidence correction
 
@@ -25,7 +31,7 @@ Runtime/helper checkpoint `ca3e41f4f675091685f15cbbacd5302e4a023818` produced th
 - Bundled backend executable: 18601653 bytes; SHA-256 `A444D2157BD5D9BAA599D665574E245471329905DF5EB5ABA52256DDE4B9427D`.
 - Bundled browser-worker executable: 18605749 bytes; SHA-256 `10F3C5ED8ADAAB8FC7A060ED0F29A0177F98FA6E069125734F96495A126B6D5F`.
 
-Backend and worker hashes match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before creating publication metadata. Protected v0.55 PR checks remain required. No tag, signed publication, live mail/provider acceptance, verified reply threading/delivery, durable crash/relaunch restore recovery or physical failure-injection acceptance is claimed.
+Backend and worker hashes match their backend-dist originals. All four artifacts report `NotSigned`; the release-metadata gate rejects the unsigned desktop before creating publication metadata. [PR #88](https://github.com/GDS-G/Job-Apply-Pro/pull/88) passed [Windows CI](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34728604169) and [Security](https://github.com/GDS-G/Job-Apply-Pro/actions/runs/34728604158) at head `5a582e6e9f307e7173ed1536cdd49c179e336223`, then merged as `df608de7f198ad6278006068b846701eeb9892da` with an identical tree. Post-merge main CI `34729164550` and Security `34729164541` are in progress. No tag, signed publication, live mail/provider acceptance, verified reply threading/delivery, durable crash/relaunch restore recovery or physical failure-injection acceptance is claimed for v0.55.
 
 ### Bounded Backend Lifecycle validation
 
