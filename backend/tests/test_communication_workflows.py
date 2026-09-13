@@ -15,6 +15,7 @@ from job_apply_pro.domain.communications import (
     DraftCreate,
     FollowUpCreate,
     IntegrationProvider,
+    MailMode,
     MessageCategory,
     MutationConfirmation,
     MutationStatus,
@@ -70,7 +71,15 @@ def _service(
         repository,
         message_adapters=message_adapters,
         calendar_adapters=calendar_adapters,
-        provider_configs=provider_configs,
+        provider_configs=provider_configs
+        or {
+            IntegrationProvider.GMAIL: ProviderConnectionConfig(
+                provider=IntegrationProvider.GMAIL,
+                credential_reference="fixture-epoch",
+                account_hint="candidate@example.test",
+            )
+        },
+        provider_account_identities={IntegrationProvider.GMAIL: "fixture-account"},
     )
 
 
@@ -262,6 +271,13 @@ def test_provider_sync_cursor_advances_only_after_import_and_is_account_bound(
         == "INITIAL"
     )
     second_binding = hashlib.sha256(b"GMAIL\0oauth:gmail:second\0").hexdigest()
+    second_binding = second_service._fingerprint(
+        {
+            "connection": second_binding,
+            "account": second_service._fingerprint({"unverified_connection": second_binding}),
+            "source_version": 1,
+        }
+    )
     current_state = repository.get_sync_state(IntegrationProvider.GMAIL, second_binding)
     assert current_state is not None
     stale_result = repository.save_sync_state(
@@ -436,8 +452,8 @@ def test_fingerprinted_send_is_audited_and_idempotent(session: Session) -> None:
     draft = service.create_draft(
         DraftCreate(
             analysis_id=record.id,
+            mode=MailMode.NEW_MESSAGE,
             provider=IntegrationProvider.GMAIL,
-            provider_thread_id="gmail-thread-1",
             recipient="recruiter@example.test",
             subject="Re: Interview availability",
             body_text="Thank you. I am available Thursday at 10:00 UTC.",
@@ -463,8 +479,8 @@ def test_disabled_send_fails_closed_and_keeps_failed_audit(session: Session) -> 
     draft = service.create_draft(
         DraftCreate(
             analysis_id=record.id,
+            mode=MailMode.NEW_MESSAGE,
             provider=IntegrationProvider.GMAIL,
-            provider_thread_id="gmail-thread-1",
             recipient="recruiter@example.test",
             subject="Re: Interview",
             body_text="Thank you for reaching out.",

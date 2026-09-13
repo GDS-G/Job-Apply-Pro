@@ -10,6 +10,7 @@ from job_apply_pro.config import get_settings
 from job_apply_pro.domain.communications import (
     DraftCreate,
     IntegrationProvider,
+    MailMode,
     MessageCategory,
     MutationConfirmation,
     MutationStatus,
@@ -21,6 +22,7 @@ from job_apply_pro.integrations.communications import (
     FixtureMessageProvider,
     UnsupportedMailAttachmentsError,
 )
+from job_apply_pro.integrations.configuration import ProviderConnectionConfig
 from job_apply_pro.integrations.provider_clients import (
     GmailMessageProvider,
     OutlookMessageProvider,
@@ -41,8 +43,8 @@ def _command(
 ) -> DraftCreate:
     return DraftCreate(
         analysis_id=analysis_id,
+        mode=MailMode.NEW_MESSAGE,
         provider=provider,
-        provider_thread_id="thread-1",
         recipient="recruiter@example.test",
         subject="Reviewed response",
         body_text="Thank you for the invitation.",
@@ -54,7 +56,8 @@ def _command(
 def _legacy_draft(command: DraftCreate) -> OutboundDraft:
     return OutboundDraft(
         id="legacy-draft-1",
-        **command.model_dump(),
+        **command.model_dump(exclude={"mode"}),
+        provider_thread_id="",
         fingerprint="a" * 64,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -74,7 +77,18 @@ def _service(
 ) -> tuple[CommunicationService, CommunicationRepository, FixtureMessageProvider, str]:
     repository = CommunicationRepository(session, SensitiveDataCipher(StaticKeyProvider(b"a" * 32)))
     adapter = FixtureMessageProvider(provider)
-    service = CommunicationService(repository, message_adapters={provider: adapter})
+    service = CommunicationService(
+        repository,
+        message_adapters={provider: adapter},
+        provider_configs={
+            provider: ProviderConnectionConfig(
+                provider=provider,
+                credential_reference="fixture-epoch",
+                account_hint="candidate@example.test",
+            )
+        },
+        provider_account_identities={provider: "fixture-account"},
+    )
     record = service.analyze_and_save(
         NormalizedMessage(
             provider=provider,
@@ -102,27 +116,23 @@ def test_attachment_draft_rejected_before_repository_or_document_lookup(
 
 
 @pytest.mark.parametrize("provider", [IntegrationProvider.GMAIL, IntegrationProvider.OUTLOOK])
-def test_legacy_attachment_draft_fails_before_adapter_and_keeps_idempotent_failed_audit(
+def test_legacy_attachment_draft_requires_fresh_account_review_before_claim_or_adapter(
     session: Session, provider: IntegrationProvider
 ) -> None:
     service, repository, adapter, analysis_id = _service(session, provider)
     draft = repository.save_draft(_legacy_draft(_command(provider, analysis_id=analysis_id)))
     confirmation = _confirmation(draft)
 
-    with pytest.raises(UnsupportedMailAttachmentsError) as error:
+    with pytest.raises(ValueError, match="fresh account-bound draft"):
         service.send_draft(draft.id, confirmation)
 
-    assert str(error.value) == ERROR
     assert adapter.sent == []
     audits = service.list_audits()
-    assert len(audits) == 1
-    assert audits[0].status is MutationStatus.FAILED
-    assert audits[0].error_code == "UnsupportedMailAttachmentsError"
-    assert audits[0].provider_resource_id is None
-    assert PRIVATE_VERSION not in audits[0].model_dump_json()
-    assert service.send_draft(draft.id, confirmation) == audits[0]
+    assert audits == []
+    with pytest.raises(ValueError, match="fresh account-bound draft"):
+        service.send_draft(draft.id, confirmation)
     assert adapter.sent == []
-    assert len(service.list_audits()) == 1
+    assert service.list_audits() == []
 
 
 def test_stale_approval_remains_rejected_before_attachment_audit(session: Session) -> None:
@@ -216,7 +226,7 @@ def test_api_rejects_new_and_legacy_attachment_drafts_without_private_details(
         with TestClient(app) as client:
             created = client.post(
                 "/api/v1/communications/drafts",
-                json=command.model_dump(mode="json"),
+                json=command.model_dump(mode="json", exclude_none=True),
                 headers=headers,
             )
             assert created.status_code == 422
@@ -229,9 +239,11 @@ def test_api_rejects_new_and_legacy_attachment_drafts_without_private_details(
                 headers=headers,
             )
             assert sent.status_code == 409
-            assert sent.json() == {"detail": ERROR}
+            assert sent.json() == {
+                "detail": "An unbound or legacy mail preview requires a fresh account-bound draft"
+            }
             assert PRIVATE_VERSION not in sent.text
-            assert service.list_audits()[0].status is MutationStatus.FAILED
+            assert service.list_audits() == []
             assert adapter.sent == []
     finally:
         app.dependency_overrides.clear()

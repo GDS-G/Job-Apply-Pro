@@ -372,6 +372,7 @@ if __name__ == "__main__":
 
 $process = $null
 $apiWorkerProcess = $null
+$primarySmokeFailure = $null
 try {
     Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")
     # Migration need not initialize runtime document storage. This directory is
@@ -389,6 +390,24 @@ try {
     if (@($cleanup.items).Count -ne 0) { throw "Fresh packaged cleanup journal is not empty" }
     $cleanupRetry = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/ai/media-cleanup/retry" -Headers $headers -TimeoutSec 5
     if (@($cleanupRetry.items).Count -ne 0) { throw "Empty packaged cleanup retry changed state" }
+    # Discovery is present in the frozen router, but all these requests stop
+    # before public transport: invalid tokens/IDs or a nonexistent local profile.
+    $discoveryCases = @(
+        @{ path = "list"; body = @{ board_token = "internal" }; status = 422; detail = "Request validation failed; check required fields and supported values" },
+        @{ path = "review"; body = @{ board_token = "package-smoke-no-network"; posting_id = "0" }; status = 422; detail = "Request validation failed; check required fields and supported values" },
+        @{ path = "import"; body = @{ board_token = "package-smoke-no-network"; posting_id = "1"; review_fingerprint = ("a" * 64); profile_id = "package-smoke-missing-profile" }; status = 409; detail = "Local import conflicted; select an existing profile and refresh" }
+    )
+    foreach ($discoveryCase in $discoveryCases) {
+        try {
+            Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/discovery/greenhouse/$($discoveryCase.path)" -Headers $headers -ContentType "application/json" -Body ($discoveryCase.body | ConvertTo-Json) -TimeoutSec 5 | Out-Null
+            throw "Packaged invalid discovery request unexpectedly succeeded"
+        }
+        catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne $discoveryCase.status) { throw }
+            $discoveryError = $_.ErrorDetails.Message | ConvertFrom-Json
+            if ($discoveryError.detail -ne $discoveryCase.detail) { throw "Packaged discovery admission returned an unexpected error" }
+        }
+    }
     # Synthetic pixels only. The deliberately unknown prompt stops before any
     # route/provider work, but only after successful packaged image decoding.
     $mediaCases = @(
@@ -427,6 +446,30 @@ try {
     }
     & $PythonPath (Join-Path $PSScriptRoot "test_packaged_mail.py") --api-url $apiRoot
     if ($LASTEXITCODE -ne 0) { throw "Packaged verified mail attachment smoke failed" }
+    $originalMailDrafts = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($originalMailDrafts.Count -ne 2) { throw "Packaged offline mail previews are incomplete" }
+    # Verify the frozen readiness routes without fetching a real board or
+    # manufacturing a trusted public source. Simulator jobs cannot qualify.
+    $readinessWorkflow = $originalMailDrafts[0].workflow_id
+    if ($readinessWorkflow -notmatch '^mock-[a-f0-9-]{36}$' -or $originalMailDrafts[1].workflow_id -ne $readinessWorkflow) { throw "Packaged mail workflow identity changed" }
+    $syntheticWorkflow = Invoke-RestMethod -Uri "$apiRoot/api/v1/workbench/workflows/$readinessWorkflow" -Headers $headers -TimeoutSec 5
+    $readinessApplication = $syntheticWorkflow.application_id
+    if ($readinessApplication -notmatch '^[a-zA-Z0-9_-]{1,100}$') { throw "Packaged readiness application identity is invalid" }
+    $readinessUrl = "$apiRoot/api/v1/applications/$readinessApplication/job-review"
+    $originalReadiness = Invoke-RestMethod -Uri $readinessUrl -Headers $headers -TimeoutSec 5
+    if ($originalReadiness.supported -ne $false -or $originalReadiness.status -ne "UNSUPPORTED" -or @($originalReadiness.allowed_actions).Count -ne 0 -or $null -ne $originalReadiness.source) {
+        throw "Packaged simulator workflow unexpectedly gained real-job readiness authority"
+    }
+    $unsupportedReadinessBody = @{ application_id = $readinessApplication; source_fingerprint = ("a" * 64); items = @() } | ConvertTo-Json
+    try {
+        Invoke-RestMethod -Method Post -Uri "$readinessUrl/requirements/preview" -Headers $headers -ContentType "application/json" -Body $unsupportedReadinessBody -TimeoutSec 5 | Out-Null
+        throw "Packaged simulator requirements preview unexpectedly succeeded"
+    }
+    catch {
+        if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 409) { throw }
+        $readinessError = $_.ErrorDetails.Message | ConvertFrom-Json
+        if ($readinessError.detail -ne "Only saved public Greenhouse jobs before portal execution support this local review") { throw "Packaged readiness admission returned an unexpected error" }
+    }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -480,30 +523,44 @@ try {
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
     $restoredCleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    # Windows PowerShell emits a JSON array as one pipeline object; enumerate
-    # it explicitly before checking count and replaying individual audit rows.
+    # Offline previews have no provider identity and cannot reserve/send mail.
+    # Verify their exact encrypted round-trip after restore without manufacturing
+    # fake provider attempts just to preserve an older smoke expectation.
     $restoredMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
-    if ($restoredMailAudits.Count -ne 2) { throw "Restored packaged mail history is incomplete" }
-    foreach ($mailAudit in $restoredMailAudits) {
-        if ($mailAudit.status -ne "FAILED" -or $mailAudit.error_code -ne "ProviderNotConfiguredError" -or $null -ne $mailAudit.provider_resource_id) {
-            throw "Restored packaged mail history changed its failed outcome"
+    if ($restoredMailAudits.Count -ne 0) { throw "Offline mail previews unexpectedly recorded provider attempts" }
+    $restoredMailDrafts = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($restoredMailDrafts.Count -ne $originalMailDrafts.Count) { throw "Restored mail preview inventory changed" }
+    foreach ($originalMailDraft in $originalMailDrafts) {
+        $restoredMailDraft = Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts/$($originalMailDraft.id)" -Headers $headers -TimeoutSec 5
+        if (($restoredMailDraft | ConvertTo-Json -Depth 30 -Compress) -ne ($originalMailDraft | ConvertTo-Json -Depth 30 -Compress)) {
+            throw "Restored offline mail preview changed"
         }
         $mailReplayBody = @{
-            fingerprint = $mailAudit.fingerprint
-            idempotency_key = $mailAudit.idempotency_key
+            fingerprint = $originalMailDraft.fingerprint
+            idempotency_key = "post-restore-offline-" + [guid]::NewGuid().ToString("N")
             confirmed_by = "synthetic-package-probe"
         } | ConvertTo-Json
-        $mailReplay = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($mailAudit.resource_id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5
-        if ($mailReplay.id -ne $mailAudit.id -or $mailReplay.status -ne "FAILED") {
-            throw "Restored packaged mail attempt did not replay its original outcome"
+        try {
+            Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($originalMailDraft.id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5 | Out-Null
+            throw "Restored unbound mail preview unexpectedly allowed sending"
+        }
+        catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 409) { throw }
         }
     }
-    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, encrypted backup and offline restore smoke passed."
+    $postRestoreMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($postRestoreMailAudits.Count -ne 0) { throw "Restored unbound previews created provider audit attempts" }
+    $restoredReadiness = Invoke-RestMethod -Uri $readinessUrl -Headers $headers -TimeoutSec 5
+    if (($restoredReadiness | ConvertTo-Json -Depth 30 -Compress) -ne ($originalReadiness | ConvertTo-Json -Depth 30 -Compress)) {
+        throw "Restored simulator workflow changed its real-job readiness authority"
+    }
+    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, conservative job-readiness admission, encrypted backup and offline restore smoke passed."
 }
 catch {
     # Functional verification failures also need their logs and recovery evidence,
     # even when every captured process subsequently exits successfully.
     $script:smokePreserveArtifacts = $true
+    $primarySmokeFailure = $_
     throw
 }
 finally {
@@ -511,5 +568,10 @@ finally {
         Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     }
     catch { $script:smokePreserveArtifacts = $true }
-    Complete-SmokeCleanup -Directory $resolvedTestRoot
+    try { Complete-SmokeCleanup -Directory $resolvedTestRoot }
+    catch {
+        if ($null -eq $primarySmokeFailure) { throw }
+        # Keep the original verification exception; cleanup's preservation error
+        # must not hide which synthetic assertion failed. Evidence stays retained.
+    }
 }

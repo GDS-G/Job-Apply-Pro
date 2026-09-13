@@ -37,6 +37,8 @@ function sourceSnapshot(): NotificationSourceSnapshot {
     communications: [
       {
         id: "message-1",
+        reply_context: null,
+        reply_unavailable_reason: "Legacy message has no reply binding",
         analysis: {
           message: {
             provider: "GMAIL",

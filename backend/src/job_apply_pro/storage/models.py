@@ -180,6 +180,24 @@ class JobRequirementRow(Base):
     evidence_json: Mapped[dict[str, object]] = mapped_column(JSON)
 
 
+class JobReadinessReviewRow(Base):
+    __tablename__ = "job_readiness_reviews"
+    __table_args__ = (
+        UniqueConstraint("application_id", "kind", "revision", name="uq_readiness_review_revision"),
+        UniqueConstraint(
+            "application_id", "kind", "request_fingerprint", name="uq_readiness_review_request"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    application_id: Mapped[str] = mapped_column(ForeignKey("applications.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    revision: Mapped[int] = mapped_column(Integer)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class FitScoreRow(Base):
     __tablename__ = "fit_scores"
 
@@ -634,7 +652,11 @@ class CommunicationRecordRow(Base):
     __tablename__ = "communication_records"
     __table_args__ = (
         UniqueConstraint(
-            "provider", "provider_message_id", name="uq_communication_provider_message"
+            "provider",
+            "source_account_key",
+            "source_connection_fingerprint",
+            "provider_message_id",
+            name="uq_communication_account_message",
         ),
         Index("ix_communication_received", "received_at"),
     )
@@ -642,6 +664,8 @@ class CommunicationRecordRow(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     provider: Mapped[str] = mapped_column(String(40), index=True)
     provider_message_id: Mapped[str] = mapped_column(String(500))
+    source_account_key: Mapped[str] = mapped_column(String(64), default="0" * 64)
+    source_connection_fingerprint: Mapped[str] = mapped_column(String(64), default="0" * 64)
     provider_thread_id: Mapped[str] = mapped_column(String(500), index=True)
     category: Mapped[str] = mapped_column(String(50), index=True)
     workflow_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)

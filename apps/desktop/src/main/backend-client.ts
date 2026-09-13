@@ -68,6 +68,15 @@ import type {
   TailoredDocumentResult,
   WorkflowControlAction,
   WorkflowRunSnapshot,
+  JobReadinessSnapshot,
+  RequirementsRequest,
+  RequirementsPreview,
+  RequirementsApproval,
+  QualificationRequest,
+  QualificationPreview,
+  QualificationApproval,
+  ReadinessSelectionPreview,
+  ReadinessResumeApproval,
 } from "@job-apply-pro/contracts";
 
 export class BackendApiError extends Error {
@@ -98,6 +107,60 @@ export class BackendClient {
 
   listWorkflows(): Promise<WorkflowRunSnapshot[]> {
     return this.request("/workbench/workflows");
+  }
+
+  getJobReadiness(applicationId: string): Promise<JobReadinessSnapshot> {
+    return this.request(
+      `/applications/${encodeURIComponent(applicationId)}/job-review`,
+    );
+  }
+  previewJobRequirements(
+    input: RequirementsRequest,
+  ): Promise<RequirementsPreview> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/requirements/preview`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  approveJobRequirements(
+    input: RequirementsApproval,
+  ): Promise<JobReadinessSnapshot> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/requirements/approve`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  previewJobQualification(
+    input: QualificationRequest,
+  ): Promise<QualificationPreview> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/qualification/preview`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  approveJobQualification(
+    input: QualificationApproval,
+  ): Promise<JobReadinessSnapshot> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/qualification/approve`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  previewJobResume(
+    input: DocumentSelectionRequest,
+  ): Promise<ReadinessSelectionPreview> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/resume/preview`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  approveJobResume(
+    input: ReadinessResumeApproval,
+  ): Promise<JobReadinessSnapshot> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/resume/approve`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
   }
 
   listGreenhouseJobs(

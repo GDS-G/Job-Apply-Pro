@@ -5,6 +5,7 @@ import { BrowserWindow, dialog, ipcMain } from "electron";
 import type {
   CommunicationDraftCreate,
   CommunicationDraftSendResult,
+  MailReplyContext,
   MessageCategory,
   OutboundDraft,
 } from "@job-apply-pro/contracts";
@@ -25,12 +26,9 @@ const categories = new Set<MessageCategory>([
   "SPAM_OR_UNRELATED",
 ]);
 const createKeys = new Set([
+  "mode",
   "analysis_id",
   "workflow_id",
-  "provider",
-  "provider_thread_id",
-  "recipient",
-  "subject",
   "body_text",
   "category",
   "policy",
@@ -51,10 +49,15 @@ function fingerprint(value: unknown): string {
   return value;
 }
 
-function text(value: unknown, limit: number, multiline = false): string {
+function text(
+  value: unknown,
+  limit: number,
+  multiline = false,
+  allowEmpty = false,
+): string {
   if (
     typeof value !== "string" ||
-    !value.trim() ||
+    (!allowEmpty && !value.trim()) ||
     value.length > limit ||
     [...value].some((character) => {
       const code = character.charCodeAt(0);
@@ -76,14 +79,24 @@ export function validateCommunicationDraftCreate(
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.keys(value).some((key) => !createKeys.has(key))
+    ![Object.prototype, null].includes(Object.getPrototypeOf(value))
   ) {
     throw new TypeError("Mail draft input is invalid.");
   }
   const input = value as Record<string, unknown>;
+  const keys = new Set([
+    ...createKeys,
+    ...(input.mode === "REPLY"
+      ? ["source_fingerprint"]
+      : ["provider", "recipient", "subject"]),
+  ]);
   if (
-    (input.provider !== "GMAIL" && input.provider !== "OUTLOOK") ||
-    (input.policy !== undefined && input.policy !== "REVIEW_REQUIRED") ||
+    (input.mode !== "REPLY" && input.mode !== "NEW_MESSAGE") ||
+    Reflect.ownKeys(input).length !== keys.size ||
+    Reflect.ownKeys(input).some(
+      (key) => typeof key !== "string" || !keys.has(key),
+    ) ||
+    input.policy !== "REVIEW_REQUIRED" ||
     !categories.has(input.category as MessageCategory)
   ) {
     throw new TypeError(
@@ -100,25 +113,118 @@ export function validateCommunicationDraftCreate(
   }
   const versionIds = versions.map(identifier);
   const workflowId =
-    input.workflow_id == null ? null : identifier(input.workflow_id);
+    input.workflow_id === null ? null : identifier(input.workflow_id);
   if (versionIds.length && !workflowId) {
     throw new TypeError("Attachments require an owning workflow.");
   }
-  const recipient = text(input.recipient, 254);
-  if (!/^[^\s@<>;,]+@[^\s@<>;,]+\.[^\s@<>;,]+$/.test(recipient)) {
-    throw new TypeError("Review one email recipient address.");
-  }
-  return {
+  const common = {
     analysis_id: identifier(input.analysis_id),
     workflow_id: workflowId,
-    provider: input.provider,
-    provider_thread_id: text(input.provider_thread_id, 500),
-    recipient,
-    subject: text(input.subject, 1_000),
     body_text: text(input.body_text, 20_000, true),
     category: input.category as MessageCategory,
-    policy: "REVIEW_REQUIRED",
+    policy: "REVIEW_REQUIRED" as const,
     document_version_ids: versionIds,
+  };
+  if (input.mode === "REPLY") {
+    return {
+      ...common,
+      mode: "REPLY",
+      source_fingerprint: fingerprint(input.source_fingerprint),
+    };
+  }
+  if (input.provider !== "GMAIL" && input.provider !== "OUTLOOK") {
+    throw new TypeError("Mail provider is invalid.");
+  }
+  return {
+    ...common,
+    mode: "NEW_MESSAGE",
+    provider: input.provider,
+    recipient: email(input.recipient),
+    subject: text(input.subject, 1_000),
+  };
+}
+
+function email(value: unknown, limit = 254): string {
+  const recipient = text(value, Math.min(limit, 254));
+  const match =
+    /^([A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*)@([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)$/.exec(
+      recipient,
+    );
+  if (
+    !match ||
+    match[1]!.length > 64 ||
+    match[2]!
+      .split(".")
+      .some(
+        (label) =>
+          label.length < 1 ||
+          label.length > 63 ||
+          label.startsWith("-") ||
+          label.endsWith("-"),
+      )
+  ) {
+    throw new TypeError("Review one email recipient address.");
+  }
+  return recipient;
+}
+
+function replyContext(value: unknown): MailReplyContext {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("A source-bound reply context is required.");
+  }
+  const context = value as Record<string, unknown>;
+  const keys = [
+    "policy_version",
+    "provider",
+    "account_key",
+    "account_label",
+    "connection_fingerprint",
+    "source_record_id",
+    "source_message_id",
+    "source_thread_id",
+    "source_id_format",
+    "recipient",
+    "subject",
+    "rfc_message_id",
+    "references",
+    "mime_reply_supported",
+    "fingerprint",
+  ];
+  if (
+    Reflect.ownKeys(context).length !== keys.length ||
+    Reflect.ownKeys(context).some(
+      (key) => typeof key !== "string" || !keys.includes(key),
+    ) ||
+    context.policy_version !== "mail-reply-v1" ||
+    (context.provider !== "GMAIL" && context.provider !== "OUTLOOK") ||
+    context.source_id_format !==
+      (context.provider === "GMAIL" ? "GMAIL" : "GRAPH_IMMUTABLE") ||
+    typeof context.mime_reply_supported !== "boolean" ||
+    !Array.isArray(context.references) ||
+    context.references.length > 50
+  ) {
+    throw new TypeError("Reply review context is invalid.");
+  }
+  return {
+    policy_version: "mail-reply-v1",
+    provider: context.provider,
+    account_key: fingerprint(context.account_key),
+    account_label: email(context.account_label, 320),
+    connection_fingerprint: fingerprint(context.connection_fingerprint),
+    source_record_id: text(context.source_record_id, 100),
+    source_message_id: text(context.source_message_id, 500),
+    source_thread_id: text(context.source_thread_id, 500),
+    source_id_format:
+      context.source_id_format as MailReplyContext["source_id_format"],
+    recipient: email(context.recipient, 320),
+    subject: text(context.subject, 1_000, false, true),
+    rfc_message_id:
+      context.rfc_message_id === null
+        ? null
+        : text(context.rfc_message_id, 998),
+    references: context.references.map((item) => text(item, 998)),
+    mime_reply_supported: context.mime_reply_supported,
+    fingerprint: fingerprint(context.fingerprint),
   };
 }
 
@@ -133,16 +239,50 @@ function quoted(value: string): string {
 }
 
 function reviewDetails(draft: OutboundDraft): string {
-  if (draft.policy !== "REVIEW_REQUIRED") {
+  if (
+    draft.policy !== "REVIEW_REQUIRED" ||
+    (draft.mode !== "REPLY" && draft.mode !== "NEW_MESSAGE")
+  ) {
     throw new TypeError("A fresh review-required mail draft is required.");
+  }
+  const context =
+    draft.mode === "REPLY" ? replyContext(draft.reply_context) : null;
+  const accountKey = fingerprint(draft.account_key);
+  const accountLabel = email(draft.account_label, 320);
+  const recipient = email(draft.recipient, draft.mode === "REPLY" ? 320 : 254);
+  const subject = text(draft.subject, 1_000, false, draft.mode === "REPLY");
+  if (
+    context
+      ? context.provider !== draft.provider ||
+        context.source_record_id !== draft.analysis_id ||
+        context.source_thread_id !== draft.provider_thread_id ||
+        context.recipient !== recipient ||
+        context.subject !== subject ||
+        context.account_key !== accountKey ||
+        context.account_label !== accountLabel ||
+        (draft.provider === "GMAIL" &&
+          (!context.mime_reply_supported || context.rfc_message_id === null)) ||
+        (draft.document_version_ids.length > 0 && !context.mime_reply_supported)
+      : draft.reply_context !== null || draft.provider_thread_id !== ""
+  ) {
+    throw new TypeError(
+      "Draft reply context does not match the reviewed message.",
+    );
   }
   const input = validateCommunicationDraftCreate({
     analysis_id: draft.analysis_id,
     workflow_id: draft.workflow_id,
-    provider: draft.provider,
-    provider_thread_id: draft.provider_thread_id,
-    recipient: draft.recipient,
-    subject: draft.subject,
+    ...(context
+      ? {
+          mode: "REPLY",
+          source_fingerprint: context.fingerprint,
+        }
+      : {
+          mode: "NEW_MESSAGE",
+          provider: draft.provider,
+          recipient,
+          subject,
+        }),
     body_text: draft.body_text,
     category: draft.category,
     policy: draft.policy,
@@ -204,9 +344,26 @@ function reviewDetails(draft: OutboundDraft): string {
     throw new TypeError("Unexpected attachment manifest.");
   }
   return [
-    `Provider: ${input.provider}`,
-    `Recipient: ${quoted(input.recipient)}`,
-    `Subject: ${quoted(input.subject)}`,
+    `Mode: ${draft.mode === "REPLY" ? "REPLY — source-bound reply" : "NEW_MESSAGE — standalone message, not a reply"}`,
+    `Provider: ${draft.provider}`,
+    `Sending account: ${quoted(accountLabel)}`,
+    `Account binding SHA-256: ${accountKey}`,
+    `Source record: ${quoted(draft.analysis_id)}`,
+    ...(context
+      ? [
+          `Reply policy: ${context.policy_version}`,
+          `Source message: ${quoted(context.source_message_id)}`,
+          `Source thread: ${quoted(context.source_thread_id)}`,
+          `Source ID format: ${context.source_id_format}`,
+          `Connection SHA-256: ${context.connection_fingerprint}`,
+          `RFC Message-ID: ${context.rfc_message_id === null ? "None" : quoted(context.rfc_message_id)}`,
+          `References: ${quoted(JSON.stringify(context.references))}`,
+          `MIME reply supported: ${context.mime_reply_supported ? "Yes" : "No"}`,
+          `Source review SHA-256: ${context.fingerprint}`,
+        ]
+      : []),
+    `Recipient: ${quoted(recipient)}`,
+    `Subject: ${quoted(subject)}`,
     `Body (quoted exactly):\n${quoted(input.body_text)}`,
     `Workflow: ${input.workflow_id ?? "None"}`,
     `Profile: ${manifest?.profile_id ?? "No attachments"}`,
@@ -232,12 +389,17 @@ export function registerMailDraftIpc(client: BackendClient): void {
   });
   ipcMain.handle(
     "communications:draft-create",
-    (_event, ...args: unknown[]) => {
+    async (_event, ...args: unknown[]) => {
       if (args.length !== 1)
         throw new TypeError("One mail draft input is required.");
-      return client.createCommunicationDraft(
-        validateCommunicationDraftCreate(args[0]),
-      );
+      const input = validateCommunicationDraftCreate(args[0]);
+      try {
+        return await client.createCommunicationDraft(input);
+      } catch {
+        throw new Error(
+          "Mail draft could not be prepared. Refresh the source and review again. No send was requested.",
+        );
+      }
     },
   );
   ipcMain.handle(

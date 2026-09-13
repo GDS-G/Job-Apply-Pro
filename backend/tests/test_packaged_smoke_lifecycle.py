@@ -596,6 +596,7 @@ if (@($commands | Where-Object { $_.GetCommandName() -eq 'Get-SmokeWorker' }).Co
     assert result["backend_waits"] == [10_000, 10_000]
     assert result["deleted"] == 0
     assert result["retained"] is True
+    assert result["message"] == "Synthetic receipt mismatch"
 
 
 @pytest.mark.parametrize("failure", ["none", "create", "write"])

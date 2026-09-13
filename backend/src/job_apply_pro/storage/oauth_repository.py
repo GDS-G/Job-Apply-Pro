@@ -153,6 +153,7 @@ class OAuthRepository:
             "expires_at": tokens.expires_at.isoformat(),
             "granted_scopes": tokens.granted_scopes,
             "account_hint": tokens.account_hint,
+            "account_identity": tokens.account_identity,
         }
         return self._cipher.encrypt_json(
             payload, context=f"oauth-credential:{credential_reference}:tokens"

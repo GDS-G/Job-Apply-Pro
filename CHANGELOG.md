@@ -2,6 +2,36 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.60.0-alpha.1] - Unreleased
+
+### Reviewed Job Readiness
+
+- Review exact saved Greenhouse source lines as mandatory, preferred or ambiguous requirements, with no generated employer claims.
+- Link each finding to current locked application-permitted evidence; keep coverage separate from explicit eligibility approval.
+- Require current source/evidence before immutable resume selection, with full metadata/byte/extraction fingerprints and encrypted append-only reviews.
+- Commit approvals, legitimate workflow milestones and selection audits atomically; deny generic selection bypass and stale/concurrent approvals.
+- Add migration 0027, strict IPC, cancel-default native review, stale-safe UI and adversarial regressions. No browser, provider, upload or submission action occurs.
+
+## [0.59.0-alpha.1] - Unreleased
+
+### Source-Bound Replies
+
+- Distinguish explicit new messages from replies bound to verified synchronized source, stable provider identity and connection epoch.
+- Preserve exact Gmail thread/header identity and use Outlook immutable source IDs with one reviewed reply request; reject ambiguous MIME routing.
+- Encrypt source context, isolate accounts/reconnects and preserve legacy records without inventing authority.
+- Recheck source/account/content around native approval and before one-attempt dispatch. Offline previews remain unsendable; no fallback or automatic retry.
+- Add migration, wire, concurrency, provenance, IPC and UI regressions. Delivery reconciliation and live acceptance remain separate work.
+
+## [0.58.0-alpha.1] - Unreleased
+
+### Greenhouse Public Discovery
+
+- Add explicit public-board listing, selected-posting review and profile-bound local import without candidate transmission or applications.
+- Bound fixed-origin GETs, identifiers, JSON, source text, URLs and operation time; preserve immutable versioned source fingerprints.
+- Atomically deduplicate local jobs/applications and reject stale, vanished or changed sources without overwriting history.
+- Expose backend-derived controls and prohibit fabricated public transitions for real imports; qualification remains not evaluated.
+- Add client, API, migration, transaction, IPC and renderer regressions. Real application flows and live acceptance remain separate work.
+
 ## [0.57.0-alpha.1] - Unreleased
 
 ### Gemini Processing Budget
