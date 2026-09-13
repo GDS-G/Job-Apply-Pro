@@ -114,6 +114,20 @@ class WorkflowEventRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    def permits_public_transition(self, workflow_id: str, current_state: WorkflowState) -> bool:
+        # Caller-authored transitions are a synthetic workbench facility, not
+        # evidence that a real imported application was evaluated or submitted.
+        statement = (
+            select(ApplicationRow.id)
+            .join(JobRow, ApplicationRow.job_id == JobRow.id)
+            .where(
+                ApplicationRow.workflow_id == workflow_id,
+                ApplicationRow.state == current_state.value,
+                JobRow.source == "workbench-mock",
+            )
+        )
+        return self._session.scalar(statement) is not None
+
     def next_sequence(self, workflow_id: str) -> int:
         statement = select(func.max(WorkflowEventRow.sequence)).where(
             WorkflowEventRow.workflow_id == workflow_id
