@@ -2,9 +2,21 @@
 
 ADRs capture durable decisions that affect architecture, security, contracts, persistence, or delivery. Accepted records are immutable; supersede them with a new ADR rather than rewriting history.
 
+- [ADR-0071: Durable restore rollback](0071-durable-restore-rollback.md)
+
 - [ADR-0070: Reviewed job readiness](0070-reviewed-job-readiness.md)
 
 - [ADR-0069: Source-bound replies](0069-source-bound-replies.md)
+
+- [ADR-0068: Greenhouse public discovery](0068-greenhouse-public-discovery.md)
+- [ADR-0067: Gemini processing budget](0067-gemini-processing-budget.md)
+- [ADR-0066: Durable restore admission](0066-durable-restore-admission.md)
+- [ADR-0065: Verified mail attachments](0065-verified-mail-attachments.md)
+- [ADR-0064: Bounded backend lifecycle](0064-bounded-backend-lifecycle.md)
+- [ADR-0063: Packaged browser runtime](0063-packaged-browser-runtime.md)
+- [ADR-0062: Validated media inputs](0062-validated-media-inputs.md)
+- [ADR-0061: Durable media recovery](0061-durable-media-recovery.md)
+- [ADR-0060: Media lifecycle hardening](0060-media-lifecycle-hardening.md)
 
 - [ADR-0001: Modular local-first process architecture](0001-modular-local-first-architecture.md)
 - [ADR-0002: Build naming and semantic versioning](0002-build-naming-and-versioning.md)

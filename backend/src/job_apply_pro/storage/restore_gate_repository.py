@@ -19,6 +19,11 @@ from job_apply_pro.security.encryption import SensitiveDataCipher
 CONTROL_DIRECTORY = "restore-control"
 GUARD_NAME = "active.guard"
 MAX_RECORD_BYTES = 4 * 1024 * 1024
+MAX_RETAINED_RECOVERY_BYTES = 8 * 1024 * 1024 * 1024
+MAX_NEW_RECOVERY_BYTES = 5 * 1024 * 1024 * 1024
+MAX_RETAINED_RECOVERY_OPERATIONS = 128
+MAX_RECOVERY_FILES_PER_OPERATION = 2 * (4096 + 1) + 10
+MAX_RECOVERY_OBJECT_BYTES = 512 * 1024 * 1024 + 4096
 RECOVERY_MESSAGE = (
     "Offline restore recovery is required. Keep backups, staging files and the original key. "
     "Normal startup and updates are blocked until authenticated completion can be verified."
@@ -213,6 +218,15 @@ class RestoreGateRepository:
     def allocate_operation(self) -> str:
         _require_restore_lease(self.root)
         self.assert_clear()
+        operations, retained = self._recovery_usage()
+        if (
+            operations >= MAX_RETAINED_RECOVERY_OPERATIONS
+            or retained > MAX_RETAINED_RECOVERY_BYTES - MAX_NEW_RECOVERY_BYTES
+        ):
+            raise RestoreAdmissionError(
+                "Retained restore evidence reached its bounded quota; preserve it for "
+                "review before starting another restore"
+            )
         operation_id = str(uuid4())
         directory = self.operation_path(operation_id)
         try:
@@ -224,6 +238,142 @@ class RestoreGateRepository:
         except OSError:
             raise RestoreAdmissionError("Restore operation could not be allocated safely") from None
         return operation_id
+
+    @staticmethod
+    def _pending_name(name: str, allowed: re.Pattern[str]) -> bool:
+        match = re.fullmatch(r"\.(.+)\.([0-9a-f-]{36})\.pending", name)
+        if match is None or allowed.fullmatch(match.group(1)) is None:
+            return False
+        try:
+            return str(UUID(match.group(2))) == match.group(2)
+        except ValueError:
+            return False
+
+    def _operation_inventory(self, operation: Path) -> tuple[list[Path], list[Path], int]:
+        record = re.compile(
+            r"(?:intent|receipt)\.enc|database-preimage\.enc|"
+            r"(?:intent|decision|receipt)\.v2\.enc"
+        )
+        image = re.compile(r"[a-f0-9]{64}\.(?:before|after)\.enc")
+        files: list[Path] = []
+        directories: list[Path] = []
+        total = 0
+        entries = 0
+
+        def accept_file(path: Path, pattern: re.Pattern[str], maximum: int) -> None:
+            nonlocal entries, total
+            checked_path(path, root=self.root)
+            info = path.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or getattr(info, "st_file_attributes", 0) & 0x400
+                or (
+                    pattern.fullmatch(path.name) is None
+                    and not self._pending_name(path.name, pattern)
+                )
+                or info.st_size > maximum
+            ):
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            entries += 1
+            if entries > MAX_RECOVERY_FILES_PER_OPERATION:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            total += info.st_size
+            files.append(path)
+
+        for entry in operation.iterdir():
+            checked_path(entry, root=self.root)
+            info = entry.lstat()
+            if entry.name == "objects" and stat.S_ISDIR(info.st_mode):
+                if getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise RestoreAdmissionError(RECOVERY_MESSAGE)
+                directories.append(entry)
+                for child in entry.iterdir():
+                    accept_file(child, image, MAX_RECOVERY_OBJECT_BYTES)
+            elif stat.S_ISREG(info.st_mode):
+                maximum = (
+                    MAX_RECOVERY_OBJECT_BYTES
+                    if entry.name == "database-preimage.enc"
+                    else MAX_RECORD_BYTES
+                )
+                accept_file(entry, record, maximum)
+            else:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        return files, directories, total
+
+    def _recovery_usage(self) -> tuple[int, int]:
+        operations_root = checked_path(self.control / "operations", root=self.root)
+        try:
+            info = operations_root.lstat()
+        except FileNotFoundError:
+            return 0, 0
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        count = 0
+        total = 0
+        for operation in operations_root.iterdir():
+            checked_path(operation, root=self.root)
+            info = operation.lstat()
+            try:
+                canonical = str(UUID(operation.name)) == operation.name
+            except ValueError:
+                canonical = False
+            if (
+                not canonical
+                or not stat.S_ISDIR(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & 0x400
+            ):
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            count += 1
+            if count > MAX_RETAINED_RECOVERY_OPERATIONS:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            _, _, operation_total = self._operation_inventory(operation)
+            total += operation_total
+            if total > MAX_RETAINED_RECOVERY_BYTES:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        return count, total
+
+    def _require_v2_record_capacity(self, operation_id: str, size: int) -> None:
+        """Bound every publication attempt, including retained pending siblings."""
+        if size < 0 or size > MAX_RECORD_BYTES:
+            raise RestoreAdmissionError("Restore metadata exceeds the supported bound")
+        _, retained = self._recovery_usage()
+        files, _, operation_total = self._operation_inventory(self.operation_path(operation_id))
+        if (
+            len(files) >= MAX_RECOVERY_FILES_PER_OPERATION
+            or operation_total > MAX_NEW_RECOVERY_BYTES - size
+            or retained > MAX_RETAINED_RECOVERY_BYTES - size
+        ):
+            raise RestoreAdmissionError(
+                "Retained restore evidence reached its bounded quota; preserve it for "
+                "review before publishing more recovery evidence"
+            )
+
+    def discard_unactivated(self, operation_id: str) -> None:
+        """Remove only this call's strictly inventoried, never-active v2 preparation."""
+        _require_restore_lease(self.root)
+        self.assert_clear()
+        operation = self.operation_path(operation_id)
+        files, directories, _ = self._operation_inventory(operation)
+        names = {path.name for path in files}
+        if any(
+            name in {"decision.v2.enc", "receipt.v2.enc", "intent.enc", "receipt.enc"}
+            or name == "database-preimage.enc"
+            or name.startswith((".decision.v2.enc.", ".receipt.v2.enc."))
+            for name in names
+        ):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        for path in files:
+            checked_path(path, root=self.root)
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            path.unlink()
+        for directory in reversed(directories):
+            checked_path(directory, root=self.root)
+            directory.rmdir()
+        operation.rmdir()
+        sync_directory(operation.parent)
 
     def activate_prepared(self, operation_id: str) -> None:
         _require_restore_lease(self.root)
@@ -282,7 +432,9 @@ class RestoreGateRepository:
         )
         if len(encoded) > MAX_RECORD_BYTES:
             raise RestoreAdmissionError("Restore metadata exceeds the supported bound")
+        self._require_v2_record_capacity(operation_id, len(encoded))
         atomic_write_exclusive(path, encoded)
+        del encoded
 
     def finish_verified(self, operation_id: str) -> None:
         # Called only after authenticated receipt and all targets have been rechecked.

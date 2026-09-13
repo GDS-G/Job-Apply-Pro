@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Job Readiness",
-  version: "0.60.0-alpha.1",
+  name: "Durable Restore Rollback",
+  version: "0.61.0-alpha.1",
   channel: "alpha",
 } as const;
 

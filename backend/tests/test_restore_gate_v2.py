@@ -49,6 +49,76 @@ def test_allocate_is_canonical_and_activation_requires_published_intent(
         assert gate.active_id() == operation_id
 
 
+def test_allocation_counts_retained_evidence_and_enforces_global_quota(
+    tmp_path: Path, cipher: SensitiveDataCipher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import job_apply_pro.storage.restore_gate_repository as module
+
+    gate = RestoreGateRepository(tmp_path)
+    with workspace_access(tmp_path, restore=True):
+        operation_id = gate.allocate_operation()
+        gate.write_v2_record(operation_id, "intent", {"retained": True}, cipher)
+        retained = (gate.operation_path(operation_id) / "intent.v2.enc").stat().st_size
+        monkeypatch.setattr(module, "MAX_RETAINED_RECOVERY_BYTES", retained + 10)
+        monkeypatch.setattr(module, "MAX_NEW_RECOVERY_BYTES", 11)
+        before = list((gate.control / "operations").iterdir())
+
+        with pytest.raises(RestoreAdmissionError, match="bounded quota"):
+            gate.allocate_operation()
+
+        assert list((gate.control / "operations").iterdir()) == before
+
+
+@pytest.mark.parametrize("limit", ["retained-bytes", "operation-bytes", "files"])
+def test_v2_record_publication_counts_pending_siblings_before_writing(
+    tmp_path: Path,
+    cipher: SensitiveDataCipher,
+    monkeypatch: pytest.MonkeyPatch,
+    limit: str,
+) -> None:
+    import job_apply_pro.storage.restore_gate_repository as module
+
+    gate = RestoreGateRepository(tmp_path)
+    with workspace_access(tmp_path, restore=True):
+        operation_id = gate.allocate_operation()
+        operation = gate.operation_path(operation_id)
+        pending = operation / f".intent.v2.enc.{uuid4()}.pending"
+        pending.write_bytes(b"retained interrupted publication")
+        before = {path.name: path.read_bytes() for path in operation.iterdir()}
+        if limit == "retained-bytes":
+            monkeypatch.setattr(
+                module,
+                "MAX_RETAINED_RECOVERY_BYTES",
+                pending.stat().st_size + 1,
+            )
+        elif limit == "operation-bytes":
+            monkeypatch.setattr(
+                module,
+                "MAX_NEW_RECOVERY_BYTES",
+                pending.stat().st_size + 1,
+            )
+        else:
+            monkeypatch.setattr(module, "MAX_RECOVERY_FILES_PER_OPERATION", 1)
+
+        with pytest.raises(RestoreAdmissionError, match="bounded quota"):
+            gate.write_v2_record(operation_id, "intent", {"new": True}, cipher)
+
+        assert {path.name: path.read_bytes() for path in operation.iterdir()} == before
+
+
+def test_unknown_retained_inventory_fails_closed_before_new_allocation(tmp_path: Path) -> None:
+    gate = RestoreGateRepository(tmp_path)
+    with workspace_access(tmp_path, restore=True):
+        operation_id = gate.allocate_operation()
+        unexpected = gate.operation_path(operation_id) / "unreviewed.private"
+        unexpected.write_bytes(b"unknown recovery residue")
+
+        with pytest.raises(RestoreAdmissionError):
+            gate.allocate_operation()
+
+        assert unexpected.read_bytes() == b"unknown recovery residue"
+
+
 @pytest.mark.parametrize("kind", ["intent", "decision", "receipt"])
 def test_v2_records_are_context_bound_exclusive_and_readable_without_a_lease(
     tmp_path: Path, cipher: SensitiveDataCipher, kind: str
@@ -101,7 +171,7 @@ def test_interrupted_pending_records_are_preserved_ignored_and_never_activate(
     gate = RestoreGateRepository(tmp_path)
     with workspace_access(tmp_path, restore=True):
         operation_id = gate.allocate_operation()
-        pending = gate.operation_path(operation_id) / ".intent.v2.enc.interrupted.pending"
+        pending = gate.operation_path(operation_id) / f".intent.v2.enc.{uuid4()}.pending"
         pending.write_bytes(b"partial encrypted envelope")
         assert not gate.has_v2_record(operation_id, "intent")
         with pytest.raises(RestoreAdmissionError):

@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import stat
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -38,6 +40,125 @@ if TYPE_CHECKING:
 
 POLICY: Literal["interrupted-restore-rollback/2"] = "interrupted-restore-rollback/2"
 MAX_OBJECT_BYTES = 2 * MAX_FILE_BYTES + 4096
+
+type _BookkeepingIndexDefinition = tuple[
+    int,
+    str,
+    int,
+    str | None,
+    tuple[tuple[int, int, str | None, int, str, int], ...],
+]
+
+_BOOKKEEPING_SCHEMA = {
+    "backup_manifests": (
+        ("id", "VARCHAR(36)", 1, None, 1, 0),
+        ("status", "VARCHAR(30)", 1, None, 0, 0),
+        ("archive_path", "TEXT", 1, None, 0, 0),
+        ("archive_sha256", "VARCHAR(64)", 1, None, 0, 0),
+        ("manifest_json", "JSON", 1, None, 0, 0),
+        ("created_at", "DATETIME", 1, None, 0, 0),
+        ("verified_at", "DATETIME", 0, None, 0, 0),
+    ),
+    "restore_plans": (
+        ("id", "VARCHAR(36)", 1, None, 1, 0),
+        ("backup_id", "VARCHAR(36)", 1, None, 0, 0),
+        ("status", "VARCHAR(30)", 1, None, 0, 0),
+        ("plan_json", "JSON", 1, None, 0, 0),
+        ("created_at", "DATETIME", 1, None, 0, 0),
+        ("applied_at", "DATETIME", 0, None, 0, 0),
+    ),
+}
+_BOOKKEEPING_UPDATES = {
+    "backup_manifests": {
+        "status",
+        "archive_path",
+        "archive_sha256",
+        "manifest_json",
+        "verified_at",
+    },
+    "restore_plans": {"status", "plan_json", "applied_at"},
+}
+_BOOKKEEPING_TABLE_SQL = {
+    "backup_manifests": """
+        CREATE TABLE backup_manifests (
+            id VARCHAR(36) NOT NULL,
+            status VARCHAR(30) NOT NULL,
+            archive_path TEXT NOT NULL,
+            archive_sha256 VARCHAR(64) NOT NULL,
+            manifest_json JSON NOT NULL,
+            created_at DATETIME NOT NULL,
+            verified_at DATETIME,
+            PRIMARY KEY (id)
+        )
+    """,
+    "restore_plans": """
+        CREATE TABLE restore_plans (
+            id VARCHAR(36) NOT NULL,
+            backup_id VARCHAR(36) NOT NULL,
+            status VARCHAR(30) NOT NULL,
+            plan_json JSON NOT NULL,
+            created_at DATETIME NOT NULL,
+            applied_at DATETIME,
+            PRIMARY KEY (id),
+            FOREIGN KEY(backup_id) REFERENCES backup_manifests (id)
+        )
+    """,
+}
+_BOOKKEEPING_INDEXES: dict[str, dict[str, _BookkeepingIndexDefinition]] = {
+    "backup_manifests": {
+        "ix_backup_manifests_status": (
+            0,
+            "c",
+            0,
+            "CREATE INDEX ix_backup_manifests_status ON backup_manifests (status)",
+            ((0, 1, "status", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0)),
+        ),
+        "ix_backup_manifests_status_created": (
+            0,
+            "c",
+            0,
+            "CREATE INDEX ix_backup_manifests_status_created "
+            "ON backup_manifests (status, created_at)",
+            (
+                (0, 1, "status", 0, "BINARY", 1),
+                (1, 5, "created_at", 0, "BINARY", 1),
+                (2, -1, None, 0, "BINARY", 0),
+            ),
+        ),
+        "sqlite_autoindex_backup_manifests_1": (
+            1,
+            "pk",
+            0,
+            None,
+            ((0, 0, "id", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0)),
+        ),
+    },
+    "restore_plans": {
+        "ix_restore_plans_backup_id": (
+            0,
+            "c",
+            0,
+            "CREATE INDEX ix_restore_plans_backup_id ON restore_plans (backup_id)",
+            ((0, 1, "backup_id", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0)),
+        ),
+        "ix_restore_plans_status": (
+            0,
+            "c",
+            0,
+            "CREATE INDEX ix_restore_plans_status ON restore_plans (status)",
+            ((0, 2, "status", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0)),
+        ),
+        "sqlite_autoindex_restore_plans_1": (
+            1,
+            "pk",
+            0,
+            None,
+            ((0, 0, "id", 0, "BINARY", 1), (1, -1, None, 0, "BINARY", 0)),
+        ),
+    },
+}
+_BOOKKEEPING_READ_ACTIONS = frozenset({sqlite3.SQLITE_READ, sqlite3.SQLITE_SELECT})
+_BOOKKEEPING_TRANSACTION_ACTIONS = frozenset({sqlite3.SQLITE_SAVEPOINT, sqlite3.SQLITE_TRANSACTION})
 
 
 class RecoveryModel(BaseModel):
@@ -130,7 +251,11 @@ class RestoreRollback:
             value, context=f"restore:v2:{operation_id}:object:{name}"
         ).encode("ascii")
         atomic_write_exclusive(self._object_path(operation_id, image), encoded)
-        self._read_image(operation_id, image)
+        # All retained images are authenticated together by the mandatory
+        # preflight before guard publication. Release this large encoded copy
+        # first instead of rereading/decrypting it while the plaintext caller
+        # buffer is still live.
+        del encoded
         return image
 
     def _read_bounded(self, path: Path) -> bytes:
@@ -141,32 +266,214 @@ class RestoreRollback:
             raise RestoreAdmissionError("Restore bytes changed while preparing recovery")
         return value
 
+    @staticmethod
+    def _require_bookkeeping_schema(connection: sqlite3.Connection) -> None:
+        """Require the exact operational tables before any private write."""
+        if connection.execute("PRAGMA quick_check(1)").fetchall() != [("ok",)]:
+            raise sqlite3.DatabaseError("Candidate database failed integrity validation")
+        if connection.execute("PRAGMA foreign_key_check").fetchmany(1):
+            raise sqlite3.IntegrityError("Candidate database has broken foreign keys")
+        if (
+            connection.execute(
+                "SELECT 1 FROM sqlite_schema WHERE type IN ('trigger', 'view') LIMIT 1"
+            ).fetchone()
+            or connection.execute(
+                "SELECT 1 FROM sqlite_temp_schema WHERE type IN ('trigger', 'view') LIMIT 1"
+            ).fetchone()
+        ):
+            raise sqlite3.DatabaseError("Candidate database contains executable schema objects")
+        for table, expected in _BOOKKEEPING_SCHEMA.items():
+            objects = connection.execute(
+                "SELECT type, sql FROM sqlite_schema WHERE name = ? COLLATE BINARY", (table,)
+            ).fetchmany(2)
+            if len(objects) != 1 or objects[0][0] != "table":
+                raise sqlite3.DatabaseError("Candidate database lacks an exact bookkeeping table")
+            table_sql = objects[0][1]
+            if not isinstance(table_sql, str) or " ".join(table_sql.split()) != " ".join(
+                _BOOKKEEPING_TABLE_SQL[table].split()
+            ):
+                raise sqlite3.DatabaseError("Candidate bookkeeping table definition changed")
+            columns = tuple(
+                (name, str(kind).upper(), not_null, default, primary_key, hidden)
+                for _, name, kind, not_null, default, primary_key, hidden in connection.execute(
+                    f"PRAGMA table_xinfo({table})"
+                )
+            )
+            if columns != expected:
+                raise sqlite3.DatabaseError("Candidate bookkeeping schema changed")
+            indexes = {
+                name: (unique, origin, partial)
+                for _, name, unique, origin, partial in connection.execute(
+                    f"PRAGMA index_list({table})"
+                )
+            }
+            expected_indexes = _BOOKKEEPING_INDEXES[table]
+            if indexes != {
+                name: (definition[0], definition[1], definition[2])
+                for name, definition in expected_indexes.items()
+            }:
+                raise sqlite3.DatabaseError("Candidate bookkeeping indexes changed")
+            for name, definition in expected_indexes.items():
+                index_sql = connection.execute(
+                    "SELECT sql FROM sqlite_schema WHERE type = 'index' "
+                    "AND name = ? COLLATE BINARY AND tbl_name = ? COLLATE BINARY",
+                    (name, table),
+                ).fetchmany(2)
+                if len(index_sql) != 1:
+                    raise sqlite3.DatabaseError("Candidate bookkeeping index identity changed")
+                actual_sql = index_sql[0][0]
+                expected_sql = definition[3]
+                if (
+                    " ".join(actual_sql.split()) if isinstance(actual_sql, str) else actual_sql
+                ) != (
+                    " ".join(expected_sql.split())
+                    if isinstance(expected_sql, str)
+                    else expected_sql
+                ):
+                    raise sqlite3.DatabaseError("Candidate bookkeeping index definition changed")
+                index_shape = tuple(connection.execute(f'PRAGMA index_xinfo("{name}")').fetchall())
+                if index_shape != definition[4]:
+                    raise sqlite3.DatabaseError("Candidate bookkeeping index shape changed")
+        foreign_keys = connection.execute("PRAGMA foreign_key_list(restore_plans)").fetchall()
+        if (
+            foreign_keys
+            != [(0, 0, "backup_manifests", "backup_id", "id", "NO ACTION", "NO ACTION", "NONE")]
+            or connection.execute("PRAGMA foreign_key_list(backup_manifests)").fetchall()
+        ):
+            raise sqlite3.DatabaseError("Candidate bookkeeping relationship changed")
+
+    @staticmethod
+    def _bookkeeping_authorizer(
+        action: int,
+        first: str | None,
+        second: str | None,
+        _database: str | None,
+        source: str | None,
+    ) -> int:
+        if source is not None:
+            return sqlite3.SQLITE_DENY
+        if action in _BOOKKEEPING_READ_ACTIONS or action in _BOOKKEEPING_TRANSACTION_ACTIONS:
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_INSERT:
+            return sqlite3.SQLITE_OK if first in _BOOKKEEPING_UPDATES else sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_UPDATE:
+            return (
+                sqlite3.SQLITE_OK
+                if first in _BOOKKEEPING_UPDATES and second in _BOOKKEEPING_UPDATES[first]
+                else sqlite3.SQLITE_DENY
+            )
+        # Fail closed for DELETE, functions, PRAGMA/ATTACH, schema changes,
+        # recursive execution and any future SQLite action we did not enumerate.
+        return sqlite3.SQLITE_DENY
+
+    @staticmethod
+    def _sqlite_datetime(value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return value.astimezone(UTC).replace(tzinfo=None).isoformat(sep=" ")
+
     def _private_database(
-        self, operation_id: str, value: bytes, source: Intent, applied_plan: RestorePlan
+        self,
+        value: bytes,
+        source: Intent,
+        applied_plan: RestorePlan,
+        *,
+        current_database: Path,
     ) -> bytes:
-        """Only this newly owned scratch database receives SQLite bookkeeping writes."""
-        from sqlalchemy import create_engine
-        from sqlalchemy.engine import URL
-        from sqlalchemy.orm import Session
+        """Commit bounded bookkeeping only inside an authorizer-confined memory DB."""
+        from job_apply_pro.services.backup import BackupService
 
-        from job_apply_pro.storage.operations_repository import OperationsRepository
-
-        path = checked_path(
-            self.gate.operation_path(operation_id) / "bookkeeping.private.db", root=self.gate.root
-        )
-        atomic_write_exclusive(path, value)
-        engine = create_engine(URL.create("sqlite", database=str(path)))
+        connection = sqlite3.connect(":memory:", timeout=1.0)
         try:
-            with Session(engine) as session:
-                OperationsRepository(session).save_restore_result(source.manifest, applied_plan)
+            connection.enable_load_extension(False)
+            connection.execute("PRAGMA trusted_schema = OFF")
+            connection.deserialize(value)
+            del value
+            connection.execute("PRAGMA foreign_keys = ON")
+            if connection.execute("PRAGMA foreign_keys").fetchone() != (1,):
+                raise sqlite3.DatabaseError("Foreign-key enforcement is unavailable")
+            self._require_bookkeeping_schema(connection)
+            connection.set_authorizer(self._bookkeeping_authorizer)
+            manifest = source.manifest
+            manifest_json = json.dumps(
+                manifest.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            )
+            plan_json = json.dumps(
+                applied_plan.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            )
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute(
+                "SELECT 1 FROM backup_manifests WHERE id = ?", (manifest.id,)
+            ).fetchone():
+                connection.execute(
+                    "UPDATE backup_manifests SET status = ?, archive_path = ?, "
+                    "archive_sha256 = ?, manifest_json = ?, verified_at = ? WHERE id = ?",
+                    (
+                        manifest.status.value,
+                        manifest.archive_path,
+                        manifest.archive_sha256,
+                        manifest_json,
+                        self._sqlite_datetime(manifest.verified_at),
+                        manifest.id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO backup_manifests "
+                    "(id, status, archive_path, archive_sha256, manifest_json, created_at, "
+                    "verified_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        manifest.id,
+                        manifest.status.value,
+                        manifest.archive_path,
+                        manifest.archive_sha256,
+                        manifest_json,
+                        self._sqlite_datetime(manifest.created_at),
+                        self._sqlite_datetime(manifest.verified_at),
+                    ),
+                )
+            if connection.execute(
+                "SELECT 1 FROM restore_plans WHERE id = ?", (applied_plan.id,)
+            ).fetchone():
+                connection.execute(
+                    "UPDATE restore_plans SET status = ?, plan_json = ?, applied_at = ? "
+                    "WHERE id = ?",
+                    (
+                        applied_plan.status.value,
+                        plan_json,
+                        self._sqlite_datetime(applied_plan.applied_at),
+                        applied_plan.id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO restore_plans "
+                    "(id, backup_id, status, plan_json, created_at, applied_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        applied_plan.id,
+                        applied_plan.backup_id,
+                        applied_plan.status.value,
+                        plan_json,
+                        self._sqlite_datetime(applied_plan.created_at),
+                        self._sqlite_datetime(applied_plan.applied_at),
+                    ),
+                )
+            connection.commit()
+            BackupService._require_preserved_mail_attempts_connection(current_database, connection)
+            result = connection.serialize()
+            if len(result) > MAX_FILE_BYTES:
+                raise RestoreAdmissionError(
+                    "Restore bookkeeping exceeds the supported 256 MiB bound"
+                )
+            return result
+        except sqlite3.Error:
+            connection.rollback()
+            raise RestoreAdmissionError(
+                "Restore bookkeeping database cannot be prepared safely"
+            ) from None
         finally:
-            engine.dispose()
-        assert_restore_source_closed(path)
-        result = self._read_bounded(path)
-        # This is our own disposable scratch copy, never a prior recovery object.
-        path.unlink()
-        sync_directory(path.parent)
-        return result
+            connection.close()
 
     def apply(self, source: Intent) -> RestorePlan:
         root = self.gate.root
@@ -179,13 +486,13 @@ class RestoreRollback:
         assert_restore_source_closed(database)
         from job_apply_pro.services.backup import BackupService
 
+        staged_database = None
         if BackupCategory.DATABASE in source.plan.categories:
             BackupService._require_resolved_media_cleanup(database)
             staged_database = checked_path(
                 root / safe_relative(source.staged) / "database" / "job_apply_pro.db", root=root
             )
             assert_restore_source_closed(staged_database)
-            BackupService._require_preserved_mail_attempts(database, staged_database)
         checked = self.host.prepare(
             source.plan,
             source.manifest,
@@ -196,75 +503,138 @@ class RestoreRollback:
         )
         if checked != source:
             raise RestoreAdmissionError("Restore intent changed after review")
-        # Recheck every staged input before making any operation visible to admission.
-        input_bytes: dict[str, bytes] = {}
+        if staged_database is not None:
+            # Only inspect the staged SQLite database after its complete reviewed
+            # archive/input identity has been authenticated again.
+            BackupService._require_preserved_mail_attempts(database, staged_database)
+        staged_root = root / safe_relative(source.staged)
+        staged_documents = (
+            staged_root / "documents"
+            if BackupCategory.DOCUMENTS in source.plan.categories
+            else None
+        )
+        # One immutable byte snapshot is the history baseline and retained rollback
+        # preimage. The live file must still match it immediately before the guard.
+        original_database = self._read_bounded(database)
+        from job_apply_pro.services.restore_history import require_preserved_history_snapshot
+
+        require_preserved_history_snapshot(
+            original_database,
+            staged_database,
+            cipher=self.cipher,
+            documents=root / safe_relative(source.documents),
+            staged_documents=staged_documents,
+        )
+        # Recheck every staged input with streaming hashes before allocating recovery
+        # state. Plaintext inputs are then captured one at a time below.
         input_total = 0
+        database_input = None
         for item in source.inputs:
-            value = self._read_bounded(
-                root / safe_relative(source.staged) / safe_relative(item.path)
-            )
-            if len(value) != item.size or hashlib.sha256(value).hexdigest() != item.sha256:
+            staged_path = staged_root / safe_relative(item.path)
+            digest, size = hash_file(staged_path)
+            if size != item.size or digest != item.sha256:
                 raise RestoreAdmissionError("Staged restore bytes changed after review")
-            input_total += len(value)
+            input_total += size
             if input_total > MAX_RESTORE_BYTES:
                 raise RestoreAdmissionError("Restore postimages exceed the supported 1 GiB bound")
-            input_bytes[item.path] = value
-        operation_id = self.gate.allocate_operation()
-        (self.gate.operation_path(operation_id) / "objects").mkdir()
+            if item.path == "database/job_apply_pro.db":
+                database_input = item
         applied_plan = source.plan.model_copy(
             update={"status": RestoreStatus.APPLIED, "applied_at": datetime.now(UTC)}
         )
-        # Always retain the closed original DB, including for document-only restore.
-        original_database = self._read_bounded(database)
-        before_total = len(original_database)
-        targets: list[Replacement] = []
-        database_before = self._save_image(
-            operation_id, source.database, "before", original_database
+        candidate_path = (
+            staged_root / safe_relative(database_input.path)
+            if database_input is not None
+            else database
         )
-        for item in source.inputs:
-            if item.path == "database/job_apply_pro.db":
-                continue
-            destination = self.host._destination(source, item)
-            relative = destination.relative_to(root).as_posix()
-            before = None
-            if destination.exists():
-                value = self._read_bounded(destination)
-                before_total += len(value)
-                if before_total > MAX_RESTORE_BYTES:
-                    raise RestoreAdmissionError(
-                        "Restore preimages exceed the supported 1 GiB bound"
-                    )
-                before = self._save_image(operation_id, relative, "before", value)
-            after = self._save_image(operation_id, relative, "after", input_bytes[item.path])
-            targets.append(Replacement(path=relative, before=before, after=after))
+        candidate_database = (
+            self._read_bounded(candidate_path) if database_input is not None else original_database
+        )
         after_database = self._private_database(
-            operation_id,
-            input_bytes.get("database/job_apply_pro.db", original_database),
+            candidate_database,
             source,
             applied_plan,
+            current_database=database,
         )
-        if sum(target.after.size for target in targets) + len(after_database) > MAX_RESTORE_BYTES:
+        if database_input is not None:
+            del candidate_database
+        from job_apply_pro.services.restore_history import require_preserved_history_bytes
+
+        require_preserved_history_bytes(
+            original_database,
+            after_database,
+            cipher=self.cipher,
+            documents=root / safe_relative(source.documents),
+            staged_documents=staged_documents,
+        )
+        document_post_total = sum(
+            item.size for item in source.inputs if item.path != "database/job_apply_pro.db"
+        )
+        if document_post_total + len(after_database) > MAX_RESTORE_BYTES:
             raise RestoreAdmissionError("Restore postimages exceed the supported 1 GiB bound")
-        targets.append(
-            Replacement(
-                path=source.database,
-                before=database_before,
-                after=self._save_image(operation_id, source.database, "after", after_database),
+
+        operation_id = self.gate.allocate_operation()
+        try:
+            (self.gate.operation_path(operation_id) / "objects").mkdir()
+            # Always retain the exact admitted DB snapshot, including for a
+            # document-only restore whose bookkeeping changes the database.
+            before_total = len(original_database)
+            targets: list[Replacement] = []
+            database_before = self._save_image(
+                operation_id, source.database, "before", original_database
             )
-        )
-        prepared = PreparedRestore(
-            operation_id=operation_id,
-            workspace=str(root),
-            source=source,
-            applied_plan=applied_plan,
-            targets=targets,
-        )
-        self._validate(prepared)
-        self._preflight(prepared, expected="BEFORE")
-        self.gate.write_v2_record(
-            operation_id, "intent", prepared.model_dump(mode="json"), self.cipher
-        )
-        self.gate.activate_prepared(operation_id)
+            del original_database
+            for item in source.inputs:
+                if item.path == "database/job_apply_pro.db":
+                    continue
+                destination = self.host._destination(source, item)
+                relative = destination.relative_to(root).as_posix()
+                before = None
+                if destination.exists():
+                    value = self._read_bounded(destination)
+                    before_total += len(value)
+                    if before_total > MAX_RESTORE_BYTES:
+                        raise RestoreAdmissionError(
+                            "Restore preimages exceed the supported 1 GiB bound"
+                        )
+                    before = self._save_image(operation_id, relative, "before", value)
+                    del value
+                value = self._read_bounded(staged_root / safe_relative(item.path))
+                if len(value) != item.size or hashlib.sha256(value).hexdigest() != item.sha256:
+                    raise RestoreAdmissionError("Staged restore bytes changed after review")
+                after = self._save_image(operation_id, relative, "after", value)
+                del value
+                targets.append(Replacement(path=relative, before=before, after=after))
+            targets.append(
+                Replacement(
+                    path=source.database,
+                    before=database_before,
+                    after=self._save_image(operation_id, source.database, "after", after_database),
+                )
+            )
+            del after_database
+            prepared = PreparedRestore(
+                operation_id=operation_id,
+                workspace=str(root),
+                source=source,
+                applied_plan=applied_plan,
+                targets=targets,
+            )
+            self._validate(prepared)
+            self._preflight(prepared, expected="BEFORE")
+            self.gate.write_v2_record(
+                operation_id, "intent", prepared.model_dump(mode="json"), self.cipher
+            )
+            assert_restore_source_closed(database)
+            self._require_target_state(prepared, expected="BEFORE")
+            self.gate.activate_prepared(operation_id)
+        except BaseException:
+            if not self.gate.blocked():
+                with suppress(OSError, RestoreAdmissionError):
+                    self.gate.discard_unactivated(operation_id)
+                # Never mask the primary preparation failure. Unknown residue is
+                # retained and counted by the next allocation's global quota.
+            raise
         for target in prepared.targets:
             self._install(prepared, target, target.after)
         self._write_receipt(prepared, "APPLIED")
@@ -399,6 +769,13 @@ class RestoreRollback:
             for image in (target.before, target.after):
                 if image is not None:
                     self._read_image(prepared.operation_id, image)
+        self._require_target_state(prepared, expected=expected)
+
+    def _require_target_state(
+        self, prepared: PreparedRestore, *, expected: str | None = None
+    ) -> None:
+        """Verify live targets without rereading retained encrypted images."""
+        for target in prepared.targets:
             state = self._state(prepared, target)
             # Identical before/after images are always classified BEFORE.
             if (

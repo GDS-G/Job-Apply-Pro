@@ -293,15 +293,29 @@ import base64
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+MAX_FILE_BYTES = 256 * 1024 * 1024
+MAX_RESTORE_BYTES = 1024 * 1024 * 1024
+SUPPORTED_CATEGORIES = {"DATABASE", "DOCUMENTS"}
 
-def verify_restore_evidence(root, operation_id, expected_hash, expected_size, plan_id):
+
+def verify_restore_evidence(
+    root,
+    operation_id,
+    expected_hash,
+    expected_size,
+    plan_id,
+    expected_document,
+    expected_document_hash,
+    expected_document_size,
+):
     root = Path(root).resolve(strict=True)
     if str(UUID(operation_id)) != operation_id:
         raise ValueError("Invalid operation identifier")
@@ -317,49 +331,324 @@ def verify_restore_evidence(root, operation_id, expected_hash, expected_size, pl
         pass
     else:
         raise ValueError("Restore remains blocked")
+    objects = operation / "objects"
+    objects_info = objects.lstat()
+    if not stat.S_ISDIR(objects_info.st_mode) or getattr(objects_info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("Invalid restore evidence directory")
     key = base64.b64decode(os.environ["JAP_MASTER_KEY"], validate=True)
+    if len(key) != 32:
+        raise ValueError("Invalid restore evidence key")
 
-    def decrypt(name, kind):
-        path = operation / name
+    def decrypt(path, context, maximum):
         info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 384 * 1024 * 1024:
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > maximum:
             raise ValueError("Invalid restore evidence file")
         if getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError("Invalid restore evidence file")
-        parts = path.read_text(encoding="ascii").split(":", 3)
+        with path.open("rb") as stream:
+            encoded = stream.read(maximum + 1)
+        if len(encoded) > maximum:
+            raise ValueError("Invalid restore evidence file")
+        parts = encoded.decode("ascii").split(":", 3)
         if len(parts) != 4 or parts[:3] != ["jap", "v1", "local-v1"]:
             raise ValueError("Invalid restore evidence envelope")
-        payload = base64.urlsafe_b64decode(parts[3])
-        return AESGCM(key).decrypt(
-            payload[:12], payload[12:], f"restore:v1:{operation_id}:{kind}".encode()
-        )
+        payload = base64.urlsafe_b64decode(parts[3].encode("ascii"))
+        if len(payload) < 28:
+            raise ValueError("Invalid restore evidence envelope")
+        return AESGCM(key).decrypt(payload[:12], payload[12:], context.encode())
 
-    previous = decrypt("database-preimage.enc", "database-preimage")
-    if len(previous) != int(expected_size) or hashlib.sha256(previous).hexdigest() != expected_hash.lower():
-        raise ValueError("Previous database was not preserved exactly")
-    intent = json.loads(decrypt("intent.enc", "intent"))
-    receipt = json.loads(decrypt("receipt.enc", "receipt"))
-    if intent["version"] != 1 or receipt["version"] != 1 or intent["plan"]["id"] != plan_id:
+    def record(name, kind):
+        value = json.loads(
+            decrypt(
+                operation / name,
+                f"restore:v2:{operation_id}:{kind}",
+                4 * 1024 * 1024,
+            )
+        )
+        if not isinstance(value, dict):
+            raise ValueError("Invalid restore evidence record")
+        return value
+
+    def target_path(value):
+        if not isinstance(value, str) or len(value) > 512 or "\\" in value:
+            raise ValueError("Invalid restore target")
+        relative = PurePosixPath(value)
+        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+            raise ValueError("Invalid restore target")
+        path = root.joinpath(*relative.parts)
+        resolved = path.resolve(strict=True)
+        if resolved == root or root not in resolved.parents:
+            raise ValueError("Restore target is outside the smoke workspace")
+        return path
+
+    referenced_objects = set()
+
+    def image_metadata(path_value, side, image):
+        if not isinstance(image, dict) or set(image) != {"name", "sha256", "size"}:
+            raise ValueError("Invalid restore image")
+        expected_name = f"{hashlib.sha256(path_value.encode()).hexdigest()}.{side}.enc"
+        if image["name"] != expected_name or not re.fullmatch(r"[a-f0-9]{64}", image["sha256"]):
+            raise ValueError("Invalid restore image")
+        if type(image["size"]) is not int or not 0 <= image["size"] <= MAX_FILE_BYTES:
+            raise ValueError("Invalid restore image")
+
+    def image_identity(path_value, side, image):
+        image_metadata(path_value, side, image)
+        if image["name"] in referenced_objects:
+            raise ValueError("Restore image is referenced more than once")
+        referenced_objects.add(image["name"])
+        value = decrypt(
+            objects / image["name"],
+            f"restore:v2:{operation_id}:object:{image['name']}",
+            512 * 1024 * 1024 + 4096,
+        )
+        if len(value) != image["size"] or hashlib.sha256(value).hexdigest() != image["sha256"]:
+            raise ValueError("Restore image authentication failed")
+        del value
+        return image["sha256"], image["size"]
+
+    def live_identity(path):
+        info = path.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or getattr(info, "st_file_attributes", 0) & 0x400
+            or info.st_size > MAX_FILE_BYTES
+        ):
+            raise ValueError("Invalid committed restore target")
+        digest = hashlib.sha256()
+        size = 0
+        with path.open("rb") as stream:
+            while block := stream.read(1024 * 1024):
+                size += len(block)
+                if size > MAX_FILE_BYTES:
+                    raise ValueError("Committed restore target exceeds its bound")
+                digest.update(block)
+        if size != info.st_size:
+            raise ValueError("Committed restore target changed during verification")
+        return digest.hexdigest(), size
+
+    intent = record("intent.v2.enc", "intent")
+    receipt = record("receipt.v2.enc", "receipt")
+    if set(intent) != {
+        "version",
+        "policy",
+        "operation_id",
+        "workspace",
+        "source",
+        "applied_plan",
+        "targets",
+    } or set(receipt) != {"version", "intent_sha256", "outcome", "targets"}:
+        raise ValueError("Restore record shape changed")
+    source = intent.get("source")
+    applied_plan = intent.get("applied_plan")
+    if not isinstance(source, dict) or not isinstance(applied_plan, dict):
+        raise ValueError("Restore evidence has invalid source records")
+    if set(source) != {
+        "version",
+        "workspace",
+        "database",
+        "documents",
+        "staged",
+        "plan",
+        "manifest",
+        "inputs",
+    }:
+        raise ValueError("Restore source shape changed")
+    source_plan = source.get("plan")
+    manifest = source.get("manifest")
+    if not isinstance(source_plan, dict) or not isinstance(manifest, dict):
+        raise ValueError("Restore source plan is invalid")
+    plan_categories = source_plan.get("categories")
+    manifest_categories = manifest.get("categories")
+    if (
+        type(source.get("version")) is not int
+        or source.get("version") != 1
+        or not isinstance(plan_categories, list)
+        or not plan_categories
+        or any(
+            type(category) is not str or category not in SUPPORTED_CATEGORIES
+            for category in plan_categories
+        )
+        or len(set(plan_categories)) != len(plan_categories)
+        or not isinstance(manifest_categories, list)
+        or any(
+            type(category) is not str or category not in SUPPORTED_CATEGORIES
+            for category in manifest_categories
+        )
+        or len(set(manifest_categories)) != len(manifest_categories)
+        or source_plan.get("backup_id") != manifest.get("id")
+        or not set(plan_categories).issubset(manifest_categories)
+    ):
+        raise ValueError("Restore source no longer matches its reviewed manifest")
+    if (
+        type(intent.get("version")) is not int
+        or intent.get("version") != 2
+        or intent.get("policy") != "interrupted-restore-rollback/2"
+        or intent.get("operation_id") != operation_id
+        or type(receipt.get("version")) is not int
+        or receipt.get("version") != 2
+        or receipt.get("outcome") != "APPLIED"
+        or source_plan.get("id") != plan_id
+        or applied_plan.get("id") != plan_id
+        or source_plan.get("status") != "STAGED"
+        or applied_plan.get("status") != "APPLIED"
+    ):
         raise ValueError("Restore evidence does not match the reviewed plan")
-    if Path(intent["workspace"]) != root:
+    if (
+        Path(intent["workspace"]).resolve(strict=True) != root
+        or Path(source.get("workspace", "")).resolve(strict=True) != root
+    ):
         raise ValueError("Restore evidence belongs to another workspace")
-    intent["plan"]["categories"] = sorted(intent["plan"]["categories"])
-    intent["manifest"]["categories"] = sorted(intent["manifest"]["categories"])
+    source_comparable = dict(source_plan)
+    applied_comparable = dict(applied_plan)
+    for value in (source_comparable, applied_comparable):
+        value.pop("status", None)
+        value.pop("applied_at", None)
+    if source_comparable != applied_comparable:
+        raise ValueError("Applied restore plan changed from the reviewed source plan")
+    intent["source"]["plan"]["categories"] = sorted(intent["source"]["plan"]["categories"])
+    intent["source"]["manifest"]["categories"] = sorted(
+        intent["source"]["manifest"]["categories"]
+    )
+    intent["applied_plan"]["categories"] = sorted(intent["applied_plan"]["categories"])
     canonical = json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
     if hashlib.sha256(canonical).hexdigest() != receipt["intent_sha256"]:
         raise ValueError("Restore receipt does not authenticate its intent")
-    database_targets = [target for target in receipt["targets"] if target["path"] == intent["database"]]
-    if len(database_targets) != 1:
+    targets = intent.get("targets")
+    if not isinstance(targets, list) or not targets or len(targets) > 4097:
+        raise ValueError("Invalid restore target inventory")
+    paths = [target.get("path") for target in targets if isinstance(target, dict)]
+    if (
+        len(paths) != len(targets)
+        or any(not isinstance(path, str) for path in paths)
+        or len({path.casefold() for path in paths}) != len(paths)
+    ):
+        raise ValueError("Invalid restore target inventory")
+    inputs = source.get("inputs")
+    database_name = source.get("database")
+    documents_name = source.get("documents")
+    if (
+        not isinstance(inputs, list)
+        or not isinstance(database_name, str)
+        or not isinstance(documents_name, str)
+        or len(inputs) > 4096
+        or type(source_plan.get("file_count")) is not int
+        or source_plan.get("file_count") != len(inputs)
+    ):
+        raise ValueError("Invalid restore source inventory")
+    source_total = 0
+    input_paths = []
+    database_inputs = 0
+    for item in inputs:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256", "size"}:
+            raise ValueError("Invalid restore source input")
+        item_path = item["path"]
+        if (
+            not isinstance(item_path, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", item["sha256"])
+            or type(item["size"]) is not int
+            or not 0 <= item["size"] <= MAX_FILE_BYTES
+        ):
+            raise ValueError("Invalid restore source input")
+        input_paths.append(item_path)
+        source_total += item["size"]
+        database_inputs += int(item_path == "database/job_apply_pro.db")
+    if source_total > MAX_RESTORE_BYTES:
+        raise ValueError("Restore source exceeds the supported 1 GiB bound")
+    if len({path.casefold() for path in input_paths}) != len(input_paths):
+        raise ValueError("Restore source contains case-colliding inputs")
+    if database_inputs != int("DATABASE" in plan_categories):
+        raise ValueError("Restore database input does not match its reviewed category")
+    expected_paths = []
+    expected_document_after = {}
+    for item in inputs:
+        item_path = item["path"]
+        if item_path == "database/job_apply_pro.db":
+            continue
+        relative = PurePosixPath(item_path)
+        if (
+            "DOCUMENTS" not in plan_categories
+            or len(relative.parts) < 2
+            or relative.parts[0] != "documents"
+        ):
+            raise ValueError("Invalid restore document input")
+        destination = PurePosixPath(documents_name).joinpath(*relative.parts[1:]).as_posix()
+        target_path(destination)
+        expected_paths.append(destination)
+        expected_document_after[destination] = (item["sha256"], item["size"])
+    expected_paths.append(database_name)
+    if paths != expected_paths:
+        raise ValueError("Restore target order changed from its source inputs")
+    image_totals = {"before": 0, "after": 0}
+    for target in targets:
+        if not isinstance(target, dict) or set(target) != {"path", "before", "after"}:
+            raise ValueError("Invalid restore target inventory")
+        for side in ("before", "after"):
+            image = target[side]
+            if side == "before" and image is None:
+                continue
+            image_metadata(target["path"], side, image)
+            image_totals[side] += image["size"]
+    if any(total > MAX_RESTORE_BYTES for total in image_totals.values()):
+        raise ValueError("Restore images exceed the supported 1 GiB per side bound")
+    receipt_targets = receipt.get("targets")
+    if not isinstance(receipt_targets, list) or len(receipt_targets) > 4097:
+        raise ValueError("Invalid restore receipt inventory")
+    for target in receipt_targets:
+        if (
+            not isinstance(target, list)
+            or len(target) != 3
+            or not isinstance(target[0], str)
+            or not isinstance(target[1], str)
+            or not re.fullmatch(r"[a-f0-9]{64}", target[1])
+            or type(target[2]) is not int
+            or not 0 <= target[2] <= MAX_FILE_BYTES
+        ):
+            raise ValueError("Invalid restore receipt inventory")
+    expected_receipt = []
+    images = {}
+    for target in targets:
+        path_value = target["path"]
+        live_path = target_path(path_value)
+        before = target["before"]
+        images[(path_value, "before")] = (
+            None if before is None else image_identity(path_value, "before", before)
+        )
+        after_identity = image_identity(path_value, "after", target["after"])
+        images[(path_value, "after")] = after_identity
+        if path_value != database_name and expected_document_after.get(path_value) != after_identity:
+            raise ValueError("Restore document postimage changed from its source input")
+        expected_receipt.append(
+            [path_value, target["after"]["sha256"], target["after"]["size"]]
+        )
+        if live_identity(live_path) != after_identity:
+            raise ValueError("Committed restore target no longer matches its receipt")
+    if receipt_targets != expected_receipt:
+        raise ValueError("Restore receipt target inventory changed")
+    database_targets = [target for target in targets if target["path"] == database_name]
+    if len(database_targets) != 1 or targets[-1] is not database_targets[0]:
         raise ValueError("Restore receipt does not identify the committed database")
-    database = root / intent["database"]
-    if database.parent.resolve(strict=True) != root:
-        raise ValueError("Restore database is outside the smoke workspace")
-    database_info = database.lstat()
-    if not stat.S_ISREG(database_info.st_mode) or database_info.st_nlink != 1 or getattr(database_info, "st_file_attributes", 0) & 0x400:
-        raise ValueError("Invalid committed database file")
-    actual = database.read_bytes()
-    if len(actual) != database_targets[0]["size"] or hashlib.sha256(actual).hexdigest() != database_targets[0]["sha256"]:
-        raise ValueError("Committed database no longer matches its receipt")
+    previous = images[(database_name, "before")]
+    if previous != (expected_hash.lower(), int(expected_size)):
+        raise ValueError("Previous database was not preserved exactly")
+    if images.get((expected_document, "before")) != (
+        expected_document_hash.lower(),
+        int(expected_document_size),
+    ):
+        raise ValueError("Previous document was not preserved exactly")
+    if {entry.name for entry in operation.iterdir()} != {
+        "intent.v2.enc",
+        "receipt.v2.enc",
+        "objects",
+    }:
+        raise ValueError("Restore operation contains undocumented evidence")
+    object_entries = list(objects.iterdir())
+    if (
+        len(object_entries) != len(referenced_objects)
+        or {entry.name for entry in object_entries} != referenced_objects
+    ):
+        raise ValueError("Restore object inventory differs from authenticated intent")
 
 
 if __name__ == "__main__":
@@ -481,6 +770,8 @@ try {
     if ($plan.status -ne "STAGED") { throw "Packaged restore plan was not staged" }
 
     Set-Content -LiteralPath $documentPath -Value "damaged" -Encoding utf8 -NoNewline
+    $previousDocumentHash = (Get-FileHash -LiteralPath $documentPath -Algorithm SHA256).Hash
+    $previousDocumentSize = (Get-Item -LiteralPath $documentPath).Length
     Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     $process = $null
     $apiWorkerProcess = $null
@@ -508,7 +799,7 @@ try {
     }
     # Windows PowerShell's native -c argument rewriting can strip Python quotes.
     # Source travels over stdin; only the bounded synthetic values are arguments.
-    $restoreEvidenceScript | & $PythonPath - $resolvedTestRoot $freshRestoreOperations[0].Name $previousDatabaseHash $previousDatabaseSize $plan.id
+    $restoreEvidenceScript | & $PythonPath - $resolvedTestRoot $freshRestoreOperations[0].Name $previousDatabaseHash $previousDatabaseSize $plan.id "documents/restore-smoke.enc" $previousDocumentHash $previousDocumentSize
     if ($LASTEXITCODE -ne 0) { throw "Packaged offline restore evidence failed authenticated verification" }
 
     Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")

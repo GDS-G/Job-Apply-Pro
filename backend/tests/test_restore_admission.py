@@ -37,6 +37,7 @@ from job_apply_pro.storage.restore_gate_repository import (
     safe_relative,
     workspace_access,
 )
+from restore_test_schema import stamp_current_schema
 
 SOURCE = Path(__file__).parents[1] / "src"
 PROJECT = Path(__file__).parents[2]
@@ -112,6 +113,7 @@ def workspace(tmp_path: Path) -> Workspace:
     database_url = f"sqlite:///{(tmp_path / 'app.db').as_posix()}"
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
+    stamp_current_schema(engine)
     documents = tmp_path / "documents"
     documents.mkdir()
     (documents / "resume.enc").write_bytes(b"reviewed-document")
@@ -157,14 +159,13 @@ elif boundary == 'first-file':
         original(self, *args, **kwargs)
         os._exit(77)
     RestoreRollback._install = fail
-elif boundary in ('before-commit', 'after-commit'):
-    original = OperationsRepository.save_restore_result
+elif boundary in ('before-private-bookkeeping', 'after-private-bookkeeping'):
+    original = RestoreRollback._private_database
     def fail(self, *args, **kwargs):
-        if boundary == 'after-commit':
+        if boundary == 'after-private-bookkeeping':
             original(self, *args, **kwargs)
-            self.close_for_offline_restore()
         os._exit(77)
-    OperationsRepository.save_restore_result = fail
+    RestoreRollback._private_database = fail
 elif boundary == 'receipt':
     RestoreRollback.finalize = lambda *args: os._exit(77)
 elif boundary == 'clear':
@@ -206,7 +207,7 @@ def test_crash_before_receipt_blocks_relaunch_without_database_reads(
         assert workspace.gate.blocked()
 
 
-@pytest.mark.parametrize("boundary", ["before-commit", "after-commit"])
+@pytest.mark.parametrize("boundary", ["before-private-bookkeeping", "after-private-bookkeeping"])
 def test_private_bookkeeping_crash_precedes_guard_and_original_writes(
     workspace: Workspace, boundary: str
 ) -> None:

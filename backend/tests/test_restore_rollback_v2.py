@@ -1,12 +1,15 @@
 """Adversarial interrupted-operation recovery, without live providers or power-loss claims."""
 
+import copy
+import hashlib
+import json
 import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -38,7 +41,7 @@ from job_apply_pro.storage.restore_gate_repository import (
     RestoreGateRepository,
     workspace_access,
 )
-from test_restore_admission import Workspace, cli, environment, run
+from test_restore_admission import KEY, Workspace, cli, environment, run
 from test_restore_admission import workspace as workspace
 
 
@@ -103,6 +106,95 @@ def _rollback(recovery: RestoreRollback, prepared: PreparedRestore) -> None:
     recovery.host.rollback(prepared.operation_id, recovery._review_fingerprint(prepared))
 
 
+def _packaged_restore_verifier(*, reveal_failure: bool = False) -> str:
+    source = (Path(__file__).parents[2] / "scripts" / "test_packaged_backend.ps1").read_text(
+        encoding="utf-8"
+    )
+    verifier = source.split("$restoreEvidenceScript = @'", 1)[1].split("\n'@", 1)[0]
+    if reveal_failure:
+        hidden = (
+            "    except Exception:\n"
+            '        print("Packaged durable restore evidence verification failed.", '
+            "file=sys.stderr)"
+        )
+        revealed = "    except Exception as error:\n        print(str(error), file=sys.stderr)"
+        assert hidden in verifier
+        verifier = verifier.replace(hidden, revealed)
+    return verifier
+
+
+def _verify_packaged_restore(
+    workspace: Workspace,
+    operation_id: str,
+    database_before: tuple[str, int],
+    document_before: tuple[str, int],
+    *,
+    reveal_failure: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-",
+            str(workspace.root),
+            operation_id,
+            database_before[0],
+            str(database_before[1]),
+            workspace.plan.id,
+            "documents/letter.enc",
+            document_before[0],
+            str(document_before[1]),
+        ],
+        input=_packaged_restore_verifier(reveal_failure=reveal_failure),
+        env={**environment(workspace.root), "JAP_MASTER_KEY": KEY},
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def _rewrite_restore_records(
+    workspace: Workspace,
+    operation_id: str,
+    intent: dict[str, Any],
+    receipt: dict[str, Any],
+) -> None:
+    canonical = copy.deepcopy(intent)
+    canonical["source"]["plan"]["categories"] = sorted(canonical["source"]["plan"]["categories"])
+    canonical["source"]["manifest"]["categories"] = sorted(
+        canonical["source"]["manifest"]["categories"]
+    )
+    canonical["applied_plan"]["categories"] = sorted(canonical["applied_plan"]["categories"])
+    receipt["intent_sha256"] = hashlib.sha256(
+        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    operation = workspace.gate.operation_path(operation_id)
+    (operation / "intent.v2.enc").write_text(
+        workspace.cipher.encrypt_json(intent, context=f"restore:v2:{operation_id}:intent"),
+        encoding="ascii",
+    )
+    (operation / "receipt.v2.enc").write_text(
+        workspace.cipher.encrypt_json(receipt, context=f"restore:v2:{operation_id}:receipt"),
+        encoding="ascii",
+    )
+
+
+def _terminal_restore_records(
+    workspace: Workspace, operation_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return (
+        cast(
+            dict[str, Any],
+            workspace.gate.read_v2_record(operation_id, "intent", workspace.cipher),
+        ),
+        cast(
+            dict[str, Any],
+            workspace.gate.read_v2_record(operation_id, "receipt", workspace.cipher),
+        ),
+    )
+
+
 @pytest.mark.parametrize("after_installs", [0, 1, 2, 3])
 def test_rollback_restores_exact_original_database_and_documents_at_each_install_boundary(
     changed_workspace: Workspace, monkeypatch: pytest.MonkeyPatch, after_installs: int
@@ -152,6 +244,7 @@ def test_document_only_restore_also_retains_database_before_bookkeeping(
     documents_only = Workspace(workspace.root, plan, workspace.manifest, workspace.cipher)
     before = _live(documents_only)
     recovery, prepared = _interrupted_apply(documents_only, monkeypatch, after_installs=3)
+    assert not list(workspace.root.rglob("bookkeeping.private.db"))
     database = prepared.targets[-1]
     assert database.path == "app.db"
     assert database.before is not None
@@ -201,7 +294,8 @@ def test_private_bookkeeping_failure_leaves_original_files_and_admission_untouch
     workspace = changed_workspace
     before = _live(workspace)
 
-    def fail(*args: object) -> bytes:
+    def fail(*args: object, **kwargs: object) -> bytes:
+        del args, kwargs
         raise Interrupted("private bookkeeping failed")
 
     monkeypatch.setattr(RestoreRollback, "_private_database", fail)
@@ -210,6 +304,279 @@ def test_private_bookkeeping_failure_leaves_original_files_and_admission_untouch
 
     assert not workspace.gate.blocked()
     assert _live(workspace) == before
+
+
+def test_pre_guard_preparation_failure_discards_only_its_new_operation(
+    changed_workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = changed_workspace
+    before = _live(workspace)
+    original = RestoreRollback._save_image
+    saved = 0
+
+    def stop_after_first_image(
+        self: RestoreRollback, operation_id: str, path: str, side: str, value: bytes
+    ) -> Image:
+        nonlocal saved
+        result = original(self, operation_id, path, side, value)
+        saved += 1
+        if saved == 1:
+            raise Interrupted("pre-guard image interruption")
+        return result
+
+    monkeypatch.setattr(RestoreRollback, "_save_image", stop_after_first_image)
+    with workspace_access(workspace.root, restore=True), pytest.raises(Interrupted):
+        _host(workspace).apply(workspace.prepare())
+
+    operations = workspace.gate.control / "operations"
+    assert saved == 1
+    assert not workspace.gate.blocked()
+    assert not operations.exists() or not list(operations.iterdir())
+    assert _live(workspace) == before
+
+
+def test_staged_documents_are_read_and_sealed_sequentially_after_operation_allocation(
+    changed_workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = changed_workspace
+    staged = Path(workspace.plan.staged_path)
+    events: list[str] = []
+    original_read = RestoreRollback._read_bounded
+    original_read_image = RestoreRollback._read_image
+    original_save = RestoreRollback._save_image
+    original_allocate = RestoreGateRepository.allocate_operation
+
+    def allocate(self: RestoreGateRepository) -> str:
+        result = original_allocate(self)
+        events.append("allocate")
+        return result
+
+    def read(self: RestoreRollback, path: Path) -> bytes:
+        result = original_read(self, path)
+        if path.is_relative_to(staged) and path.relative_to(staged).parts[0] == "documents":
+            events.append(f"read:{path.name}")
+        return result
+
+    def save(self: RestoreRollback, operation_id: str, path: str, side: str, value: bytes) -> Image:
+        result = original_save(self, operation_id, path, side, value)
+        if side == "after" and path.startswith("documents/"):
+            events.append(f"seal:{Path(path).name}")
+        return result
+
+    def authenticate(self: RestoreRollback, operation_id: str, image: Image) -> bytes:
+        events.append("authenticate")
+        return original_read_image(self, operation_id, image)
+
+    monkeypatch.setattr(RestoreGateRepository, "allocate_operation", allocate)
+    monkeypatch.setattr(RestoreRollback, "_read_bounded", read)
+    monkeypatch.setattr(RestoreRollback, "_save_image", save)
+    monkeypatch.setattr(RestoreRollback, "_read_image", authenticate)
+    with workspace_access(workspace.root, restore=True):
+        _host(workspace).apply(workspace.prepare())
+
+    assert events[0] == "allocate"
+    assert events[1:5] == [
+        "read:letter.enc",
+        "seal:letter.enc",
+        "read:resume.enc",
+        "seal:resume.enc",
+    ]
+    assert events[5:] and set(events[5:]) == {"authenticate"}
+
+
+def test_release_verifier_authenticates_exact_terminal_inventory_and_rejects_extra_evidence(
+    changed_workspace: Workspace,
+) -> None:
+    workspace = changed_workspace
+    database_before = hash_file(workspace.database)
+    document_before = hash_file(workspace.root / "documents" / "letter.enc")
+    with workspace_access(workspace.root, restore=True):
+        _host(workspace).apply(workspace.prepare())
+    operations = list((workspace.gate.control / "operations").iterdir())
+    assert len(operations) == 1
+    operation_id = operations[0].name
+
+    accepted = _verify_packaged_restore(workspace, operation_id, database_before, document_before)
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+
+    unexpected = operations[0] / "bookkeeping.private.db"
+    unexpected.write_bytes(b"plaintext scratch must never be accepted")
+    refused = _verify_packaged_restore(workspace, operation_id, database_before, document_before)
+    assert refused.returncode == 1
+    assert refused.stderr.strip() == "Packaged durable restore evidence verification failed."
+
+
+def _completed_packaged_evidence(
+    workspace: Workspace,
+) -> tuple[str, tuple[str, int], tuple[str, int], dict[str, Any], dict[str, Any]]:
+    database_before = hash_file(workspace.database)
+    document_before = hash_file(workspace.root / "documents" / "letter.enc")
+    with workspace_access(workspace.root, restore=True):
+        _host(workspace).apply(workspace.prepare())
+    operations = list((workspace.gate.control / "operations").iterdir())
+    assert len(operations) == 1
+    operation_id = operations[0].name
+    intent, receipt = _terminal_restore_records(workspace, operation_id)
+    return operation_id, database_before, document_before, intent, receipt
+
+
+@pytest.mark.parametrize(
+    ("malformation", "message"),
+    [
+        ("source-version", "Restore source no longer matches its reviewed manifest"),
+        ("manifest-binding", "Restore source no longer matches its reviewed manifest"),
+        ("file-count", "Invalid restore source inventory"),
+        ("database-cardinality", "Restore database input does not match its reviewed category"),
+        ("case-collision", "Restore source contains case-colliding inputs"),
+        ("source-total", "Restore source exceeds the supported 1 GiB bound"),
+    ],
+)
+def test_release_verifier_rechecks_runtime_source_invariants(
+    changed_workspace: Workspace, malformation: str, message: str
+) -> None:
+    workspace = changed_workspace
+    operation_id, database_before, document_before, intent, receipt = _completed_packaged_evidence(
+        workspace
+    )
+    source = intent["source"]
+    source_plan = source["plan"]
+    applied_plan = intent["applied_plan"]
+    inputs = source["inputs"]
+    if malformation == "source-version":
+        source["version"] = 2
+    elif malformation == "manifest-binding":
+        replacement = str(uuid4())
+        source_plan["backup_id"] = replacement
+        applied_plan["backup_id"] = replacement
+    elif malformation == "file-count":
+        source_plan["file_count"] += 1
+        applied_plan["file_count"] += 1
+    elif malformation == "database-cardinality":
+        source_plan["categories"] = ["DOCUMENTS"]
+        applied_plan["categories"] = ["DOCUMENTS"]
+    else:
+        database_input = next(
+            item for item in inputs if item["path"] == "database/job_apply_pro.db"
+        )
+        if malformation == "case-collision":
+            inputs.append(copy.deepcopy(database_input))
+        else:
+            for _ in range(4):
+                duplicate = copy.deepcopy(database_input)
+                duplicate["size"] = 256 * 1024 * 1024
+                inputs.append(duplicate)
+        source_plan["file_count"] = len(inputs)
+        applied_plan["file_count"] = len(inputs)
+    _rewrite_restore_records(workspace, operation_id, intent, receipt)
+
+    refused = _verify_packaged_restore(
+        workspace,
+        operation_id,
+        database_before,
+        document_before,
+        reveal_failure=True,
+    )
+    assert refused.returncode == 1
+    assert refused.stderr.strip() == message
+
+
+@pytest.mark.parametrize("side", ["before", "after"])
+def test_release_verifier_enforces_one_gibibyte_bound_for_each_image_side(
+    changed_workspace: Workspace, side: str
+) -> None:
+    workspace = changed_workspace
+    operation_id, database_before, document_before, intent, receipt = _completed_packaged_evidence(
+        workspace
+    )
+    source = intent["source"]
+    inputs = source["inputs"]
+    targets = intent["targets"]
+    receipt_targets = receipt["targets"]
+    empty_hash = hashlib.sha256(b"").hexdigest()
+    extra_targets = []
+    extra_receipts = []
+    for index in range(5):
+        path = f"documents/aggregate-{index}.enc"
+        (workspace.root / path).write_bytes(b"")
+        inputs.append({"path": path, "sha256": empty_hash, "size": 0})
+        after_size = 256 * 1024 * 1024 if side == "after" else 0
+        before = None
+        if side == "before":
+            before = {
+                "name": f"{hashlib.sha256(path.encode()).hexdigest()}.before.enc",
+                "sha256": "0" * 64,
+                "size": 256 * 1024 * 1024,
+            }
+        after = {
+            "name": f"{hashlib.sha256(path.encode()).hexdigest()}.after.enc",
+            "sha256": empty_hash if after_size == 0 else "0" * 64,
+            "size": after_size,
+        }
+        extra_targets.append({"path": path, "before": before, "after": after})
+        extra_receipts.append([path, after["sha256"], after["size"]])
+    targets[-1:-1] = extra_targets
+    receipt_targets[-1:-1] = extra_receipts
+    source["plan"]["file_count"] = len(inputs)
+    intent["applied_plan"]["file_count"] = len(inputs)
+    _rewrite_restore_records(workspace, operation_id, intent, receipt)
+
+    refused = _verify_packaged_restore(
+        workspace,
+        operation_id,
+        database_before,
+        document_before,
+        reveal_failure=True,
+    )
+    assert refused.returncode == 1
+    assert refused.stderr.strip() == "Restore images exceed the supported 1 GiB per side bound"
+
+
+@pytest.mark.parametrize(
+    ("location", "message"),
+    [
+        ("source", "Invalid restore source input"),
+        ("image", "Invalid restore image"),
+        ("receipt", "Invalid restore receipt inventory"),
+    ],
+)
+def test_release_verifier_rejects_boolean_byte_counts(
+    changed_workspace: Workspace, location: str, message: str
+) -> None:
+    workspace = changed_workspace
+    operation_id, database_before, document_before, intent, receipt = _completed_packaged_evidence(
+        workspace
+    )
+    path = "documents/letter.enc"
+    value = b"x"
+    digest = hashlib.sha256(value).hexdigest()
+    source_input = next(item for item in intent["source"]["inputs"] if item["path"] == path)
+    target = next(item for item in intent["targets"] if item["path"] == path)
+    receipt_target = next(item for item in receipt["targets"] if item[0] == path)
+    source_input["sha256"] = digest
+    source_input["size"] = True if location == "source" else 1
+    target["after"]["sha256"] = digest
+    target["after"]["size"] = True if location == "image" else 1
+    receipt_target[1] = digest
+    receipt_target[2] = True if location == "receipt" else 1
+    (workspace.root / path).write_bytes(value)
+    image_name = target["after"]["name"]
+    (workspace.gate.operation_path(operation_id) / "objects" / image_name).write_text(
+        workspace.cipher.encrypt_bytes(
+            value, context=f"restore:v2:{operation_id}:object:{image_name}"
+        ),
+        encoding="ascii",
+    )
+    _rewrite_restore_records(workspace, operation_id, intent, receipt)
+
+    refused = _verify_packaged_restore(
+        workspace,
+        operation_id,
+        database_before,
+        document_before,
+        reveal_failure=True,
+    )
+    assert refused.returncode == 1
+    assert refused.stderr.strip() == message
 
 
 def test_rollback_removes_only_known_introduced_target_and_preserves_unrelated_files(
@@ -459,6 +826,42 @@ def test_interruption_after_removing_introduced_file_is_idempotently_recoverable
 
     assert _live(workspace) == before
     assert not workspace.gate.blocked()
+
+
+@pytest.mark.parametrize("changed_target", ["database", "document"])
+def test_live_target_change_before_guard_rejects_stale_rollback_baseline(
+    changed_workspace: Workspace,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_target: str,
+) -> None:
+    workspace = changed_workspace
+    original_write = RestoreGateRepository.write_v2_record
+
+    def change_database_after_intent(
+        gate: RestoreGateRepository,
+        operation_id: str,
+        name: str,
+        value: dict[str, object],
+        cipher: SensitiveDataCipher,
+    ) -> None:
+        original_write(gate, operation_id, name, value, cipher)
+        if name == "intent":
+            target = (
+                workspace.database
+                if changed_target == "database"
+                else workspace.root / "documents" / "letter.enc"
+            )
+            target.write_bytes(target.read_bytes() + b"external-change")
+
+    monkeypatch.setattr(RestoreGateRepository, "write_v2_record", change_database_after_intent)
+    with (
+        workspace_access(workspace.root, restore=True),
+        pytest.raises(RestoreAdmissionError, match="unknown bytes"),
+    ):
+        _host(workspace).apply(workspace.prepare())
+
+    assert not workspace.gate.blocked()
+    assert not list((workspace.gate.control / "operations").glob("*"))
 
 
 def test_rollback_receipt_after_interruption_finalizes_without_repeating_target_writes(

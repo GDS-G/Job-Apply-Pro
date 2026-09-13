@@ -1413,7 +1413,7 @@ export function registerWorkbenchIpc(
         message:
           "Job Apply Pro will stop its local backend and replace the selected data.",
         detail:
-          "The current database is retained as a .pre-restore recovery file. The app restarts the backend after the exact reviewed fingerprint is applied.",
+          "Before replacement, the app seals exact encrypted recovery images under restore-control. Normal restart stays blocked until authenticated terminal evidence verifies completion.",
         buttons: ["Cancel", "Apply verified restore"],
         defaultId: 0,
         cancelId: 0,

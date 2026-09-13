@@ -138,7 +138,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Reviewed Job Readiness v0.60.0-alpha.1"),
+      screen.getByText("Durable Restore Rollback v0.61.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

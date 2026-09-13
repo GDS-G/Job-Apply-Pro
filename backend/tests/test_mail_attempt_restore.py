@@ -30,6 +30,7 @@ from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.backup import BackupError, BackupService
 from job_apply_pro.services.restore_recovery import RestoreRecoveryService
+from job_apply_pro.services.restore_rollback import RestoreRollback
 from job_apply_pro.storage.database import Base
 from job_apply_pro.storage.operations_repository import OperationsRepository
 from job_apply_pro.storage.restore_gate_repository import (
@@ -329,7 +330,7 @@ def test_backup_before_attempt_cannot_reopen_draft(
 
 
 @pytest.mark.parametrize("legacy", [False, True])
-def test_exact_history_with_additional_staged_evidence_is_compatible(
+def test_mail_component_accepts_exact_history_with_additional_staged_evidence(
     restore: _Restore, legacy: bool
 ) -> None:
     if legacy:
@@ -339,10 +340,9 @@ def test_exact_history_with_additional_staged_evidence_is_compatible(
     _record(restore.current, "UNCERTAIN", claim=not legacy)
     shutil.copyfile(restore.current, restore.staged)
     _record(restore.staged, "ACCEPTED", suffix="2", claim=not legacy)
-    original = restore.current.read_bytes()
-    restore.apply()
-    restore.assert_applied(original)
-    assert restore.document.read_bytes() == b"staged encrypted document"
+    # This deliberately partial fixture proves the narrow mail component. Full
+    # forward restore separately requires the complete dependency-history schema.
+    BackupService._require_preserved_mail_attempts(restore.current, restore.staged)
 
 
 @pytest.mark.parametrize("column", _AUDIT_COLUMNS)
@@ -485,13 +485,18 @@ def test_unreadable_mail_history_error_is_static(restore: _Restore) -> None:
     )
 
 
-def test_documents_only_restore_does_not_consult_mail_history(restore: _Restore) -> None:
+def test_documents_only_restore_does_not_bypass_full_history_admission(restore: _Restore) -> None:
+    from job_apply_pro.services.restore_history import RestoreHistoryError
+
     _record(restore.current)
     original = restore.current.read_bytes()
-    with patch.object(BackupService, "_require_preserved_mail_attempts") as guard:
+    with (
+        patch.object(BackupService, "_require_preserved_mail_attempts") as guard,
+        pytest.raises(RestoreHistoryError),
+    ):
         restore.apply({BackupCategory.DOCUMENTS})
     guard.assert_not_called()
-    assert restore.current.read_bytes() != original  # Applied-plan bookkeeping commits.
+    assert restore.current.read_bytes() == original
     with closing(sqlite3.connect(restore.current)) as connection:
         assert connection.execute(
             "SELECT status FROM communication_mutation_audits"
@@ -499,7 +504,256 @@ def test_documents_only_restore_does_not_consult_mail_history(restore: _Restore)
         assert connection.execute("SELECT * FROM mail_send_claims").fetchall() == [
             ("draft-1", "audit-1")
         ]
-    assert restore.document.read_bytes() == b"staged encrypted document"
+    assert restore.document.read_bytes() != b"staged encrypted document"
+    assert not RestoreGateRepository(restore.current.parent).blocked()
+
+
+def test_candidate_trigger_is_rejected_before_private_bookkeeping_can_change_history(
+    restore: _Restore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _record(restore.current)
+    shutil.copyfile(restore.current, restore.staged)
+    with closing(sqlite3.connect(restore.staged)) as connection, connection:
+        connection.execute(
+            "CREATE TRIGGER erase_mail_claim AFTER INSERT ON backup_manifests "
+            "BEGIN DELETE FROM mail_send_claims; END"
+        )
+    monkeypatch.setattr(
+        "job_apply_pro.services.restore_history.require_preserved_history_snapshot",
+        lambda *args, **kwargs: None,
+    )
+
+    restore.assert_refused(message="bookkeeping database")
+
+
+def test_private_authorizer_denies_triggered_history_write_even_if_schema_check_is_bypassed(
+    restore: _Restore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _record(restore.current)
+    shutil.copyfile(restore.current, restore.staged)
+    with closing(sqlite3.connect(restore.staged)) as connection, connection:
+        connection.execute(
+            "CREATE TRIGGER erase_mail_audit AFTER INSERT ON backup_manifests "
+            "BEGIN DELETE FROM communication_mutation_audits; END"
+        )
+    monkeypatch.setattr(
+        RestoreRollback,
+        "_require_bookkeeping_schema",
+        staticmethod(lambda connection: None),
+    )
+    monkeypatch.setattr(
+        "job_apply_pro.services.restore_history.require_preserved_history_snapshot",
+        lambda *args, **kwargs: None,
+    )
+
+    restore.assert_refused(message="bookkeeping database")
+
+
+@pytest.mark.parametrize(
+    ("action", "first", "second", "source"),
+    [
+        (sqlite3.SQLITE_DELETE, "backup_manifests", None, None),
+        (sqlite3.SQLITE_ATTACH, "file:auxiliary.db", None, None),
+        (sqlite3.SQLITE_DETACH, "auxiliary", None, None),
+        (sqlite3.SQLITE_PRAGMA, "user_version", None, None),
+        (sqlite3.SQLITE_CREATE_TABLE, "forbidden", None, None),
+        (sqlite3.SQLITE_DROP_TABLE, "backup_manifests", None, None),
+        (sqlite3.SQLITE_ALTER_TABLE, "main", "backup_manifests", None),
+        (sqlite3.SQLITE_CREATE_INDEX, "ix_forbidden", "backup_manifests", None),
+        (sqlite3.SQLITE_FUNCTION, None, "length", None),
+        (sqlite3.SQLITE_UPDATE, "backup_manifests", "id", None),
+        (sqlite3.SQLITE_UPDATE, "restore_plans", "backup_id", None),
+        (sqlite3.SQLITE_INSERT, "mail_send_claims", None, None),
+        (sqlite3.SQLITE_UPDATE, "restore_plans", "status", "hostile_trigger"),
+        (-1, None, None, None),
+    ],
+)
+def test_private_bookkeeping_authorizer_denial_matrix(
+    action: int,
+    first: str | None,
+    second: str | None,
+    source: str | None,
+) -> None:
+    assert (
+        RestoreRollback._bookkeeping_authorizer(action, first, second, "main", source)
+        == sqlite3.SQLITE_DENY
+    )
+
+
+@pytest.mark.parametrize(
+    ("action", "first", "second"),
+    [
+        (sqlite3.SQLITE_READ, "communication_mutation_audits", "id"),
+        (sqlite3.SQLITE_SELECT, None, None),
+        (sqlite3.SQLITE_TRANSACTION, "BEGIN", None),
+        (sqlite3.SQLITE_SAVEPOINT, "BEGIN", "private"),
+        (sqlite3.SQLITE_INSERT, "backup_manifests", None),
+        (sqlite3.SQLITE_INSERT, "restore_plans", None),
+        (sqlite3.SQLITE_UPDATE, "backup_manifests", "status"),
+        (sqlite3.SQLITE_UPDATE, "backup_manifests", "archive_path"),
+        (sqlite3.SQLITE_UPDATE, "backup_manifests", "archive_sha256"),
+        (sqlite3.SQLITE_UPDATE, "backup_manifests", "manifest_json"),
+        (sqlite3.SQLITE_UPDATE, "backup_manifests", "verified_at"),
+        (sqlite3.SQLITE_UPDATE, "restore_plans", "status"),
+        (sqlite3.SQLITE_UPDATE, "restore_plans", "plan_json"),
+        (sqlite3.SQLITE_UPDATE, "restore_plans", "applied_at"),
+    ],
+)
+def test_private_bookkeeping_authorizer_allow_matrix(
+    action: int, first: str | None, second: str | None
+) -> None:
+    assert (
+        RestoreRollback._bookkeeping_authorizer(action, first, second, "main", None)
+        == sqlite3.SQLITE_OK
+    )
+
+
+def test_private_bookkeeping_authorizer_allows_fixed_writes_and_transactions(
+    restore: _Restore,
+) -> None:
+    with closing(sqlite3.connect(":memory:")) as connection:
+        connection.deserialize(restore.current.read_bytes())
+        connection.execute("PRAGMA foreign_keys = ON")
+        RestoreRollback._require_bookkeeping_schema(connection)
+        connection.set_authorizer(RestoreRollback._bookkeeping_authorizer)
+        manifest_id = str(uuid4())
+        plan_id = str(uuid4())
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "INSERT INTO backup_manifests "
+            "(id, status, archive_path, archive_sha256, manifest_json, created_at, verified_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                manifest_id,
+                "VERIFIED",
+                "synthetic.japbackup",
+                "a" * 64,
+                "{}",
+                "2026-09-13 12:00:00",
+                None,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO restore_plans "
+            "(id, backup_id, status, plan_json, created_at, applied_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                plan_id,
+                manifest_id,
+                "STAGED",
+                "{}",
+                "2026-09-13 12:00:00",
+                None,
+            ),
+        )
+        connection.execute(
+            "UPDATE backup_manifests SET status = ?, verified_at = ? WHERE id = ?",
+            ("VERIFIED", "2026-09-13 12:01:00", manifest_id),
+        )
+        connection.execute(
+            "UPDATE restore_plans SET status = ?, applied_at = ? WHERE id = ?",
+            ("APPLIED", "2026-09-13 12:01:00", plan_id),
+        )
+        connection.commit()
+        assert connection.execute(
+            "SELECT status FROM restore_plans WHERE id = ?", (plan_id,)
+        ).fetchone() == ("APPLIED",)
+
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "UPDATE restore_plans SET status = ? WHERE id = ?", ("ROLLED_BACK", plan_id)
+        )
+        connection.rollback()
+        assert connection.execute(
+            "SELECT status FROM restore_plans WHERE id = ?", (plan_id,)
+        ).fetchone() == ("APPLIED",)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "DELETE FROM backup_manifests",
+        "ATTACH DATABASE ':memory:' AS auxiliary",
+        "PRAGMA user_version",
+        "CREATE TABLE forbidden (id INTEGER)",
+        "SELECT length(id) FROM backup_manifests",
+        "UPDATE backup_manifests SET id = id",
+    ],
+)
+def test_private_bookkeeping_authorizer_denies_sql_execution(
+    restore: _Restore, statement: str
+) -> None:
+    with closing(sqlite3.connect(":memory:")) as connection:
+        connection.deserialize(restore.current.read_bytes())
+        connection.set_authorizer(RestoreRollback._bookkeeping_authorizer)
+        with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
+            connection.execute(statement).fetchall()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "view",
+        "foreign-key",
+        "table-check",
+        "missing-index",
+        "unexpected-index",
+        "partial-index",
+        "expression-index",
+        "index-collation",
+    ],
+)
+def test_candidate_requires_exact_private_bookkeeping_schema(
+    restore: _Restore, damage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with closing(sqlite3.connect(restore.staged)) as connection, connection:
+        if damage in {"view", "foreign-key", "table-check"}:
+            connection.execute("DROP TABLE restore_plans")
+            columns = (
+                "id VARCHAR(36) NOT NULL PRIMARY KEY, backup_id VARCHAR(36) NOT NULL, "
+                "status VARCHAR(30) NOT NULL, plan_json JSON NOT NULL, "
+                "created_at DATETIME NOT NULL, applied_at DATETIME"
+            )
+            if damage == "view":
+                connection.execute(
+                    "CREATE VIEW restore_plans AS SELECT NULL AS id, NULL AS backup_id, "
+                    "NULL AS status, NULL AS plan_json, NULL AS created_at, NULL AS applied_at"
+                )
+            else:
+                relationship = (
+                    ""
+                    if damage == "foreign-key"
+                    else ", FOREIGN KEY(backup_id) REFERENCES backup_manifests (id)"
+                )
+                check = ", CHECK(status <> '')" if damage == "table-check" else ""
+                connection.execute(f"CREATE TABLE restore_plans ({columns}{relationship}{check})")
+                connection.execute(
+                    "CREATE INDEX ix_restore_plans_backup_id ON restore_plans (backup_id)"
+                )
+                connection.execute("CREATE INDEX ix_restore_plans_status ON restore_plans (status)")
+        elif damage == "missing-index":
+            connection.execute("DROP INDEX ix_restore_plans_status")
+        elif damage == "unexpected-index":
+            connection.execute(
+                "CREATE INDEX ix_restore_plans_created_at ON restore_plans (created_at)"
+            )
+        else:
+            connection.execute("DROP INDEX ix_restore_plans_status")
+            if damage == "partial-index":
+                definition = "status) WHERE status IS NOT NULL"
+            elif damage == "expression-index":
+                definition = "lower(status))"
+            else:
+                definition = "status COLLATE NOCASE DESC)"
+            connection.execute(
+                f"CREATE INDEX ix_restore_plans_status ON restore_plans ({definition}"
+            )
+    monkeypatch.setattr(
+        "job_apply_pro.services.restore_history.require_preserved_history_snapshot",
+        lambda *args, **kwargs: None,
+    )
+
+    restore.assert_refused(message="bookkeeping database")
 
 
 @pytest.mark.parametrize("revision", [None, "20260805_0007"])
@@ -513,13 +767,17 @@ def test_valid_pre_mail_schema_has_no_send_evidence_to_preserve(
             connection.execute("DROP TABLE alembic_version")
         else:
             connection.execute("UPDATE alembic_version SET version_num=?", (revision,))
-    restore.apply()
-    restore.assert_applied()
+    BackupService._require_preserved_mail_attempts(restore.current, restore.staged)
+    from job_apply_pro.services.restore_history import RestoreHistoryError
+
+    original = restore.current.read_bytes()
+    with pytest.raises(RestoreHistoryError):
+        restore.apply()
+    assert restore.current.read_bytes() == original
 
 
-def test_current_schema_without_attempts_is_compatible(restore: _Restore) -> None:
-    restore.apply()
-    restore.assert_applied()
+def test_mail_component_without_attempts_is_compatible(restore: _Restore) -> None:
+    BackupService._require_preserved_mail_attempts(restore.current, restore.staged)
 
 
 def test_matching_audit_does_not_allow_discarding_its_claim(restore: _Restore) -> None:
