@@ -1543,7 +1543,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Verified Mail Attachments v0.55.0-alpha.1</strong>
+              <strong>Durable Restore Admission v0.56.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

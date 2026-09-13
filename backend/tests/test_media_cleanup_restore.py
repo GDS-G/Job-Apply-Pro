@@ -49,12 +49,9 @@ class RestoreFiles:
     staged_document: Path
 
     def apply(self) -> None:
-        BackupService.apply_staged_files(
-            self.plan,
-            database_url=f"sqlite:///{self.database.as_posix()}",
-            document_dir=self.documents,
-            staging_dir=self.staging,
-        )
+        # Unit-test the read-only precondition directly. Actual admitted writes,
+        # encrypted preimages and subprocess crash behavior have dedicated tests.
+        BackupService._require_resolved_media_cleanup(self.database)
 
     def assert_not_replaced(self, original_database: bytes | None) -> None:
         if original_database is None:
@@ -130,7 +127,7 @@ def test_restore_blocks_every_non_deleted_current_cleanup_state(
 
 
 @pytest.mark.parametrize("states", [["DELETED", "DELETED"], [], None])
-def test_restore_allows_deleted_empty_or_legacy_journal_and_preserves_previous_database(
+def test_restore_precondition_allows_deleted_empty_or_legacy_journal_without_writing(
     restore_files: RestoreFiles, states: list[str | None] | None
 ) -> None:
     _database(restore_files.database, states)
@@ -138,11 +135,7 @@ def test_restore_allows_deleted_empty_or_legacy_journal_and_preserves_previous_d
 
     restore_files.apply()
 
-    assert restore_files.database.read_bytes() == b"verified-staged-database"
-    assert restore_files.database.with_suffix(".db.pre-restore").read_bytes() == original
-    assert restore_files.document.read_bytes() == b"staged-encrypted-document"
-    assert restore_files.staged_database.read_bytes() == b"verified-staged-database"
-    assert restore_files.staged_document.read_bytes() == b"staged-encrypted-document"
+    restore_files.assert_not_replaced(original)
 
 
 @pytest.mark.parametrize("current_content", [b"not-a-sqlite-database", None])
@@ -225,14 +218,17 @@ def test_restore_blocks_uninspectable_journal_schema(
 
 
 @pytest.mark.parametrize("database_exists", [True, False])
-def test_document_only_restore_does_not_inspect_database(
+def test_legacy_document_restore_cannot_bypass_admission_or_inspect_database(
     restore_files: RestoreFiles, database_exists: bool
 ) -> None:
     if database_exists:
         _database(restore_files.database, ["MANUAL_REVIEW"])
     original = restore_files.database.read_bytes() if database_exists else None
     document_plan = restore_files.plan.model_copy(update={"categories": {BackupCategory.DOCUMENTS}})
-    with patch("job_apply_pro.services.backup.sqlite3.connect") as connect:
+    with (
+        patch("job_apply_pro.services.backup.sqlite3.connect") as connect,
+        pytest.raises(BackupError, match="disabled"),
+    ):
         BackupService.apply_staged_files(
             document_plan,
             database_url=f"sqlite:///{restore_files.database.as_posix()}",
@@ -241,7 +237,7 @@ def test_document_only_restore_does_not_inspect_database(
         )
 
     connect.assert_not_called()
-    assert restore_files.document.read_bytes() == b"staged-encrypted-document"
+    assert restore_files.document.read_bytes() == b"current-encrypted-document"
     assert restore_files.staged_document.read_bytes() == b"staged-encrypted-document"
     if original is None:
         assert not restore_files.database.exists()

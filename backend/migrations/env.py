@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from job_apply_pro.config import get_settings
+from job_apply_pro.restore_admission import runtime_access
 from job_apply_pro.storage import models  # noqa: F401
 from job_apply_pro.storage.database import Base
 
@@ -39,7 +40,8 @@ def run_migrations_online() -> None:
             context.run_migrations()
 
 
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    run_migrations_online()
+with runtime_access(get_settings()):
+    if context.is_offline_mode():
+        run_migrations_offline()
+    else:
+        run_migrations_online()

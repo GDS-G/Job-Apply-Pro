@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 import sqlite3
 from contextlib import closing
@@ -5,16 +6,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from job_apply_pro import __version__
 from job_apply_pro.domain.communications import IntegrationProvider, MutationStatus
 from job_apply_pro.domain.mail import ProviderMailResult
 from job_apply_pro.domain.operations import (
     BackupCategory,
     BackupCreate,
+    BackupEntry,
+    BackupManifest,
+    BackupStatus,
     RestoreCreate,
     RestorePlan,
     RestoreStatus,
@@ -23,8 +29,14 @@ from job_apply_pro.integrations.communications import ProviderSendUncertainError
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.backup import BackupError, BackupService
+from job_apply_pro.services.restore_recovery import RestoreRecoveryService
 from job_apply_pro.storage.database import Base
 from job_apply_pro.storage.operations_repository import OperationsRepository
+from job_apply_pro.storage.restore_gate_repository import (
+    RestoreAdmissionError,
+    RestoreGateRepository,
+    workspace_access,
+)
 from test_mail_attachment_boundary import _command, _confirmation, _service
 
 _AUDIT_COLUMNS = (
@@ -58,6 +70,14 @@ def _database(path: Path, *, legacy: bool = False) -> None:
         )
         if not legacy:
             connection.execute("CREATE TABLE mail_send_claims (draft_id TEXT, audit_id TEXT)")
+    # Real restore bookkeeping tables coexist with deliberately minimal/malformed
+    # mail schemas so the guard's exact evidence checks remain independently tested.
+    engine = create_engine(f"sqlite:///{path.as_posix()}")
+    Base.metadata.create_all(
+        engine,
+        tables=[Base.metadata.tables["backup_manifests"], Base.metadata.tables["restore_plans"]],
+    )
+    engine.dispose()
 
 
 def _attempt(
@@ -98,26 +118,161 @@ class _Restore:
     staged_document: Path
     plan: RestorePlan
 
-    def apply(self) -> None:
-        BackupService.apply_staged_files(
-            self.plan,
-            database_url=f"sqlite:///{self.current.as_posix()}",
-            document_dir=self.document.parent,
-            staging_dir=Path(self.plan.staged_path).parent,
+    @property
+    def cipher(self) -> SensitiveDataCipher:
+        return SensitiveDataCipher(StaticKeyProvider(b"g" * 32))
+
+    def apply(self, categories: set[BackupCategory] | None = None) -> None:
+        """Exercise real authenticated preparation, ownership, guard and commit."""
+        root = self.current.parent
+        plan = self.plan
+        if categories is not None:
+            plan_id = str(uuid4())
+            staged = Path(plan.staged_path).parent / plan_id
+            (staged / "documents").mkdir(parents=True)
+            shutil.copyfile(self.staged_document, staged / "documents" / "resume.enc")
+            plan = plan.model_copy(
+                update={"id": plan_id, "categories": categories, "staged_path": str(staged)}
+            )
+        files: list[tuple[BackupCategory, str, bytes]] = []
+        for category, relative in (
+            (BackupCategory.DATABASE, "database/job_apply_pro.db"),
+            (BackupCategory.DOCUMENTS, "documents/resume.enc"),
+        ):
+            if category in plan.categories:
+                source = Path(plan.staged_path) / relative
+                files.append((category, relative, source.read_bytes() if source.exists() else b""))
+        entries = [
+            BackupEntry(
+                category=category,
+                relative_path=relative,
+                size_bytes=len(data),
+                sha256=hashlib.sha256(data).hexdigest(),
+            )
+            for category, relative, data in files
+        ]
+        engine = create_engine(f"sqlite:///{self.current.as_posix()}")
+        with Session(engine) as session:
+            service = BackupService(
+                OperationsRepository(session),
+                self.cipher,
+                database_url=f"sqlite:///{self.current.as_posix()}",
+                document_dir=self.document.parent,
+                backup_dir=root / "backups",
+                staging_dir=Path(plan.staged_path).parent,
+            )
+            archive = service._build_zip(
+                plan.backup_id, "Synthetic mail snapshot", plan.created_at, files, entries
+            )
+        engine.dispose()
+        encoded = self.cipher.encrypt_bytes(
+            archive, context=f"backup:{plan.backup_id}:archive"
+        ).encode("ascii")
+        archive_path = root / "backups" / f"{plan.backup_id}.japbackup"
+        archive_path.write_bytes(encoded)
+        manifest = BackupManifest(
+            id=plan.backup_id,
+            application_version=__version__,
+            schema_revision=BackupService.SCHEMA_REVISION,
+            label="Synthetic mail snapshot",
+            categories=plan.categories,
+            entries=entries,
+            encryption_key_id=self.cipher.key_id,
+            archive_path=str(archive_path),
+            archive_sha256=hashlib.sha256(encoded).hexdigest(),
+            archive_size_bytes=len(encoded),
+            status=BackupStatus.VERIFIED,
+            created_at=plan.created_at,
         )
+        plan = plan.model_copy(
+            update={
+                "file_count": len(entries),
+                "fingerprint": BackupService._fingerprint(
+                    {
+                        "plan_id": plan.id,
+                        "backup_id": plan.backup_id,
+                        "categories": sorted(category.value for category in plan.categories),
+                        "archive_sha256": manifest.archive_sha256,
+                        "file_count": len(entries),
+                    }
+                ),
+            }
+        )
+        recovery = RestoreRecoveryService(root, self.cipher)
+
+        def commit_result(applied: RestorePlan) -> None:
+            result_engine = create_engine(f"sqlite:///{self.current.as_posix()}")
+            try:
+                with Session(result_engine) as session:
+                    OperationsRepository(session).save_restore_result(manifest, applied)
+            finally:
+                result_engine.dispose()
+
+        with workspace_access(root, restore=True):
+            intent = recovery.prepare(
+                plan,
+                manifest,
+                database=self.current,
+                documents=self.document.parent,
+                staging=Path(plan.staged_path).parent,
+                backups=root / "backups",
+            )
+            recovery.apply(intent, commit_result)
+
+    def assert_applied(self, original: bytes | None = None) -> None:
+        gate = RestoreGateRepository(self.current.parent)
+        assert not gate.blocked()
+        with (
+            closing(sqlite3.connect(self.current)) as current,
+            closing(sqlite3.connect(self.staged)) as staged,
+        ):
+            for table in (
+                "local_data",
+                "communication_mutation_audits",
+                "mail_send_claims",
+                "alembic_version",
+            ):
+                exists = staged.execute(
+                    "SELECT type FROM sqlite_master WHERE name=?", (table,)
+                ).fetchone()
+                assert (
+                    current.execute(
+                        "SELECT type FROM sqlite_master WHERE name=?", (table,)
+                    ).fetchone()
+                    == exists
+                )
+                if exists:
+                    assert (
+                        current.execute(f"SELECT * FROM {table}").fetchall()
+                        == staged.execute(f"SELECT * FROM {table}").fetchall()
+                    )
+            assert current.execute("SELECT status FROM restore_plans").fetchone() == ("APPLIED",)
+        if original is not None:
+            preimages = list((gate.control / "operations").glob("*/database-preimage.enc"))
+            assert len(preimages) == 1
+            assert (
+                self.cipher.decrypt_bytes(
+                    preimages[0].read_text("ascii"),
+                    context=f"restore:v1:{preimages[0].parent.name}:database-preimage",
+                )
+                == original
+            )
 
     def assert_refused(
         self, *, message: str = "Mail send history|recorded mail send attempts"
     ) -> None:
         original = self.current.read_bytes()
         staged = self.staged.read_bytes() if self.staged.exists() else None
-        with pytest.raises(BackupError, match=message) as error:
+        with pytest.raises((BackupError, RestoreAdmissionError, OSError), match=message) as error:
             self.apply()
         assert "synthetic-provider-id" not in str(error.value)
         assert "draft-1" not in str(error.value)
         assert "key-1" not in str(error.value)
         assert self.current.read_bytes() == original
         assert (self.staged.read_bytes() if self.staged.exists() else None) == staged
+        gate = RestoreGateRepository(self.current.parent)
+        assert not gate.blocked()
+        assert not (gate.control / "operations").exists()
         assert not self.current.with_suffix(".db.pre-restore").exists()
         assert not self.current.with_suffix(".db.restore.tmp").exists()
         assert self.document.read_bytes() == b"current encrypted document"
@@ -127,7 +282,8 @@ class _Restore:
 @pytest.fixture
 def restore(tmp_path: Path) -> _Restore:
     current = tmp_path / "current.db"
-    staged_root = tmp_path / "staging" / "reviewed-plan"
+    plan_id = str(uuid4())
+    staged_root = tmp_path / "staging" / plan_id
     staged = staged_root / "database" / "job_apply_pro.db"
     document = tmp_path / "documents" / "resume.enc"
     staged_document = staged_root / "documents" / "resume.enc"
@@ -144,8 +300,8 @@ def restore(tmp_path: Path) -> _Restore:
         document,
         staged_document,
         RestorePlan(
-            id="reviewed-plan",
-            backup_id="synthetic-backup",
+            id=plan_id,
+            backup_id=str(uuid4()),
             categories={BackupCategory.DATABASE, BackupCategory.DOCUMENTS},
             staged_path=str(staged_root),
             file_count=2,
@@ -183,10 +339,8 @@ def test_exact_history_with_additional_staged_evidence_is_compatible(
     shutil.copyfile(restore.current, restore.staged)
     _record(restore.staged, "ACCEPTED", suffix="2", claim=not legacy)
     original = restore.current.read_bytes()
-    expected = restore.staged.read_bytes()
     restore.apply()
-    assert restore.current.read_bytes() == expected
-    assert restore.current.with_suffix(".db.pre-restore").read_bytes() == original
+    restore.assert_applied(original)
     assert restore.document.read_bytes() == b"staged encrypted document"
 
 
@@ -276,7 +430,9 @@ def test_missing_or_corrupt_staged_database_cannot_discard_history(
         restore.staged.unlink()
     else:
         restore.staged.write_bytes(contents)
-    restore.assert_refused()
+    restore.assert_refused(
+        message=r"Mail send history|recorded mail send attempts|cannot find|No such"
+    )
 
 
 @pytest.mark.parametrize("target", ["current", "staged"])
@@ -302,7 +458,10 @@ def test_inspection_is_read_only_and_includes_committed_wal_attempt(restore: _Re
         assert b"UNCERTAIN" in original_wal
         connect = sqlite3.connect
         with patch("job_apply_pro.services.backup.sqlite3.connect", wraps=connect) as observed:
-            restore.assert_refused()
+            restore.assert_refused(message="sidecars")
+            observed.assert_not_called()
+            with pytest.raises(BackupError, match="recorded mail send attempts"):
+                BackupService._require_preserved_mail_attempts(restore.current, restore.staged)
         for call in observed.call_args_list:
             assert call.args[0].endswith("?mode=ro")
             assert "immutable" not in call.args[0]
@@ -328,16 +487,17 @@ def test_unreadable_mail_history_error_is_static(restore: _Restore) -> None:
 def test_documents_only_restore_does_not_consult_mail_history(restore: _Restore) -> None:
     _record(restore.current)
     original = restore.current.read_bytes()
-    document_plan = restore.plan.model_copy(update={"categories": {BackupCategory.DOCUMENTS}})
     with patch.object(BackupService, "_require_preserved_mail_attempts") as guard:
-        BackupService.apply_staged_files(
-            document_plan,
-            database_url=f"sqlite:///{restore.current.as_posix()}",
-            document_dir=restore.document.parent,
-            staging_dir=Path(restore.plan.staged_path).parent,
-        )
+        restore.apply({BackupCategory.DOCUMENTS})
     guard.assert_not_called()
-    assert restore.current.read_bytes() == original
+    assert restore.current.read_bytes() != original  # Applied-plan bookkeeping commits.
+    with closing(sqlite3.connect(restore.current)) as connection:
+        assert connection.execute(
+            "SELECT status FROM communication_mutation_audits"
+        ).fetchone() == ("ACCEPTED",)
+        assert connection.execute("SELECT * FROM mail_send_claims").fetchall() == [
+            ("draft-1", "audit-1")
+        ]
     assert restore.document.read_bytes() == b"staged encrypted document"
 
 
@@ -353,12 +513,12 @@ def test_valid_pre_mail_schema_has_no_send_evidence_to_preserve(
         else:
             connection.execute("UPDATE alembic_version SET version_num=?", (revision,))
     restore.apply()
-    assert restore.current.read_bytes() == restore.staged.read_bytes()
+    restore.assert_applied()
 
 
 def test_current_schema_without_attempts_is_compatible(restore: _Restore) -> None:
     restore.apply()
-    assert restore.current.read_bytes() == restore.staged.read_bytes()
+    restore.assert_applied()
 
 
 def test_matching_audit_does_not_allow_discarding_its_claim(restore: _Restore) -> None:
@@ -413,15 +573,22 @@ def test_real_encrypted_backup_before_send_preserves_current_attempt(
         )
     engine.dispose()
     before = database.read_bytes()
-    with pytest.raises(BackupError, match="recorded mail send attempts"):
-        BackupService.apply_staged_files(
+    recovery = RestoreRecoveryService(tmp_path, SensitiveDataCipher(StaticKeyProvider(b"r" * 32)))
+    with workspace_access(tmp_path, restore=True):
+        intent = recovery.prepare(
             plan,
-            database_url=database_url,
-            document_dir=tmp_path / "documents",
-            staging_dir=tmp_path / "staging",
+            manifest,
+            database=database,
+            documents=tmp_path / "documents",
+            staging=tmp_path / "staging",
+            backups=tmp_path / "backups",
         )
+        with pytest.raises(BackupError, match="recorded mail send attempts"):
+            recovery.apply(intent, lambda _plan: pytest.fail("Refusal must precede commit"))
     assert database.read_bytes() == before
     assert not database.with_suffix(".db.pre-restore").exists()
+    assert not recovery.gate.blocked()
+    assert not (recovery.gate.control / "operations").exists()
     with closing(sqlite3.connect(database)) as connection:
         assert connection.execute("SELECT draft_id, audit_id FROM mail_send_claims").fetchall() == [
             (draft.id, audit.id),
