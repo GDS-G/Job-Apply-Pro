@@ -389,6 +389,24 @@ try {
     if (@($cleanup.items).Count -ne 0) { throw "Fresh packaged cleanup journal is not empty" }
     $cleanupRetry = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/ai/media-cleanup/retry" -Headers $headers -TimeoutSec 5
     if (@($cleanupRetry.items).Count -ne 0) { throw "Empty packaged cleanup retry changed state" }
+    # Discovery is present in the frozen router, but all these requests stop
+    # before public transport: invalid tokens/IDs or a nonexistent local profile.
+    $discoveryCases = @(
+        @{ path = "list"; body = @{ board_token = "internal" }; status = 422; detail = "Request validation failed; check required fields and supported values" },
+        @{ path = "review"; body = @{ board_token = "package-smoke-no-network"; posting_id = "0" }; status = 422; detail = "Request validation failed; check required fields and supported values" },
+        @{ path = "import"; body = @{ board_token = "package-smoke-no-network"; posting_id = "1"; review_fingerprint = ("a" * 64); profile_id = "package-smoke-missing-profile" }; status = 409; detail = "Local import conflicted; select an existing profile and refresh" }
+    )
+    foreach ($discoveryCase in $discoveryCases) {
+        try {
+            Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/discovery/greenhouse/$($discoveryCase.path)" -Headers $headers -ContentType "application/json" -Body ($discoveryCase.body | ConvertTo-Json) -TimeoutSec 5 | Out-Null
+            throw "Packaged invalid discovery request unexpectedly succeeded"
+        }
+        catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne $discoveryCase.status) { throw }
+            $discoveryError = $_.ErrorDetails.Message | ConvertFrom-Json
+            if ($discoveryError.detail -ne $discoveryCase.detail) { throw "Packaged discovery admission returned an unexpected error" }
+        }
+    }
     # Synthetic pixels only. The deliberately unknown prompt stops before any
     # route/provider work, but only after successful packaged image decoding.
     $mediaCases = @(

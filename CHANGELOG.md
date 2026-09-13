@@ -2,6 +2,16 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.58.0-alpha.1] - Unreleased
+
+### Greenhouse Public Discovery
+
+- Add explicit public-board listing, selected-posting review and profile-bound local import without candidate transmission or applications.
+- Bound fixed-origin GETs, identifiers, JSON, source text, URLs and operation time; preserve immutable versioned source fingerprints.
+- Atomically deduplicate local jobs/applications and reject stale, vanished or changed sources without overwriting history.
+- Expose backend-derived controls and prohibit fabricated public transitions for real imports; qualification remains not evaluated.
+- Add client, API, migration, transaction, IPC and renderer regressions. Real application flows and live acceptance remain separate work.
+
 ## [0.57.0-alpha.1] - Unreleased
 
 ### Gemini Processing Budget

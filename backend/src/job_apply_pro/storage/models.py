@@ -160,6 +160,15 @@ class JobRow(Base):
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class JobDiscoverySnapshotRow(Base):
+    __tablename__ = "job_discovery_snapshots"
+
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), primary_key=True)
+    review_fingerprint: Mapped[str] = mapped_column(String(64))
+    review_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class JobRequirementRow(Base):
     __tablename__ = "job_requirements"
 

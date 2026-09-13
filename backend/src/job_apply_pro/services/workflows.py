@@ -9,9 +9,20 @@ from job_apply_pro.domain.workflow import (
 from job_apply_pro.storage.repositories import WorkflowEventRepository
 
 
+class PublicTransitionDeniedError(ValueError):
+    pass
+
+
 class WorkflowService:
     def __init__(self, repository: WorkflowEventRepository) -> None:
         self._repository = repository
+
+    def transition_public(self, workflow_id: str, command: TransitionCommand) -> WorkflowEvent:
+        if not self._repository.permits_public_transition(workflow_id, command.current_state):
+            raise PublicTransitionDeniedError(
+                "Direct transitions require a synthetic workbench workflow at its current state"
+            )
+        return self.transition(workflow_id, command)
 
     def transition(self, workflow_id: str, command: TransitionCommand) -> WorkflowEvent:
         validate_transition(command)

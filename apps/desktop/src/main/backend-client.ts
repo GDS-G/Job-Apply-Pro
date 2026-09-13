@@ -38,6 +38,12 @@ import type {
   DocumentSelectionPreview,
   DocumentSelectionRequest,
   FollowUp,
+  GreenhouseImportResult,
+  GreenhouseJobImportInput,
+  GreenhouseJobList,
+  GreenhouseJobListInput,
+  GreenhouseJobReview,
+  GreenhouseJobReviewInput,
   IntegrationHealth,
   IntegrationProvider,
   HelpTopic,
@@ -92,6 +98,36 @@ export class BackendClient {
 
   listWorkflows(): Promise<WorkflowRunSnapshot[]> {
     return this.request("/workbench/workflows");
+  }
+
+  listGreenhouseJobs(
+    input: GreenhouseJobListInput,
+  ): Promise<GreenhouseJobList> {
+    return this.request(
+      "/discovery/greenhouse/list",
+      { method: "POST", body: JSON.stringify(input) },
+      30_000,
+    );
+  }
+
+  reviewGreenhouseJob(
+    input: GreenhouseJobReviewInput,
+  ): Promise<GreenhouseJobReview> {
+    return this.request(
+      "/discovery/greenhouse/review",
+      { method: "POST", body: JSON.stringify(input) },
+      30_000,
+    );
+  }
+
+  importGreenhouseJob(
+    input: GreenhouseJobImportInput,
+  ): Promise<GreenhouseImportResult> {
+    return this.request(
+      "/discovery/greenhouse/import",
+      { method: "POST", body: JSON.stringify(input) },
+      30_000,
+    );
   }
 
   listBrowserSessions(workflowId?: string): Promise<BrowserSessionSnapshot[]> {

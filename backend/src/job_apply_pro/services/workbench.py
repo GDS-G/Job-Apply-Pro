@@ -91,6 +91,8 @@ class WorkbenchService:
         self, workflow_id: str, command: WorkflowControlCommand
     ) -> WorkflowRunSnapshot:
         snapshot = self.get_workflow(workflow_id)
+        if command.action not in snapshot.allowed_controls:
+            raise WorkbenchStateError("This workflow does not permit that mock workbench control")
         target, cause = self._resolve_target(snapshot, command.action)
         return self._workbench.apply_transition(
             workflow_id,

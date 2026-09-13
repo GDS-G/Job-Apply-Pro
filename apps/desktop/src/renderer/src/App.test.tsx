@@ -1,8 +1,33 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  PortalRunSnapshot,
+  WorkflowControlAction,
+  WorkflowRunSnapshot,
+} from "@job-apply-pro/contracts";
+
 import { App } from "./App";
+
+const discoveredWorkflow: WorkflowRunSnapshot = {
+  workflow_id: "discovery-1",
+  application_id: "application-1",
+  profile_id: "profile-1",
+  candidate_display_name: "Synthetic candidate",
+  employer: "Example employer",
+  title: "Discovered real job",
+  state: "DISCOVERED",
+  progress: 5,
+  updated_at: "2026-09-15T10:00:00Z",
+  events: [],
+};
 
 describe("App", () => {
   afterEach(() => {
@@ -10,11 +35,110 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([undefined, []] as (WorkflowControlAction[] | undefined)[])(
+    "denies synthetic controls when the server grants none (%s)",
+    async (allowedControls) => {
+      const item: WorkflowRunSnapshot = {
+        ...discoveredWorkflow,
+        ...(allowedControls ? { allowed_controls: allowedControls } : {}),
+      };
+      vi.spyOn(window.jobApplyPro.workbench, "listWorkflows").mockResolvedValue(
+        [item],
+      );
+      const control = vi.spyOn(window.jobApplyPro.workbench, "controlWorkflow");
+      render(<App />);
+      await screen.findByText(item.title);
+      for (const name of [
+        "Advance mock run",
+        "Pause",
+        "Retry checkpoint",
+        "Take over",
+        "Stop safely",
+      ]) {
+        const button = screen.getByRole("button", { name });
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+      }
+      expect(control).not.toHaveBeenCalled();
+    },
+  );
+
+  it("enables only synthetic controls explicitly granted by the server", async () => {
+    const item: WorkflowRunSnapshot = {
+      ...discoveredWorkflow,
+      workflow_id: "mock-1",
+      allowed_controls: ["ADVANCE"],
+    };
+    vi.spyOn(window.jobApplyPro.workbench, "listWorkflows").mockResolvedValue([
+      item,
+    ]);
+    const control = vi
+      .spyOn(window.jobApplyPro.workbench, "controlWorkflow")
+      .mockResolvedValue({
+        ...item,
+        state: "DEDUPLICATED",
+        allowed_controls: [],
+      });
+    render(<App />);
+    await screen.findByText(item.title);
+    const advance = screen.getByRole("button", { name: "Advance mock run" });
+    expect(advance).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeDisabled();
+    fireEvent.click(advance);
+    await waitFor(() =>
+      expect(control).toHaveBeenCalledExactlyOnceWith("mock-1", "ADVANCE"),
+    );
+    await waitFor(() => expect(advance).toBeDisabled());
+  });
+
+  it("preserves the separately reviewed reference ATS submission control", async () => {
+    const run: PortalRunSnapshot = {
+      id: "fixture-run",
+      portal: "REFERENCE_ATS",
+      capabilities: [],
+      workflow_id: discoveredWorkflow.workflow_id,
+      application_id: discoveredWorkflow.application_id,
+      browser_session_id: "fixture-browser",
+      profile_id: discoveredWorkflow.profile_id,
+      job_id: "fixture-job",
+      state: "READY_TO_SUBMIT",
+      portal_origin: "http://127.0.0.1:4173",
+      query: "Synthetic",
+      deduplicated: true,
+      qualification: {
+        score: 1,
+        threshold: 0.5,
+        eligible: true,
+        matched_terms: [],
+        missing_terms: [],
+        evidence_claim_ids: [],
+      },
+      selected_document_version_id: "fixture-version",
+      field_mappings: [],
+      review_fingerprint: "a".repeat(64),
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    };
+    vi.spyOn(window.jobApplyPro.workbench, "listWorkflows").mockResolvedValue([
+      { ...discoveredWorkflow, allowed_controls: [] },
+    ]);
+    vi.spyOn(window.jobApplyPro.workbench, "listPortalRuns").mockResolvedValue([
+      run,
+    ]);
+    render(<App />);
+    expect(
+      await screen.findByRole("button", { name: "Confirm fixture submission" }),
+    ).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Advance mock run" }),
+    ).toBeDisabled();
+  });
+
   it("shows the Workbench safety boundary", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Gemini Processing Budget v0.57.0-alpha.1"),
+      screen.getByText("Greenhouse Public Discovery v0.58.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

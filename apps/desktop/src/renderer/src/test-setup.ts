@@ -12,6 +12,15 @@ const bridge: DesktopBridge = {
       checked_at: new Date(0).toISOString(),
     }),
     listWorkflows: async () => [],
+    listGreenhouseJobs: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    reviewGreenhouseJob: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    importGreenhouseJob: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     listBrowserSessions: async () => [],
     getCandidateKnowledge: async (profileId) => ({
       profile_id: profileId,

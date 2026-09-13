@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.workflow import InvalidTransitionError, TransitionCommand, WorkflowEvent
-from job_apply_pro.services.workflows import WorkflowService
+from job_apply_pro.services.workflows import PublicTransitionDeniedError, WorkflowService
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.repositories import WorkflowEventRepository
 
@@ -32,8 +32,8 @@ def transition_workflow(
     service: WorkflowServiceDependency,
 ) -> WorkflowEvent:
     try:
-        return service.transition(workflow_id, command)
-    except InvalidTransitionError as error:
+        return service.transition_public(workflow_id, command)
+    except (InvalidTransitionError, PublicTransitionDeniedError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 

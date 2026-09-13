@@ -26,7 +26,7 @@ from job_apply_pro.domain.portals import (
     PortalRunSnapshot,
     SubmissionEvidence,
 )
-from job_apply_pro.domain.workbench import WorkflowRunSnapshot
+from job_apply_pro.domain.workbench import WorkflowRunSnapshot, allowed_workbench_controls
 from job_apply_pro.domain.workflow import (
     TransitionCommand,
     VerificationResult,
@@ -113,6 +113,20 @@ def _browser_record(row: BrowserSessionRow, action_count: int) -> BrowserSession
 class WorkflowEventRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def permits_public_transition(self, workflow_id: str, current_state: WorkflowState) -> bool:
+        # Caller-authored transitions are a synthetic workbench facility, not
+        # evidence that a real imported application was evaluated or submitted.
+        statement = (
+            select(ApplicationRow.id)
+            .join(JobRow, ApplicationRow.job_id == JobRow.id)
+            .where(
+                ApplicationRow.workflow_id == workflow_id,
+                ApplicationRow.state == current_state.value,
+                JobRow.source == "workbench-mock",
+            )
+        )
+        return self._session.scalar(statement) is not None
 
     def next_sequence(self, workflow_id: str) -> int:
         statement = select(func.max(WorkflowEventRow.sequence)).where(
@@ -742,4 +756,5 @@ class WorkbenchRepository:
             progress=self._PROGRESS.get(state, 60),
             updated_at=_utc(application.updated_at),
             events=events,
+            allowed_controls=allowed_workbench_controls(job.source, state),
         )

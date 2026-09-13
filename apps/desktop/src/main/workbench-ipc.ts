@@ -24,6 +24,7 @@ import type {
 } from "@job-apply-pro/contracts";
 
 import type { BackendSupervisor } from "./backend-supervisor.js";
+import { registerGreenhouseDiscoveryIpc } from "./greenhouse-discovery-ipc.js";
 import { registerMailDraftIpc } from "./mail-draft-ipc.js";
 import type { DesktopNotificationManager } from "./notification-manager.js";
 import { readProviderConfigurationFile } from "./provider-configuration-file.js";
@@ -704,6 +705,7 @@ export function registerWorkbenchIpc(
   updates: UpdateManager,
   notifications: DesktopNotificationManager,
 ): void {
+  registerGreenhouseDiscoveryIpc(supervisor.client);
   registerMailDraftIpc(supervisor.client);
   ipcMain.handle("workbench:get-status", () => supervisor.status);
   ipcMain.handle("workbench:list-workflows", () =>

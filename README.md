@@ -2,9 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Gemini Processing Budget build
+## Greenhouse Public Discovery build
 
-The active source milestone is **Gemini Processing Budget `v0.57.0-alpha.1`**. One invocation-local work deadline now follows media uploads, processing waits and status reads, inference and validated response construction. Processing polls target only the original durably registered resource; cleanup retains a separate bounded network allowance and terminal retention errors. See [ADR-0067](docs/adr/0067-gemini-processing-budget.md) for exact limits. Synchronous transport timeouts are not a guaranteed hard cancellation deadline, and this does not enable an unconfigured provider.
+The active source milestone is **Greenhouse Public Discovery `v0.58.0-alpha.1`**. Manually preview a public board, review one exact posting and import it for a local candidate profile. Fixed-origin unauthenticated reads send no candidate data; snapshots and deduplication are atomic and immutable. Imported jobs remain not evaluated, without mock advancement controls or a submission. See [ADR-0068](docs/adr/0068-greenhouse-public-discovery.md) for contracts, limits and remaining real-portal work.
+
+Gemini retains one invocation-local work deadline across uploads, processing waits/status reads, inference and response construction. Polls target only the original registered resource; cleanup has a separate allowance and terminal retention errors. See [ADR-0067](docs/adr/0067-gemini-processing-budget.md). This is not hard OS/gateway cancellation and does not enable an unconfigured provider.
 
 Offline restore retains exclusive workspace ownership, encrypted intent and persistent startup admission before replacement. An interrupted operation blocks desktop/backend restart and updates until authenticated completion evidence verifies every final target. The original key and recovery records are preserved. See [ADR-0066](docs/adr/0066-durable-restore-admission.md) for bounds, early SQLite-sidecar checks and limitations; this is not atomic multi-file replacement, automatic rollback or safe resume.
 

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Gemini Processing Budget",
-  version: "0.57.0-alpha.1",
+  name: "Greenhouse Public Discovery",
+  version: "0.58.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -68,6 +68,60 @@ export interface Job {
   source_url?: string | null;
   description_hash: string;
   discovered_at: string;
+}
+
+export interface GreenhouseJobListInput {
+  board_token: string;
+}
+
+export interface GreenhouseJobReviewInput extends GreenhouseJobListInput {
+  posting_id: string;
+}
+
+export interface GreenhouseJobImportInput extends GreenhouseJobReviewInput {
+  review_fingerprint: string;
+  profile_id: string;
+}
+
+export interface GreenhouseJobSummary {
+  posting_id: string;
+  title: string;
+  location: string | null;
+  source_url: string | null;
+  navigation_supported: boolean;
+}
+
+export interface GreenhouseJobList {
+  board_token: string;
+  board_name: string;
+  fetched_at: string;
+  jobs: GreenhouseJobSummary[];
+  excluded_prospect_count: number;
+}
+
+export interface GreenhouseJobReview extends GreenhouseJobSummary {
+  board_token: string;
+  employer: string;
+  description: string;
+  api_url: string;
+  reported_url: string;
+  provider_updated_at: string | null;
+  fetched_at: string;
+  normalizer_version: string;
+  review_fingerprint: string;
+  qualification_status: "NOT_EVALUATED";
+}
+
+export interface GreenhouseImportResult {
+  outcome:
+    | "IMPORTED"
+    | "EXISTING"
+    | "STALE_REVIEW"
+    | "SOURCE_CHANGED"
+    | "SOURCE_UNAVAILABLE";
+  job: Job | null;
+  workflow: WorkflowRunSnapshot | null;
+  notice: string;
 }
 
 export interface Application {
@@ -1527,6 +1581,7 @@ export interface WorkflowRunSnapshot {
   progress: number;
   updated_at: string;
   events: WorkflowEvent[];
+  allowed_controls?: WorkflowControlAction[];
 }
 
 export interface CandidateProfileCreate {
@@ -1606,6 +1661,15 @@ export interface DesktopBridge {
   workbench: {
     getStatus(): Promise<BackendRuntimeStatus>;
     listWorkflows(): Promise<WorkflowRunSnapshot[]>;
+    listGreenhouseJobs(
+      input: GreenhouseJobListInput,
+    ): Promise<GreenhouseJobList>;
+    reviewGreenhouseJob(
+      input: GreenhouseJobReviewInput,
+    ): Promise<GreenhouseJobReview>;
+    importGreenhouseJob(
+      input: GreenhouseJobImportInput,
+    ): Promise<GreenhouseImportResult>;
     listBrowserSessions(workflowId?: string): Promise<BrowserSessionSnapshot[]>;
     getCandidateKnowledge(
       profileId: string,
