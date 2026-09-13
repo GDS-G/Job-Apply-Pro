@@ -43,6 +43,7 @@ from job_apply_pro.integrations.communications import (
     MessageProviderAdapter,
     ProviderMutationError,
     ProviderNotConfiguredError,
+    UnsupportedMailAttachmentsError,
 )
 from job_apply_pro.integrations.configuration import (
     CommunicationConfiguration,
@@ -53,6 +54,7 @@ from job_apply_pro.integrations.configuration import (
 )
 from job_apply_pro.integrations.oauth import (
     OAUTH_PROVIDERS,
+    BoundMailTokenProvider,
     OAuthAuthorizationError,
     OAuthConfigurationError,
     OAuthConnectionService,
@@ -65,6 +67,7 @@ from job_apply_pro.integrations.provider_clients import (
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.communications import CommunicationService
+from job_apply_pro.services.mail_attachments import MailAttachmentResolver
 from job_apply_pro.storage.communication_configuration_repository import (
     CommunicationConfigurationRepository,
 )
@@ -149,12 +152,24 @@ def get_communication_service(
         IntegrationProvider.GMAIL in clients
         and oauth.state(IntegrationProvider.GMAIL).status.value == "CONNECTED"
     ):
-        message_adapters[IntegrationProvider.GMAIL] = GmailMessageProvider(oauth)
+        message_adapters[IntegrationProvider.GMAIL] = GmailMessageProvider(
+            BoundMailTokenProvider(
+                oauth,
+                IntegrationProvider.GMAIL,
+                configured[IntegrationProvider.GMAIL].credential_reference or "",
+            )
+        )
     if (
         IntegrationProvider.OUTLOOK in clients
         and oauth.state(IntegrationProvider.OUTLOOK).status.value == "CONNECTED"
     ):
-        message_adapters[IntegrationProvider.OUTLOOK] = OutlookMessageProvider(oauth)
+        message_adapters[IntegrationProvider.OUTLOOK] = OutlookMessageProvider(
+            BoundMailTokenProvider(
+                oauth,
+                IntegrationProvider.OUTLOOK,
+                configured[IntegrationProvider.OUTLOOK].credential_reference or "",
+            )
+        )
     if (
         IntegrationProvider.GOOGLE_CALENDAR in clients
         and oauth.state(IntegrationProvider.GOOGLE_CALENDAR).status.value == "CONNECTED"
@@ -172,6 +187,12 @@ def get_communication_service(
         automatic_categories=configuration.automatic_categories,
         provider_configs=configured,
         knowledge_repository=CandidateKnowledgeRepository(session),
+        attachment_resolver=MailAttachmentResolver(
+            CandidateKnowledgeRepository(session),
+            WorkbenchRepository(session),
+            cipher,
+            get_settings().document_data_dir,
+        ),
     )
 
 
@@ -404,6 +425,10 @@ def list_synced_calendar_events(service: ServiceDependency) -> list[SyncedCalend
 def create_outbound_draft(command: DraftCreate, service: ServiceDependency) -> OutboundDraft:
     try:
         return service.create_draft(command)
+    except UnsupportedMailAttachmentsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except ValueError as error:
@@ -417,12 +442,24 @@ def list_outbound_drafts(service: ServiceDependency) -> list[OutboundDraft]:
     return service.list_drafts()
 
 
+@router.get("/drafts/{draft_id}", response_model=OutboundDraft)
+def get_outbound_draft(draft_id: str, service: ServiceDependency) -> OutboundDraft:
+    try:
+        return service.get_draft(draft_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
 @router.post("/drafts/{draft_id}/send", response_model=MutationAudit)
 def send_outbound_draft(
     draft_id: str, command: MutationConfirmation, service: ServiceDependency
 ) -> MutationAudit:
     try:
         return service.send_draft(draft_id, command)
+    except UnsupportedMailAttachmentsError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except ValueError as error:
@@ -430,6 +467,11 @@ def send_outbound_draft(
     except ProviderNotConfiguredError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+    except ProviderMutationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The mail provider rejected the send request",
         ) from error
 
 

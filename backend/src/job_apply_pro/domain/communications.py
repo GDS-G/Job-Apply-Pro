@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
@@ -46,6 +47,8 @@ class MutationStatus(StrEnum):
     PLANNED = "PLANNED"
     CONFIRMED = "CONFIRMED"
     FAILED = "FAILED"
+    ACCEPTED = "ACCEPTED"
+    UNCERTAIN = "UNCERTAIN"
 
 
 class FollowUpStatus(StrEnum):
@@ -365,8 +368,27 @@ class ProviderSyncState(BaseModel):
     updated_at: datetime
 
 
+class MailAttachmentMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document_version_id: str
+    document_id: str
+    file_name: str
+    media_type: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    size_bytes: int = Field(gt=0, le=2 * 1024 * 1024)
+
+
+class MailAttachmentManifest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    policy_version: Literal["mail-attachments-v1"] = "mail-attachments-v1"
+    profile_id: str
+    attachments: tuple[MailAttachmentMetadata, ...] = Field(min_length=1, max_length=4)
+
+
 class DraftCreate(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     analysis_id: str = Field(min_length=1, max_length=100)
     workflow_id: str | None = Field(default=None, max_length=100)
@@ -394,6 +416,8 @@ class OutboundDraft(BaseModel):
     category: MessageCategory
     policy: OutboundPolicy
     document_version_ids: list[str]
+    attachment_manifest: MailAttachmentManifest | None = None
+    provider_binding_fingerprint: str | None = Field(default=None, exclude=True)
     fingerprint: str = Field(min_length=64, max_length=64)
     created_at: datetime
     updated_at: datetime

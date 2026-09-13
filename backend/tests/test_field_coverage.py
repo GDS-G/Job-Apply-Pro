@@ -167,11 +167,11 @@ def _service(
         updated_at=NOW,
     )
     return ApplicationFieldCoverageService(
-        bindings=_Repository(bindings or []),  # type: ignore[arg-type]
-        answers=_Repository(answers or []),  # type: ignore[arg-type]
-        applications=_Repository([application]),  # type: ignore[arg-type]
-        executions=_Repository(executions or []),  # type: ignore[arg-type]
-        supervised=_Repository([run]),  # type: ignore[arg-type]
+        bindings=_Repository(bindings or []),
+        answers=_Repository(answers or []),
+        applications=_Repository([application]),
+        executions=_Repository(executions or []),
+        supervised=_Repository([run]),
     )
 
 
@@ -258,7 +258,7 @@ def test_review_rejects_cross_workflow_application() -> None:
     service = _service([])
     application = service._applications.get("application-1")
     assert application is not None
-    service._applications = _Repository(  # type: ignore[assignment]
+    service._applications = _Repository(
         [application.model_copy(update={"workflow_id": "another-workflow"})]
     )
     with pytest.raises(ValueError, match="another application workflow"):
@@ -273,7 +273,7 @@ def test_review_requires_current_user_takeover_and_deterministic_locator() -> No
 
     run = service._supervised.get("run-1")
     assert run is not None
-    service._supervised = _Repository(  # type: ignore[assignment]
+    service._supervised = _Repository(
         [run.model_copy(update={"state": SupervisedPortalRunState.STOPPED})]
     )
     with pytest.raises(ValueError, match="awaits the user"):

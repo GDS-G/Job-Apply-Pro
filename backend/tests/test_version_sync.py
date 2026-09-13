@@ -19,16 +19,16 @@ def test_release_metadata_is_synchronized() -> None:
     )
     backend = tomllib.loads((root / "backend" / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert version == __version__ == "0.54.0-alpha.1"
+    assert version == __version__ == "0.55.0-alpha.1"
     assert build == {
-        "name": "Bounded Backend Lifecycle",
+        "name": "Verified Mail Attachments",
         "version": version,
         "channel": "alpha",
         "roadmap_phases": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "production_automation_enabled": False,
     }
     assert workspace["version"] == desktop["version"] == contracts["version"] == version
-    assert backend["project"]["version"] == "0.54.0a1"
+    assert backend["project"]["version"] == "0.55.0a1"
     assert build["name"] == SupportService.BUILD_NAME
     assert health().build == build["name"]
     contract_source = (root / "packages/contracts/src/index.ts").read_text(encoding="utf-8")

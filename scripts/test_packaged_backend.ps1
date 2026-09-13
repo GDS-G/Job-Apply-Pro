@@ -30,6 +30,7 @@ if (-not $resolvedTestRoot.StartsWith($resolvedTempRoot, [StringComparison]::Ord
 }
 
 New-Item -ItemType Directory -Path $resolvedTestRoot | Out-Null
+$env:JAP_WORKSPACE_ROOT = $resolvedTestRoot
 $env:JAP_DATABASE_URL = "sqlite:///" + (Join-Path $resolvedTestRoot "smoke.db").Replace("\", "/")
 $env:JAP_BROWSER_DATA_DIR = Join-Path $resolvedTestRoot "browser"
 $env:JAP_BROWSER_ARTIFACT_DIR = Join-Path $resolvedTestRoot "artifacts"
@@ -46,6 +47,7 @@ $apiRoot = "http://127.0.0.1:$($env:JAP_API_PORT)"
 $env:JAP_API_TOKEN = "package-smoke-token"
 $env:JAP_MASTER_KEY = [Convert]::ToBase64String([byte[]](1..32))
 $env:JAP_AI_CONFIG_JSON = '{"providers":[],"models":[],"policies":[]}'
+$env:JAP_COMMUNICATION_CONFIG_JSON = '{"providers":[],"oauth_clients":[]}'
 $env:JAP_AUTOMATION_ENABLED = "false"
 $env:JAP_BROWSER_HEADLESS = "true"
 
@@ -105,6 +107,90 @@ function Stop-SmokeBackend {
     }
 }
 
+# This helper authenticates synthetic restore evidence without opening SQLite or
+# printing keys, decrypted bytes, filesystem paths, or database hashes.
+$restoreEvidenceScript = @'
+import base64
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+from uuid import UUID
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+def verify_restore_evidence(root, operation_id, expected_hash, expected_size, plan_id):
+    root = Path(root).resolve(strict=True)
+    if str(UUID(operation_id)) != operation_id:
+        raise ValueError("Invalid operation identifier")
+    control = root / "restore-control"
+    operation = control / "operations" / operation_id
+    for path in (control, operation.parent, operation):
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("Invalid restore evidence directory")
+    try:
+        (control / "active.guard").lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise ValueError("Restore remains blocked")
+    key = base64.b64decode(os.environ["JAP_MASTER_KEY"], validate=True)
+
+    def decrypt(name, kind):
+        path = operation / name
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 384 * 1024 * 1024:
+            raise ValueError("Invalid restore evidence file")
+        if getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("Invalid restore evidence file")
+        parts = path.read_text(encoding="ascii").split(":", 3)
+        if len(parts) != 4 or parts[:3] != ["jap", "v1", "local-v1"]:
+            raise ValueError("Invalid restore evidence envelope")
+        payload = base64.urlsafe_b64decode(parts[3])
+        return AESGCM(key).decrypt(
+            payload[:12], payload[12:], f"restore:v1:{operation_id}:{kind}".encode()
+        )
+
+    previous = decrypt("database-preimage.enc", "database-preimage")
+    if len(previous) != int(expected_size) or hashlib.sha256(previous).hexdigest() != expected_hash.lower():
+        raise ValueError("Previous database was not preserved exactly")
+    intent = json.loads(decrypt("intent.enc", "intent"))
+    receipt = json.loads(decrypt("receipt.enc", "receipt"))
+    if intent["version"] != 1 or receipt["version"] != 1 or intent["plan"]["id"] != plan_id:
+        raise ValueError("Restore evidence does not match the reviewed plan")
+    if Path(intent["workspace"]) != root:
+        raise ValueError("Restore evidence belongs to another workspace")
+    intent["plan"]["categories"] = sorted(intent["plan"]["categories"])
+    intent["manifest"]["categories"] = sorted(intent["manifest"]["categories"])
+    canonical = json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()
+    if hashlib.sha256(canonical).hexdigest() != receipt["intent_sha256"]:
+        raise ValueError("Restore receipt does not authenticate its intent")
+    database_targets = [target for target in receipt["targets"] if target["path"] == intent["database"]]
+    if len(database_targets) != 1:
+        raise ValueError("Restore receipt does not identify the committed database")
+    database = root / intent["database"]
+    if database.parent.resolve(strict=True) != root:
+        raise ValueError("Restore database is outside the smoke workspace")
+    database_info = database.lstat()
+    if not stat.S_ISREG(database_info.st_mode) or database_info.st_nlink != 1 or getattr(database_info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("Invalid committed database file")
+    actual = database.read_bytes()
+    if len(actual) != database_targets[0]["size"] or hashlib.sha256(actual).hexdigest() != database_targets[0]["sha256"]:
+        raise ValueError("Committed database no longer matches its receipt")
+
+
+if __name__ == "__main__":
+    try:
+        verify_restore_evidence(*sys.argv[1:])
+    except Exception:
+        print("Packaged durable restore evidence verification failed.", file=sys.stderr)
+        raise SystemExit(1) from None
+'@
+
 $process = $null
 $apiWorkerProcess = $null
 try {
@@ -162,6 +248,8 @@ try {
     }
     $apiWorkerProcess = Get-Process -Id $workerRecords[0].ProcessId -ErrorAction Stop
     $null = $apiWorkerProcess.Handle
+    & $PythonPath (Join-Path $PSScriptRoot "test_packaged_mail.py") --api-url $apiRoot
+    if ($LASTEXITCODE -ne 0) { throw "Packaged verified mail attachment smoke failed" }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -176,23 +264,38 @@ try {
     Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     $process = $null
     $apiWorkerProcess = $null
+    $databasePath = Join-Path $resolvedTestRoot "smoke.db"
+    $previousDatabaseHash = (Get-FileHash -LiteralPath $databasePath -Algorithm SHA256).Hash
+    $previousDatabaseSize = (Get-Item -LiteralPath $databasePath).Length
+    $restoreOperationsPath = Join-Path $resolvedTestRoot "restore-control\operations"
+    $previousRestoreOperations = if (Test-Path -LiteralPath $restoreOperationsPath) {
+        @(Get-ChildItem -LiteralPath $restoreOperationsPath -Directory | Select-Object -ExpandProperty Name)
+    } else { @() }
     $restoreArguments = @("restore", "--plan-id", $plan.id, "--fingerprint", $plan.fingerprint)
     $restore = Start-Process -FilePath $backend -ArgumentList $restoreArguments -WindowStyle Hidden -Wait -PassThru
     if ($restore.ExitCode -ne 0) { throw "Packaged offline restore failed" }
     if ((Get-Content -Raw -LiteralPath $documentPath) -ne $originalDocument) {
         throw "Packaged offline restore did not recover the staged document"
     }
-    $databasePath = Join-Path $resolvedTestRoot "smoke.db"
-    if (-not (Test-Path -LiteralPath "$databasePath.pre-restore" -PathType Leaf)) {
-        throw "Packaged offline restore did not retain the previous database"
+    if (-not (Test-Path -LiteralPath $restoreOperationsPath -PathType Container)) {
+        throw "Packaged offline restore did not retain durable recovery evidence"
     }
+    $freshRestoreOperations = @(Get-ChildItem -LiteralPath $restoreOperationsPath -Directory | Where-Object { $_.Name -notin $previousRestoreOperations })
+    if ($freshRestoreOperations.Count -ne 1) {
+        throw "Packaged offline restore did not create exactly one fresh recovery operation"
+    }
+    if (Test-Path -LiteralPath "$databasePath.pre-restore") {
+        throw "Packaged offline restore unexpectedly created a plaintext database recovery copy"
+    }
+    & $PythonPath -c $restoreEvidenceScript $resolvedTestRoot $freshRestoreOperations[0].Name $previousDatabaseHash $previousDatabaseSize $plan.id
+    if ($LASTEXITCODE -ne 0) { throw "Packaged offline restore evidence failed authenticated verification" }
 
     $postRestoreMigration = Start-Process -FilePath $backend -ArgumentList "migrate" -WindowStyle Hidden -Wait -PassThru
     if ($postRestoreMigration.ExitCode -ne 0) { throw "Post-restore migration failed" }
     $postRestoreStdout = Join-Path $resolvedTestRoot "post-restore.stdout.log"
     $postRestoreStderr = Join-Path $resolvedTestRoot "post-restore.stderr.log"
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $postRestoreStdout -StderrPath $postRestoreStderr
-    $backups = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -TimeoutSec 5)
+    $backups = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
     if ($backups.Count -ne 1 -or $backups[0].id -ne $backup.id) {
         throw "Recovered database did not retain the backup manifest"
     }
@@ -200,7 +303,25 @@ try {
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
     $restoredCleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, encrypted backup and offline restore smoke passed."
+    # Windows PowerShell emits a JSON array as one pipeline object; enumerate
+    # it explicitly before checking count and replaying individual audit rows.
+    $restoredMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($restoredMailAudits.Count -ne 2) { throw "Restored packaged mail history is incomplete" }
+    foreach ($mailAudit in $restoredMailAudits) {
+        if ($mailAudit.status -ne "FAILED" -or $mailAudit.error_code -ne "ProviderNotConfiguredError" -or $null -ne $mailAudit.provider_resource_id) {
+            throw "Restored packaged mail history changed its failed outcome"
+        }
+        $mailReplayBody = @{
+            fingerprint = $mailAudit.fingerprint
+            idempotency_key = $mailAudit.idempotency_key
+            confirmed_by = "synthetic-package-probe"
+        } | ConvertTo-Json
+        $mailReplay = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($mailAudit.resource_id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5
+        if ($mailReplay.id -ne $mailAudit.id -or $mailReplay.status -ne "FAILED") {
+            throw "Restored packaged mail attempt did not replay its original outcome"
+        }
+    }
+    Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, encrypted backup and offline restore smoke passed."
 }
 finally {
     try {

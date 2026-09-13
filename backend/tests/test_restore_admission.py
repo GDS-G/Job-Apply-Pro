@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -20,7 +21,13 @@ from job_apply_pro.restore_admission import assert_runtime_admission, runtime_ac
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.backup import BackupService
-from job_apply_pro.services.restore_recovery import Intent, RestoreRecoveryService
+from job_apply_pro.services.restore_recovery import (
+    MAX_RESTORE_FILES,
+    Intent,
+    Receipt,
+    RestoreRecoveryService,
+    Target,
+)
 from job_apply_pro.storage.database import Base
 from job_apply_pro.storage.operations_repository import OperationsRepository
 from job_apply_pro.storage.restore_gate_repository import (
@@ -479,6 +486,52 @@ def test_existing_legacy_preimage_is_never_overwritten(workspace: Workspace) -> 
     )
     assert result.returncode == 0, result.stderr
     assert previous.read_bytes() == b"unknown-previous-preimage"
+
+
+def test_staged_journal_appearing_after_preparation_is_preserved_before_mail_inspection(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    intent = workspace.prepare()
+    staged = Path(workspace.plan.staged_path) / "database" / "job_apply_pro.db"
+    sidecar = staged.with_name(staged.name + "-journal")
+    sidecar.write_bytes(b"unknown-staged-journal")
+    before = workspace.database.read_bytes()
+
+    def unexpected_mail_read(_current: Path, _staged: Path) -> None:
+        pytest.fail("Mail preservation must not read an unclosed staged database")
+
+    monkeypatch.setattr(BackupService, "_require_preserved_mail_attempts", unexpected_mail_read)
+    with (
+        workspace_access(workspace.root, restore=True),
+        pytest.raises(RestoreAdmissionError, match="sidecars"),
+    ):
+        RestoreRecoveryService(workspace.root, workspace.cipher).apply(intent, lambda _plan: None)
+    assert sidecar.read_bytes() == b"unknown-staged-journal"
+    assert workspace.database.read_bytes() == before
+    assert not workspace.gate.blocked()
+    assert not (workspace.gate.control / "operations").exists()
+
+
+def test_maximum_document_inventory_allows_its_additional_database_receipt(
+    workspace: Workspace,
+) -> None:
+    documents = [
+        Target(path=f"documents/{index}.enc", sha256="a" * 64, size=0)
+        for index in range(MAX_RESTORE_FILES)
+    ]
+    payload = workspace.prepare().model_dump(mode="json")
+    payload["inputs"] = [target.model_dump(mode="json") for target in documents]
+    payload["plan"]["categories"] = ["DOCUMENTS"]
+    payload["plan"]["file_count"] = MAX_RESTORE_FILES
+    assert len(Intent.model_validate(payload).inputs) == MAX_RESTORE_FILES
+    database = Target(path="app.db", sha256="b" * 64, size=1)
+    targets = [*documents, database]
+    assert len(Receipt(intent_sha256="c" * 64, targets=targets).targets) == MAX_RESTORE_FILES + 1
+    with pytest.raises(ValidationError, match="at most 4097 items"):
+        Receipt(intent_sha256="c" * 64, targets=[*targets, database])
+    payload["inputs"].append(database.model_dump(mode="json"))
+    with pytest.raises(ValidationError, match="at most 4096 items"):
+        Intent.model_validate(payload)
 
 
 @pytest.mark.parametrize("url", ["sqlite:///file:app.db?uri=true", "sqlite:///app.db?mode=ro"])

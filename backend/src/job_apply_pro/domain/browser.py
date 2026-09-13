@@ -351,7 +351,7 @@ class BrowserObservedControl(BaseModel):
 
         def optional_scalar(*names: str) -> object | None:
             for name in names:
-                candidate = item.get(name)
+                candidate: object = item.get(name)
                 if candidate not in {None, ""}:
                     return candidate
             return None

@@ -22,7 +22,10 @@ from job_apply_pro.domain.operations import (
     RestorePlan,
     RestoreStatus,
 )
-from job_apply_pro.restore_admission import assert_no_sqlite_sidecars
+from job_apply_pro.restore_admission import (
+    assert_no_sqlite_sidecars,
+    assert_restore_source_closed,
+)
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.storage.restore_gate_repository import (
     RECOVERY_MESSAGE,
@@ -65,7 +68,8 @@ class Receipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     version: Literal[1] = 1
     intent_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    targets: list[Target] = Field(max_length=MAX_RESTORE_FILES)
+    # Document-only restores also commit bookkeeping to the existing database.
+    targets: list[Target] = Field(max_length=MAX_RESTORE_FILES + 1)
 
 
 def hash_file(path: Path) -> tuple[str, int]:
@@ -293,6 +297,13 @@ class RestoreRecoveryService:
             from job_apply_pro.services.backup import BackupService
 
             BackupService._require_resolved_media_cleanup(database)
+            staged_database = checked_path(
+                root / safe_relative(intent.staged) / "database" / "job_apply_pro.db", root=root
+            )
+            assert_restore_source_closed(staged_database)
+            # Local admission does not replace durable external-effect evidence.
+            # A snapshot must preserve every current immutable mail attempt/claim.
+            BackupService._require_preserved_mail_attempts(database, staged_database)
         operation_id = self.gate.begin(intent.model_dump(mode="json"), self.cipher)
         if BackupCategory.DATABASE in intent.plan.categories:
             # Unique encrypted DB preimage; never overwrite/delete a prior recovery copy.
