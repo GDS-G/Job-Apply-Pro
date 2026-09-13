@@ -2,7 +2,7 @@
 
 ## Status and purpose
 
-Accepted for Gemini Processing Budget `v0.57.0-alpha.1`, subject to final integrated and packaged validation. ADR-0061 retains durable cleanup ownership and ADR-0062 normalizes approved image bytes. This decision adds bounded processing-state observation and a shared invocation-local work budget; it does not enable unconfigured providers, alter consent or permit unresolved retention to trigger another upload.
+Accepted for Gemini Processing Budget `v0.57.0-alpha.1`. Exact-version local integrated and unsigned-package checks pass; protected integration is tracked separately in the readiness audit. ADR-0061 retains durable cleanup ownership and ADR-0062 normalizes approved image bytes. This decision adds bounded processing-state observation and a shared invocation-local work budget; it does not enable unconfigured providers, alter consent or permit unresolved retention to trigger another upload.
 
 ## Invocation-local state and limits
 
