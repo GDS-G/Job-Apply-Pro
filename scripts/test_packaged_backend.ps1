@@ -195,7 +195,7 @@ try {
     $postRestoreStdout = Join-Path $resolvedTestRoot "post-restore.stdout.log"
     $postRestoreStderr = Join-Path $resolvedTestRoot "post-restore.stderr.log"
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $postRestoreStdout -StderrPath $postRestoreStderr
-    $backups = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -TimeoutSec 5)
+    $backups = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/operations/backups" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
     if ($backups.Count -ne 1 -or $backups[0].id -ne $backup.id) {
         throw "Recovered database did not retain the backup manifest"
     }
@@ -203,7 +203,9 @@ try {
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
     $restoredCleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    $restoredMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5)
+    # Windows PowerShell emits a JSON array as one pipeline object; enumerate
+    # it explicitly before checking count and replaying individual audit rows.
+    $restoredMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
     if ($restoredMailAudits.Count -ne 2) { throw "Restored packaged mail history is incomplete" }
     foreach ($mailAudit in $restoredMailAudits) {
         if ($mailAudit.status -ne "FAILED" -or $mailAudit.error_code -ne "ProviderNotConfiguredError" -or $null -ne $mailAudit.provider_resource_id) {
