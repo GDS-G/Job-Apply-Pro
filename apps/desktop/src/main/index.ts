@@ -5,6 +5,11 @@ import { app, BrowserWindow, dialog, Notification, shell } from "electron";
 
 import { BackendSupervisor } from "./backend-supervisor.js";
 import { loadOrCreateMasterKey } from "./secret-store.js";
+import {
+  InstalledRecoveryError,
+  INSTALLED_RECOVERY_MESSAGE,
+  runInstalledRestoreRecovery,
+} from "./restore-recovery-controller.js";
 import { DesktopNotificationManager } from "./notification-manager.js";
 import { FileNotificationStateStore } from "./notification-state-store.js";
 import { registerWorkbenchIpc } from "./workbench-ipc.js";
@@ -109,8 +114,26 @@ app
     const databaseUrl =
       process.env.JAP_DATABASE_URL ?? `sqlite:///${databasePath}`;
     const admission = { dataRoot: userDataPath, databaseUrl, projectRoot };
-    // Recovery-only startup must be visible without loading a key or opening DB.
-    assertRestoreAdmission(admission);
+    // A packaged app with an active guard enters a terminal recovery-only
+    // session. It never creates a key or constructs normal desktop services.
+    const recoverIfBlocked = async (): Promise<boolean> => {
+      try {
+        assertRestoreAdmission(admission);
+        return false;
+      } catch (error) {
+        if (!(error instanceof RestoreAdmissionError) || !app.isPackaged)
+          throw error;
+        await runInstalledRestoreRecovery({
+          ...admission,
+          resourcesPath: process.resourcesPath,
+          masterKeyPath: join(userDataPath, "secrets", "master-key.bin"),
+        });
+        quitAuthorized = true;
+        app.quit();
+        return true;
+      }
+    };
+    if (await recoverIfBlocked()) return;
     const masterKey =
       process.env.JAP_MASTER_KEY ??
       (await loadOrCreateMasterKey(
@@ -118,7 +141,7 @@ app
         admission,
       ));
     if (quitRequested) return;
-    assertRestoreAdmission(admission);
+    if (await recoverIfBlocked()) return;
     backendSupervisor = new BackendSupervisor({
       projectRoot,
       dataRoot: userDataPath,
@@ -245,14 +268,18 @@ app
     dialog.showErrorBox(
       error instanceof RestoreAdmissionError
         ? "Job Apply Pro — restore recovery required"
-        : error instanceof MissingMasterKeyError
-          ? "Job Apply Pro — encryption key recovery required"
-          : "Job Apply Pro could not start",
+        : error instanceof InstalledRecoveryError
+          ? "Job Apply Pro — restore recovery could not continue"
+          : error instanceof MissingMasterKeyError
+            ? "Job Apply Pro — encryption key recovery required"
+            : "Job Apply Pro could not start",
       error instanceof RestoreAdmissionError
         ? RESTORE_ADMISSION_MESSAGE
-        : error instanceof MissingMasterKeyError
-          ? MISSING_MASTER_KEY_MESSAGE
-          : "The encrypted local workspace could not be initialized. Preserve the workspace and open diagnostics before retrying.",
+        : error instanceof InstalledRecoveryError
+          ? INSTALLED_RECOVERY_MESSAGE
+          : error instanceof MissingMasterKeyError
+            ? MISSING_MASTER_KEY_MESSAGE
+            : "The encrypted local workspace could not be initialized. Preserve the workspace and open diagnostics before retrying.",
     );
     app.quit();
   });
