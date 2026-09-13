@@ -15,7 +15,7 @@ from job_apply_pro.ai.providers import (
     AIProviderRuntime,
     GeminiProvider,
 )
-from job_apply_pro.domain.ai import AIInputPart, AIProviderRequest
+from job_apply_pro.domain.ai import AIInputPart, AIProviderRequest, AIProviderResponse
 from job_apply_pro.domain.media_cleanup import MediaCleanupState
 from media_cleanup_helpers import new_test_journal
 
@@ -457,3 +457,30 @@ def test_active_response_on_last_permitted_poll_is_usable() -> None:
     assert harness.provider.complete(_request(timeout=100)).content == "Reviewed"
     assert harness.methods().count("GET") == 30
     assert harness.methods()[-2:] == ["POST", "DELETE"]
+
+
+@pytest.mark.parametrize(("media_count", "delete_fails"), [(0, False), (1, False), (1, True)])
+def test_response_construction_deadline_expiry_preserves_cleanup_precedence(
+    media_count: int, delete_fails: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = _Harness()
+    if delete_fails:
+        harness.deletions.append(httpx.Response(503))
+
+    def slow_response(**values: object) -> AIProviderResponse:
+        result = AIProviderResponse.model_validate(values)
+        harness.clock.now += 2
+        return result
+
+    monkeypatch.setattr("job_apply_pro.ai.providers.AIProviderResponse", slow_response)
+    with pytest.raises(AIProviderError) as caught:
+        harness.provider.complete(_request(media_count, timeout=1))
+    assert isinstance(caught.value, AIProviderMediaRetentionError) is delete_fails
+    if not delete_fails:
+        assert "work time limit" in str(caught.value)
+    if media_count:
+        assert harness.methods() == ["POST", "POST", "POST", "DELETE"]
+        assert harness.timeouts()[-1] == 15
+    else:
+        assert harness.methods() == ["POST"]
+        assert "cleanup" not in harness.events

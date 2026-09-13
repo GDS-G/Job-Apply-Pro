@@ -347,6 +347,7 @@ class GeminiProvider:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
+            self._remaining_work(budget.deadline)
         except AIProviderError:
             raise
         except (KeyError, TypeError, ValueError) as error:
