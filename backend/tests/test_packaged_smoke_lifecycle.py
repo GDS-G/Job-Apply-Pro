@@ -96,6 +96,8 @@ $script:cimDate = $script:worker.StartedUtc
 $script:cimParent = $script:backend.Id
 $script:cimPath = $script:worker.ExecutablePath
 $script:lookupCalls = 0
+$script:fixtureDirectories = 0
+$script:fixtureWrites = 0
 $script:deleteCalls = 0
 $script:spawnCalls = 0
 $script:hidden = $false
@@ -168,6 +170,8 @@ __SCENARIO__
     spawn_calls = $script:spawnCalls
     hidden = $script:hidden
     lookups = $script:lookupCalls
+    fixture_directories = $script:fixtureDirectories
+    fixture_writes = $script:fixtureWrites
     message = $script:lastError
 } | ConvertTo-Json -Compress
 """
@@ -555,3 +559,72 @@ if (@($commands | Where-Object { $_.GetCommandName() -eq 'Get-SmokeWorker' }).Co
     assert result["backend_waits"] == [10_000, 10_000]
     assert result["deleted"] == 0
     assert result["retained"] is True
+
+
+@pytest.mark.parametrize("failure", ["none", "create", "write"])
+def test_main_fixture_setup_creates_owned_directory_and_stops_on_io_error(
+    failure: str,
+) -> None:
+    result = run_lifecycle(
+        f"$script:fixtureFailure = '{failure}'\n"
+        + r"""
+$setting = $ast.EndBlock.Statements[0]
+if ($setting -isnot [System.Management.Automation.Language.AssignmentStatementAst] -or
+    $setting.Left.VariablePath.UserPath -ne 'ErrorActionPreference') {
+    throw 'Global stopping policy must be the first statement after parameters'
+}
+$ErrorActionPreference = 'Continue'
+. ([scriptblock]::Create($setting.Extent.Text))
+if ($ErrorActionPreference -ne 'Stop') { throw 'Filesystem errors are not terminating' }
+$process = $null
+$apiWorkerProcess = $null
+$resolvedTestRoot = $directory
+$env:JAP_DOCUMENT_DATA_DIR = Join-Path $directory 'documents'
+function New-Item {
+    param($ItemType, $Path, [switch]$Force, $ErrorAction)
+    if ($ItemType -ne 'Directory' -or $Path -ne (Join-Path $directory 'documents')) {
+        throw 'Fixture directory escaped the owned synthetic workspace'
+    }
+    if ($script:fixtureFailure -eq 'create') { Write-Error 'Synthetic directory failure' }
+    $script:fixtureDirectories += 1
+}
+function Set-Content {
+    param($LiteralPath, $Value, $Encoding, [switch]$NoNewline)
+    if ($script:fixtureDirectories -ne 1 -or
+        $LiteralPath -ne (Join-Path $env:JAP_DOCUMENT_DATA_DIR 'restore-smoke.enc') -or
+        $Value -ne 'verified-packaged-restore-fixture') {
+        throw 'Fixture write preceded owned directory creation'
+    }
+    if ($script:fixtureFailure -eq 'write') { Write-Error 'Synthetic fixture write failure' }
+    $script:fixtureWrites += 1
+}
+$mainTry = @($ast.EndBlock.Statements | Where-Object {
+    $_ -is [System.Management.Automation.Language.TryStatementAst]
+})[-1]
+$prefix = [Collections.Generic.List[string]]::new()
+$foundWrite = $false
+foreach ($statement in $mainTry.Body.Statements) {
+    $prefix.Add($statement.Extent.Text)
+    if (@($statement.FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.CommandAst] -and
+        $node.GetCommandName() -eq 'Set-Content'
+    }, $true)).Count -ne 0) {
+        $foundWrite = $true
+        break
+    }
+}
+if (-not $foundWrite) { throw 'Initial fixture write was not found' }
+# Run the real initialization through its first fixture write, with filesystem
+# calls mocked; retain the real outer failure handler and cleanup boundary.
+$probe = "try {`n" + ($prefix -join "`n") + "`n} " +
+    $mainTry.CatchClauses[0].Extent.Text + ' finally ' + $mainTry.Finally.Extent.Text
+Capture-Failure { . ([scriptblock]::Create($probe)) }
+"""
+    )
+    assert result["fixture_directories"] == (0 if failure == "create" else 1)
+    assert result["fixture_writes"] == (1 if failure == "none" else 0)
+    assert result["command_owners"] == 1
+    assert result["backend_kills"] == 0
+    assert result["backend_waits"] == [120_000, 1000]
+    assert result["deleted"] == (1 if failure == "none" else 0)
+    assert result["retained"] is (failure != "none")

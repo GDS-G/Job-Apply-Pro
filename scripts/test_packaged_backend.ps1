@@ -3,6 +3,8 @@ param(
     [string]$PythonPath = ""
 )
 
+$ErrorActionPreference = "Stop"
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $bundleRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot $BackendDirectory))
 $repoPrefix = $repoRoot.TrimEnd("\", "/") + [IO.Path]::DirectorySeparatorChar
@@ -372,6 +374,9 @@ $process = $null
 $apiWorkerProcess = $null
 try {
     Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")
+    # Migration need not initialize runtime document storage. This directory is
+    # fixed beneath the newly created, isolated synthetic workspace above.
+    New-Item -ItemType Directory -Path $env:JAP_DOCUMENT_DATA_DIR -Force -ErrorAction Stop | Out-Null
     $documentPath = Join-Path $env:JAP_DOCUMENT_DATA_DIR "restore-smoke.enc"
     $originalDocument = "verified-packaged-restore-fixture"
     Set-Content -LiteralPath $documentPath -Value $originalDocument -Encoding utf8 -NoNewline
