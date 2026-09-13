@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  RestoreAdmissionError,
+  RESTORE_ADMISSION_MESSAGE,
+  MissingMasterKeyError,
+  MISSING_MASTER_KEY_MESSAGE,
+} from "./restore-admission.js";
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => void>(),
@@ -17,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(async () => undefined),
   notificationStop: vi.fn(),
   errorBox: vi.fn(),
+  admission: vi.fn<() => void>(),
   installGate: undefined as (() => Promise<void>) | undefined,
 }));
 
@@ -74,6 +81,11 @@ vi.mock("./backend-supervisor.js", () => ({
   },
 }));
 vi.mock("./secret-store.js", () => ({ loadOrCreateMasterKey: mocks.key }));
+vi.mock("./restore-admission.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./restore-admission.js")>();
+  return { ...actual, assertRestoreAdmission: mocks.admission };
+});
 vi.mock("./notification-manager.js", () => ({
   DesktopNotificationManager: class {
     initialize = async () => undefined;
@@ -115,6 +127,7 @@ describe("desktop terminal lifecycle callers", () => {
     mocks.key.mockImplementation(async () => "synthetic-key");
     mocks.shutdown.mockImplementation(async () => undefined);
     mocks.prepareUpdate.mockImplementation(async () => undefined);
+    mocks.admission.mockImplementation(() => undefined);
     vi.stubGlobal("__dirname", "C:/synthetic/out/main");
     vi.stubEnv("JAP_MASTER_KEY", "");
     // Empty is an explicit override, so remove it for key-initialization tests.
@@ -132,6 +145,60 @@ describe("desktop terminal lifecycle callers", () => {
     expect(mocks.appQuit).toHaveBeenCalledOnce();
     expect(mocks.key).not.toHaveBeenCalled();
     expect(mocks.createSupervisor).not.toHaveBeenCalled();
+    expect(mocks.admission).not.toHaveBeenCalled();
+  });
+
+  it("shows static lost-key preservation guidance and quits before opening backend services", async () => {
+    mocks.key.mockRejectedValue(new MissingMasterKeyError());
+    await import("./index.js");
+    await settle();
+    expect(mocks.createSupervisor).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.errorBox).toHaveBeenCalledExactlyOnceWith(
+      "Job Apply Pro — encryption key recovery required",
+      MISSING_MASTER_KEY_MESSAGE,
+    );
+    expect(mocks.appQuit).toHaveBeenCalledOnce();
+    expect(mocks.windows).toHaveLength(0);
+  });
+
+  it.each([false, true])(
+    "shows recovery guidance before key or backend initialization (key override=%s)",
+    async (override) => {
+      if (override) vi.stubEnv("JAP_MASTER_KEY", "synthetic override");
+      mocks.admission.mockImplementation(() => {
+        throw new RestoreAdmissionError();
+      });
+      await import("./index.js");
+      await settle();
+      expect(mocks.key).not.toHaveBeenCalled();
+      expect(mocks.createSupervisor).not.toHaveBeenCalled();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.windows).toHaveLength(0);
+      expect(mocks.errorBox).toHaveBeenCalledExactlyOnceWith(
+        "Job Apply Pro — restore recovery required",
+        RESTORE_ADMISSION_MESSAGE,
+      );
+      expect(mocks.appQuit).toHaveBeenCalledOnce();
+      expect(mocks.installGate).toBeUndefined();
+    },
+  );
+
+  it("rechecks admission after asynchronous key loading before constructing services", async () => {
+    mocks.admission
+      .mockImplementationOnce(() => undefined)
+      .mockImplementation(() => {
+        throw new RestoreAdmissionError();
+      });
+    await import("./index.js");
+    await settle();
+    expect(mocks.key).toHaveBeenCalledOnce();
+    expect(mocks.createSupervisor).not.toHaveBeenCalled();
+    expect(mocks.errorBox).toHaveBeenCalledExactlyOnceWith(
+      "Job Apply Pro — restore recovery required",
+      RESTORE_ADMISSION_MESSAGE,
+    );
+    expect(mocks.appQuit).toHaveBeenCalledOnce();
   });
 
   it("awaits shutdown proof with reentrant before-quit protection", async () => {

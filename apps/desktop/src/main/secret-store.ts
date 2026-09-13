@@ -4,7 +4,17 @@ import { dirname } from "node:path";
 
 import { safeStorage } from "electron";
 
-export async function loadOrCreateMasterKey(path: string): Promise<string> {
+import {
+  assertMasterKeyCreationAdmission,
+  assertRestoreAdmission,
+  type RestoreAdmissionOptions,
+} from "./restore-admission.js";
+
+export async function loadOrCreateMasterKey(
+  path: string,
+  admission: RestoreAdmissionOptions,
+): Promise<string> {
+  assertRestoreAdmission(admission);
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error(
       "Operating-system encryption is unavailable for the local master key.",
@@ -24,9 +34,12 @@ export async function loadOrCreateMasterKey(path: string): Promise<string> {
     }
   }
 
+  // Recheck after the asynchronous read, before generating a missing key.
+  assertMasterKeyCreationAdmission(admission);
   const masterKey = randomBytes(32).toString("base64");
   const protectedValue = safeStorage.encryptString(masterKey);
   await mkdir(dirname(path), { recursive: true });
+  assertMasterKeyCreationAdmission(admission);
   await writeFile(path, protectedValue, { mode: 0o600, flag: "wx" });
   return masterKey;
 }

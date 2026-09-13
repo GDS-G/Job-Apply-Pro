@@ -138,7 +138,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Verified Mail Attachments v0.55.0-alpha.1"),
+      screen.getByText("Gemini Processing Budget v0.57.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

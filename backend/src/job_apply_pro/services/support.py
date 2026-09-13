@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Verified Mail Attachments"
+    BUILD_NAME = "Gemini Processing Budget"
 
     def __init__(
         self,
