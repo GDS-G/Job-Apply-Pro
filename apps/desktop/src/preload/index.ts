@@ -15,6 +15,9 @@ import type {
   CandidateProfileCreate,
   ChallengeAnswerCommand,
   ChallengeSessionCreate,
+  GreenhouseJobImportInput,
+  GreenhouseJobListInput,
+  GreenhouseJobReviewInput,
   IntegrationProvider,
   CommunicationDraftCreate,
   MockWorkflowCreate,
@@ -34,6 +37,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
   workbench: {
     getStatus: () => ipcRenderer.invoke("workbench:get-status"),
     listWorkflows: () => ipcRenderer.invoke("workbench:list-workflows"),
+    listGreenhouseJobs: (input: GreenhouseJobListInput) =>
+      ipcRenderer.invoke("discovery:greenhouse-list", input),
+    reviewGreenhouseJob: (input: GreenhouseJobReviewInput) =>
+      ipcRenderer.invoke("discovery:greenhouse-review", input),
+    importGreenhouseJob: (input: GreenhouseJobImportInput) =>
+      ipcRenderer.invoke("discovery:greenhouse-import", input),
     listBrowserSessions: (workflowId?: string) =>
       ipcRenderer.invoke("workbench:list-browser-sessions", workflowId),
     getCandidateKnowledge: (profileId: string) =>

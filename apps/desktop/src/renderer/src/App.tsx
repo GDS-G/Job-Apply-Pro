@@ -71,6 +71,7 @@ import type {
 
 import { MediaCleanupPanel } from "./MediaCleanupPanel";
 import { MailDraftPanel } from "./MailDraftPanel";
+import { GreenhouseDiscoveryPanel } from "./GreenhouseDiscoveryPanel";
 
 const initialStatus: BackendRuntimeStatus = {
   state: "starting",
@@ -678,7 +679,11 @@ export function App() {
   }
 
   async function control(action: WorkflowControlAction) {
-    if (selected === null) return;
+    if (
+      selected === null ||
+      !(selected.allowed_controls ?? []).includes(action)
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
@@ -1512,7 +1517,12 @@ export function App() {
             <div className="hero-actions">
               <button
                 className="button button--secondary"
-                disabled={busy || selected === null}
+                disabled={
+                  busy ||
+                  !(selected?.allowed_controls ?? []).includes(
+                    selected?.state === "USER_TAKEOVER" ? "RESUME" : "PAUSE",
+                  )
+                }
                 onClick={() =>
                   void control(
                     selected?.state === "USER_TAKEOVER" ? "RESUME" : "PAUSE",
@@ -1529,7 +1539,10 @@ export function App() {
               </button>
               <button
                 className="button button--primary"
-                disabled={busy || selected === null}
+                disabled={
+                  busy ||
+                  !(selected?.allowed_controls ?? []).includes("ADVANCE")
+                }
                 onClick={() => void control("ADVANCE")}
                 type="button"
               >
@@ -1755,21 +1768,30 @@ export function App() {
               {selected ? (
                 <div className="queue-controls">
                   <button
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      !(selected.allowed_controls ?? []).includes("RETRY")
+                    }
                     onClick={() => void control("RETRY")}
                     type="button"
                   >
                     <RotateCcw size={14} /> Retry checkpoint
                   </button>
                   <button
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      !(selected.allowed_controls ?? []).includes("TAKEOVER")
+                    }
                     onClick={() => void control("TAKEOVER")}
                     type="button"
                   >
                     <UserRound size={14} /> Take over
                   </button>
                   <button
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      !(selected.allowed_controls ?? []).includes("STOP")
+                    }
                     onClick={() => void control("STOP")}
                     type="button"
                   >
@@ -1878,6 +1900,21 @@ export function App() {
               )}
             </article>
           </section>
+
+          <GreenhouseDiscoveryPanel
+            backendReady={status.state === "ready"}
+            profileId={profileId}
+            onImported={async (workflow) => {
+              setWorkflows((current) => [
+                workflow,
+                ...current.filter(
+                  (item) => item.workflow_id !== workflow.workflow_id,
+                ),
+              ]);
+              setSelectedId(workflow.workflow_id);
+              await refreshWorkflows();
+            }}
+          />
 
           <section className="panel knowledge-panel">
             <div className="panel__header">

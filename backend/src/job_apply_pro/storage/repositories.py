@@ -26,7 +26,7 @@ from job_apply_pro.domain.portals import (
     PortalRunSnapshot,
     SubmissionEvidence,
 )
-from job_apply_pro.domain.workbench import WorkflowRunSnapshot
+from job_apply_pro.domain.workbench import WorkflowRunSnapshot, allowed_workbench_controls
 from job_apply_pro.domain.workflow import (
     TransitionCommand,
     VerificationResult,
@@ -742,4 +742,5 @@ class WorkbenchRepository:
             progress=self._PROGRESS.get(state, 60),
             updated_at=_utc(application.updated_at),
             events=events,
+            allowed_controls=allowed_workbench_controls(job.source, state),
         )

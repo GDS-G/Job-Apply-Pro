@@ -1812,3 +1812,24 @@ h1 {
 .mail-draft-review li {
   margin-bottom: 14px;
 }
+
+.greenhouse-discovery-results,
+.greenhouse-job-review {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  overflow-wrap: anywhere;
+}
+
+.greenhouse-discovery-results label {
+  display: grid;
+  gap: 8px;
+}
+
+.greenhouse-job-review pre {
+  white-space: pre-wrap;
+  font: inherit;
+  unicode-bidi: plaintext;
+  max-height: 420px;
+  overflow: auto;
+}
