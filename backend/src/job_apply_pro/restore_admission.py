@@ -1,5 +1,6 @@
 """Early filesystem-only admission; never imports candidate storage or models."""
 
+import stat
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -28,6 +29,42 @@ def sqlite_database_path(database_url: str) -> Path | None:
     if not url.database or url.database == ":memory:":
         return None
     return Path(url.database).absolute()
+
+
+def assert_no_sqlite_sidecars(database: Path) -> None:
+    """Inspect only paths: opening SQLite could consume recovery sidecars."""
+    database = checked_path(database)
+    for suffix in ("-wal", "-shm", "-journal"):
+        try:
+            database.with_name(database.name + suffix).lstat()
+        except FileNotFoundError:
+            continue
+        raise RestoreAdmissionError(
+            "Restore requires a cleanly closed SQLite database; preserve existing journal "
+            "sidecars and reopen the original workspace safely before retrying"
+        )
+
+
+def closed_restore_database_path(database_url: str) -> Path:
+    """Restore-only precondition; normal startup may still recover SQLite journals."""
+    database = sqlite_database_path(database_url)
+    if database is None:
+        raise RestoreAdmissionError("Restore requires an app-owned file-backed SQLite database")
+    assert_restore_source_closed(database)
+    return database
+
+
+def assert_restore_source_closed(database: Path) -> None:
+    database = checked_path(database)
+    try:
+        info = database.lstat()
+    except OSError:
+        raise RestoreAdmissionError(
+            "Restore requires the existing original database; preserve the workspace and key"
+        ) from None
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise RestoreAdmissionError("Restore requires an existing, exclusively owned database file")
+    assert_no_sqlite_sidecars(database)
 
 
 def workspace_roots(settings: Settings) -> list[Path]:

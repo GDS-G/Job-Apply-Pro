@@ -75,7 +75,7 @@ def serve() -> None:
 def restore(plan_id: str, fingerprint: str) -> None:
     """Apply an already-staged restore while the API process is stopped."""
     from job_apply_pro.config import get_settings
-    from job_apply_pro.restore_admission import workspace_roots
+    from job_apply_pro.restore_admission import closed_restore_database_path, workspace_roots
     from job_apply_pro.storage.restore_gate_repository import (
         RestoreAdmissionError,
         RestoreGateRepository,
@@ -90,6 +90,8 @@ def restore(plan_id: str, fingerprint: str) -> None:
         )
     with workspace_access(roots[0], restore=True):
         RestoreGateRepository(roots[0]).assert_clear()
+        # BackupService imports storage models, so check paths before importing it.
+        closed_restore_database_path(get_settings().database_url)
         from job_apply_pro.services.backup import BackupError
 
         try:
@@ -100,15 +102,18 @@ def restore(plan_id: str, fingerprint: str) -> None:
 
 def _restore_owned(plan_id: str, fingerprint: str, root: Path) -> None:
     from job_apply_pro.config import get_settings
+    from job_apply_pro.restore_admission import closed_restore_database_path
+
+    settings = get_settings()
+    database = closed_restore_database_path(settings.database_url)
+
     from job_apply_pro.domain.operations import RestorePlan
     from job_apply_pro.security.encryption import SensitiveDataCipher
     from job_apply_pro.security.keys import EnvironmentKeyProvider
-    from job_apply_pro.services.backup import BackupService
     from job_apply_pro.services.restore_recovery import RestoreRecoveryService
     from job_apply_pro.storage.database import SessionFactory, engine
     from job_apply_pro.storage.operations_repository import OperationsRepository
 
-    settings = get_settings()
     with SessionFactory() as session:
         repository = OperationsRepository(session)
         plan = repository.get_restore_plan(plan_id)
@@ -124,7 +129,7 @@ def _restore_owned(plan_id: str, fingerprint: str, root: Path) -> None:
     intent = recovery.prepare(
         plan,
         manifest,
-        database=BackupService._sqlite_path(settings.database_url),
+        database=database,
         documents=settings.document_data_dir,
         staging=settings.restore_staging_dir,
         backups=settings.backup_data_dir,

@@ -214,11 +214,13 @@ class BackupService:
             return self._apply_documents_owned(plan_id, command)
 
     def _apply_documents_owned(self, plan_id: str, command: RestoreConfirmation) -> RestorePlan:
+        from job_apply_pro.restore_admission import assert_restore_source_closed
         from job_apply_pro.services.restore_recovery import RestoreRecoveryService
         from job_apply_pro.storage.restore_gate_repository import RestoreAdmissionError
 
         recovery = RestoreRecoveryService(self._database_path.parent, self._cipher)
         recovery.gate.assert_clear()
+        assert_restore_source_closed(self._database_path)
         plan = self._repository.get_restore_plan(plan_id)
         if plan is None:
             raise LookupError(f"Restore plan {plan_id} was not found")

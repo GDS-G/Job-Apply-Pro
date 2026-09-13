@@ -22,6 +22,7 @@ from job_apply_pro.domain.operations import (
     RestorePlan,
     RestoreStatus,
 )
+from job_apply_pro.restore_admission import assert_no_sqlite_sidecars
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.storage.restore_gate_repository import (
     RECOVERY_MESSAGE,
@@ -152,18 +153,6 @@ def _authenticate_archive(
                 raise RestoreAdmissionError(
                     "Backup entry failed authenticated integrity verification"
                 )
-
-
-def _no_sidecars(database: Path) -> None:
-    for suffix in ("-wal", "-shm", "-journal"):
-        try:
-            database.with_name(database.name + suffix).lstat()
-        except FileNotFoundError:
-            continue
-        raise RestoreAdmissionError(
-            "Restore requires a cleanly closed SQLite database; preserve existing journal "
-            "sidecars and reopen the original workspace safely before retrying"
-        )
 
 
 class RestoreRecoveryService:
@@ -298,7 +287,7 @@ class RestoreRecoveryService:
         database = checked_path(root / safe_relative(intent.database), root=root)
         # Do not open SQLite at all while unknown journal sidecars exist. A
         # read-only SQLite connection is not an authorization to discard them.
-        _no_sidecars(database)
+        assert_no_sqlite_sidecars(database)
         hash_file(database)
         if BackupCategory.DATABASE in intent.plan.categories:
             from job_apply_pro.services.backup import BackupService
@@ -335,14 +324,14 @@ class RestoreRecoveryService:
             ):
                 raise RestoreAdmissionError(RECOVERY_MESSAGE)
             if source.path == "database/job_apply_pro.db":
-                _no_sidecars(target)
+                assert_no_sqlite_sidecars(target)
             targets.append(
                 Target(path=target.relative_to(root).as_posix(), sha256=digest, size=size)
             )
         # Even document-only restores update their manifest/plan in this database.
         # Completion therefore always proves the committed database bytes too.
         if BackupCategory.DATABASE not in intent.plan.categories:
-            _no_sidecars(database)
+            assert_no_sqlite_sidecars(database)
             digest, size = hash_file(database)
             targets.append(Target(path=intent.database, sha256=digest, size=size))
         receipt = Receipt(intent_sha256=_intent_hash(intent), targets=targets)
@@ -381,7 +370,7 @@ class RestoreRecoveryService:
                     self.gate.root / safe_relative(target.path), root=self.gate.root
                 )
                 if target.path == intent.database:
-                    _no_sidecars(path)
+                    assert_no_sqlite_sidecars(path)
                 else:
                     source = next(
                         source
