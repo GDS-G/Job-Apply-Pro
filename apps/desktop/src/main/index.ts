@@ -11,9 +11,24 @@ import { registerWorkbenchIpc } from "./workbench-ipc.js";
 import { UpdateManager } from "./update-manager.js";
 
 const isDevelopment = !app.isPackaged;
+// Acquire ownership before reading/creating the encryption key or opening the DB.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+let quitAuthorized = false;
+let quitInProgress = false;
+let quitRequested = false;
 let backendSupervisor: BackendSupervisor | null = null;
 let updateManager: UpdateManager | null = null;
 let notificationManager: DesktopNotificationManager | null = null;
+
+if (!hasSingleInstanceLock) app.quit();
+
+app.on("second-instance", () => {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+});
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -70,6 +85,7 @@ function createMainWindow(): BrowserWindow {
 app
   .whenReady()
   .then(async () => {
+    if (!hasSingleInstanceLock || quitRequested) return;
     app.setAppUserModelId("com.jobapplypro.desktop");
     const projectRoot =
       process.env.JAP_PROJECT_ROOT ??
@@ -84,6 +100,7 @@ app
       (await loadOrCreateMasterKey(
         join(userDataPath, "secrets", "master-key.bin"),
       ));
+    if (quitRequested) return;
     const databasePath = join(userDataPath, "job-apply-pro.db").replaceAll(
       "\\",
       "/",
@@ -109,7 +126,15 @@ app
         ? { pythonPath: process.env.JAP_PYTHON_PATH }
         : {}),
     });
-    updateManager = new UpdateManager(app.isPackaged, app.getVersion());
+    updateManager = new UpdateManager(
+      app.isPackaged,
+      app.getVersion(),
+      async () => {
+        await backendSupervisor?.prepareUpdate();
+        notificationManager?.stop();
+        quitRequested = true;
+      },
+    );
     notificationManager = new DesktopNotificationManager(
       async () => {
         if (!backendSupervisor || !updateManager) {
@@ -171,6 +196,10 @@ app
       },
     );
     await notificationManager.initialize();
+    if (quitRequested) {
+      notificationManager.stop();
+      return;
+    }
     registerWorkbenchIpc(backendSupervisor, updateManager, notificationManager);
     backendSupervisor.onStatus((status) => {
       for (const window of BrowserWindow.getAllWindows()) {
@@ -190,11 +219,8 @@ app
       }
     });
     createMainWindow();
-    void backendSupervisor.start().catch(() => {
-      backendSupervisor?.markDegraded(
-        "Local backend startup failed. Saved data remains on disk; restart the app to retry.",
-      );
-    });
+    // Supervisor publishes sanitized, ownership-aware failures itself.
+    void backendSupervisor.start().catch(() => undefined);
     void updateManager.check();
 
     app.on("activate", () => {
@@ -204,7 +230,7 @@ app
   .catch(() => {
     dialog.showErrorBox(
       "Job Apply Pro could not start",
-      "The encrypted local workspace could not be initialized. No data was changed.",
+      "The encrypted local workspace could not be initialized. Preserve the workspace and open diagnostics before retrying.",
     );
     app.quit();
   });
@@ -213,7 +239,33 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (quitAuthorized || !hasSingleInstanceLock) return;
+  event.preventDefault();
+  if (quitInProgress) return;
+  quitInProgress = true;
+  quitRequested = true;
   notificationManager?.stop();
-  backendSupervisor?.stop();
+  void Promise.resolve(backendSupervisor?.shutdown())
+    .then(() => {
+      quitAuthorized = true;
+      app.quit();
+    })
+    .catch(() => {
+      quitRequested = false;
+      if (app.isReady()) {
+        const window = BrowserWindow.getAllWindows()[0] ?? createMainWindow();
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+      dialog.showErrorBox(
+        "Job Apply Pro must remain open",
+        backendSupervisor?.status.message ??
+          "Safe backend shutdown has not been confirmed. Keep the app open and review recovery status.",
+      );
+    })
+    .finally(() => {
+      quitInProgress = false;
+    });
 });

@@ -1,6 +1,6 @@
 # Job Apply Pro user guide
 
-This guide applies to Packaged Browser Runtime `v0.53.0-alpha.1`. This is an alpha milestone, not a production-ready signed release: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are implemented but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, explicit media-upload consent for images, and a local uncommitted gateway configuration.
+This guide applies to Bounded Backend Lifecycle `v0.54.0-alpha.1`. This is an alpha milestone, not a production-ready signed release: named portal capability is disabled by default and is not a production compatibility claim. Native Windows notifications are implemented but still require physical release-lab validation. Live mail/calendar access remains unavailable until the owner registers an OAuth desktop client, imports reviewed registration metadata, and completes provider authorization. Live Gemini access likewise requires an owner-created API key, reviewed provider terms/privacy/retention settings, explicit external-AI consent, explicit media-upload consent for images, and a local uncommitted gateway configuration.
 
 Gemini image review accepts fully decoded, static JPEG, PNG, or WebP images matching the declared type. The app applies EXIF orientation and creates a clean PNG without embedded EXIF/GPS, comments, PNG text, thumbnails, XMP, or color-profile metadata. Original and normalized images must each fit 5 MiB, no edge may exceed 8,192 pixels, total pixels may not exceed 16,777,216, and each request allows four images. A compressed photo may exceed the limit when converted to PNG; the app rejects it instead of silently resizing it. Export a smaller image and review it again. Embedded color profiles are not applied and higher-bit-depth inputs become 8-bit RGB/RGBA, so compare the normalized visual result carefully. Metadata removal does not redact visible names, faces, text, or other sensitive pixels; review those before consenting. URL-based image parts are not fetched or normalized by this boundary.
 
@@ -12,12 +12,20 @@ The packaged browser runtime includes `resources/backend/job-apply-pro-browser-w
 
 When explicitly using Chromium, its matching Playwright browser must already be installed. Frozen Windows workers use `%LOCALAPPDATA%\ms-playwright` by default and preserve an explicit `PLAYWRIGHT_BROWSERS_PATH` override. No browser is downloaded automatically by the app; a missing executable is a recoverable installation/configuration error, not permission to use another personal browser profile.
 
-1. For production use, wait for a published signed installer. `Job-Apply-Pro-0.53.0-alpha.1-x64.exe` is a development-candidate filename, not evidence of signing or successful acceptance. Consult the readiness audit for this exact version's build, hashes and limitations. Test unsigned candidates only on an isolated development workstation.
+1. For production use, wait for a published signed installer. `Job-Apply-Pro-0.54.0-alpha.1-x64.exe` is a development-candidate filename, not evidence of signing or successful acceptance. Consult the readiness audit for this exact version's build, hashes and limitations. Test unsigned candidates only on an isolated development workstation.
 2. For a future signed release, compare the Authenticode publisher and checksum with its release record; do not assume that a GitHub account name is the certificate subject. Do not proceed with production installation if its signature is invalid or its publisher is unexpected.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.
 
 The packaged browser runtime uses Microsoft Edge. Keep Windows and Edge supported and updated.
+
+## Startup, shutdown and restore safety
+
+Only one desktop instance owns the workspace; starting a second instance focuses the first. Startup waits for migration and authenticated backend readiness. Quit and update wait for the app's owned backend processes to exit instead of treating a termination request as success.
+
+Offline restore changes several files. If it exceeds the two-minute observation window, the app does not kill its writer. Keep the app open, preserve backups and staging files, and follow the displayed recovery status. Quit, update and restart are blocked while a restore may still write. After a failed or uncertain writer has exited, deliberate quit is possible, but automatic restart and update/relaunch remain blocked for that app session. Do not reopen the workspace until the restore outcome is independently resolved; the current guard does not survive a forced app termination or workstation crash.
+
+If shutdown cannot be verified, the app keeps or reopens its window. Do not force-close processes or remove recovery files to bypass this warning. These controls do not yet establish physical sleep/restart recovery or signed update/rollback acceptance.
 
 ## Review durable media recovery
 

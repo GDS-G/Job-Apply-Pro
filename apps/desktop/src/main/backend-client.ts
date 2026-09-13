@@ -80,8 +80,14 @@ export class BackendClient {
     private readonly token: string,
   ) {}
 
-  async runtimeStatus(): Promise<void> {
-    await this.request("/runtime/status");
+  async runtimeStatus(
+    options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<void> {
+    await this.request(
+      "/runtime/status",
+      options.signal ? { signal: options.signal } : {},
+      options.timeoutMs,
+    );
   }
 
   listWorkflows(): Promise<WorkflowRunSnapshot[]> {
@@ -753,11 +759,12 @@ export class BackendClient {
     });
   }
 
-  runDueBackupSchedules(): Promise<BackupManifest[]> {
+  runDueBackupSchedules(signal?: AbortSignal): Promise<BackupManifest[]> {
     return this.request(
       "/operations/backup-schedules/run-due",
       {
         method: "POST",
+        ...(signal ? { signal } : {}),
       },
       120_000,
     );
@@ -795,23 +802,31 @@ export class BackendClient {
     timeoutMs = 10_000,
   ): Promise<T> {
     const isForm = init.body instanceof FormData;
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        ...(isForm ? {} : { "Content-Type": "application/json" }),
-        "X-Job-Apply-Pro-Token": this.token,
-        ...init.headers,
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) {
-      const payload: unknown = await response.json().catch(() => null);
-      const detail =
-        typeof payload === "object" && payload !== null && "detail" in payload
-          ? String(payload.detail)
-          : `Local backend request failed with HTTP ${response.status}`;
-      throw new BackendApiError(detail, response.status);
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          ...(isForm ? {} : { "Content-Type": "application/json" }),
+          "X-Job-Apply-Pro-Token": this.token,
+          ...init.headers,
+        },
+        signal: init.signal
+          ? AbortSignal.any([init.signal, timeout.signal])
+          : timeout.signal,
+      });
+      if (!response.ok) {
+        const payload: unknown = await response.json().catch(() => null);
+        const detail =
+          typeof payload === "object" && payload !== null && "detail" in payload
+            ? String(payload.detail)
+            : `Local backend request failed with HTTP ${response.status}`;
+        throw new BackendApiError(detail, response.status);
+      }
+      return (await response.json()) as T;
+    } finally {
+      clearTimeout(timer);
     }
-    return (await response.json()) as T;
   }
 }
