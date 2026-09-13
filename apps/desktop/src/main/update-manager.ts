@@ -13,10 +13,12 @@ type UpdateListener = (status: DesktopUpdateStatus) => void;
 export class UpdateManager {
   private listeners = new Set<UpdateListener>();
   private current: DesktopUpdateStatus;
+  private installing: Promise<void> | null = null;
 
   constructor(
     private readonly packaged: boolean,
     currentVersion: string,
+    private readonly beforeInstall: () => Promise<void>,
   ) {
     this.current = initialUpdateStatus(packaged, currentVersion);
     if (!packaged) return;
@@ -91,9 +93,26 @@ export class UpdateManager {
     return this.current;
   }
 
-  install(): void {
-    if (this.packaged && this.current.state === "DOWNLOADED") {
+  install(): Promise<void> {
+    if (this.installing !== null) return this.installing;
+    if (!this.packaged || this.current.state !== "DOWNLOADED")
+      return Promise.resolve();
+    const operation = this.installAfterShutdown().finally(() => {
+      if (this.installing === operation) this.installing = null;
+    });
+    this.installing = operation;
+    return operation;
+  }
+
+  private async installAfterShutdown(): Promise<void> {
+    try {
+      await this.beforeInstall();
       autoUpdater.quitAndInstall(false, true);
+    } catch {
+      const message =
+        "Update installation was blocked because safe shutdown could not be completed. Keep the app open and review backend recovery status.";
+      this.update("ERROR", message);
+      throw new Error(message);
     }
   }
 

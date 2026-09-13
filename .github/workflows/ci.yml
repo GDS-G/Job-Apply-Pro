@@ -80,6 +80,11 @@ jobs:
       - name: Smoke-test delivered browser runtime
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_packaged_backend.ps1 -BackendDirectory release/win-unpacked/resources/backend
 
+      - name: Exercise delivered backend supervisor lifecycle
+        run: |
+          $env:JAP_LIFECYCLE_TEST_BACKEND = (Resolve-Path -LiteralPath 'release/win-unpacked/resources/backend/job-apply-pro-backend.exe').Path
+          pnpm --filter @job-apply-pro/desktop test src/main/backend-supervisor.packaged.test.ts
+
       - name: Upload package smoke artifact
         uses: actions/upload-artifact@v7
         with:
