@@ -82,6 +82,47 @@ class MessageCategory(StrEnum):
     SPAM_OR_UNRELATED = "SPAM_OR_UNRELATED"
 
 
+class MailMode(StrEnum):
+    NEW_MESSAGE = "NEW_MESSAGE"
+    REPLY = "REPLY"
+
+
+class MailReplyHeaders(BaseModel):
+    """Validated header facts, not proof that a message came from a provider."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_id_format: Literal["GMAIL", "GRAPH_IMMUTABLE"]
+    from_address: str = Field(min_length=1, max_length=320)
+    sender_address: str = Field(min_length=1, max_length=320)
+    reply_to: tuple[str, ...] = Field(default=(), max_length=1)
+    rfc_message_id: str | None = Field(default=None, max_length=998)
+    references: tuple[str, ...] = Field(default=(), max_length=50)
+    in_reply_to: tuple[str, ...] = Field(default=(), max_length=1)
+
+
+class MailReplyContext(BaseModel):
+    """Immutable reply facts authored by account-bound provider sync only."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    policy_version: Literal["mail-reply-v1"] = "mail-reply-v1"
+    provider: Literal[IntegrationProvider.GMAIL, IntegrationProvider.OUTLOOK]
+    account_key: str = Field(pattern=r"^[a-f0-9]{64}$")
+    account_label: str = Field(min_length=1, max_length=320)
+    connection_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_record_id: str = Field(min_length=1, max_length=100)
+    source_message_id: str = Field(min_length=1, max_length=500)
+    source_thread_id: str = Field(min_length=1, max_length=500)
+    source_id_format: Literal["GMAIL", "GRAPH_IMMUTABLE"]
+    recipient: str = Field(min_length=1, max_length=320)
+    subject: str = Field(max_length=1_000)
+    rfc_message_id: str | None = Field(default=None, max_length=998)
+    references: tuple[str, ...] = Field(default=(), max_length=50)
+    mime_reply_supported: bool
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class NormalizedMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -96,6 +137,7 @@ class NormalizedMessage(BaseModel):
     attachment_names: list[str] = Field(default_factory=list, max_length=100)
     referenced_identifiers: list[str] = Field(default_factory=list, max_length=100)
     referenced_urls: list[str] = Field(default_factory=list, max_length=100)
+    reply_headers: MailReplyHeaders | None = None
 
     @field_validator("received_at")
     @classmethod
@@ -272,6 +314,7 @@ class OAuthAuthorizationState(BaseModel):
     granted_scopes: list[str] = Field(default_factory=list, max_length=100)
     expires_at: datetime | None = None
     account_hint: str | None = Field(default=None, max_length=200)
+    account_identity: str | None = Field(default=None, exclude=True)
 
 
 class OAuthAuthorizationRequest(BaseModel):
@@ -307,6 +350,7 @@ class OAuthTokenSet(BaseModel):
     expires_at: datetime
     granted_scopes: list[str] = Field(default_factory=list, max_length=100)
     account_hint: str | None = Field(default=None, max_length=200)
+    account_identity: str | None = Field(default=None, min_length=1, max_length=500)
 
     @field_validator("expires_at")
     @classmethod
@@ -323,6 +367,10 @@ class CommunicationRecord(BaseModel):
     analysis: CommunicationAnalysis
     received_at: datetime
     created_at: datetime
+    source_account_key: str | None = Field(default=None, exclude=True)
+    source_connection_fingerprint: str | None = Field(default=None, exclude=True)
+    reply_context: MailReplyContext | None = None
+    reply_unavailable_reason: str | None = None
 
 
 class ProviderMessageSyncResult(BaseModel):
@@ -391,15 +439,36 @@ class DraftCreate(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     analysis_id: str = Field(min_length=1, max_length=100)
+    mode: MailMode
     workflow_id: str | None = Field(default=None, max_length=100)
-    provider: IntegrationProvider
-    provider_thread_id: str = Field(min_length=1, max_length=500)
-    recipient: str = Field(min_length=1, max_length=500)
-    subject: str = Field(min_length=1, max_length=1_000)
+    provider: IntegrationProvider | None = None
+    recipient: str | None = Field(default=None, min_length=1, max_length=500)
+    subject: str | None = Field(default=None, min_length=1, max_length=1_000)
+    source_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     body_text: str = Field(min_length=1, max_length=20_000)
     category: MessageCategory
     policy: OutboundPolicy = OutboundPolicy.REVIEW_REQUIRED
     document_version_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def require_explicit_mode_fields(self) -> "DraftCreate":
+        if self.policy is not OutboundPolicy.REVIEW_REQUIRED:
+            raise ValueError("Mail drafts require explicit review")
+        if self.mode is MailMode.REPLY:
+            if self.source_fingerprint is None or any(
+                name in self.model_fields_set for name in ("provider", "recipient", "subject")
+            ):
+                raise ValueError(
+                    "Reply requests require source review without destination overrides"
+                )
+        elif (
+            self.provider not in {IntegrationProvider.GMAIL, IntegrationProvider.OUTLOOK}
+            or self.recipient is None
+            or self.subject is None
+            or "source_fingerprint" in self.model_fields_set
+        ):
+            raise ValueError("New messages require an explicit provider, recipient and subject")
+        return self
 
 
 class OutboundDraft(BaseModel):
@@ -417,6 +486,10 @@ class OutboundDraft(BaseModel):
     policy: OutboundPolicy
     document_version_ids: list[str]
     attachment_manifest: MailAttachmentManifest | None = None
+    mode: MailMode | None = None
+    account_key: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    account_label: str | None = Field(default=None, max_length=320)
+    reply_context: MailReplyContext | None = None
     provider_binding_fingerprint: str | None = Field(default=None, exclude=True)
     fingerprint: str = Field(min_length=64, max_length=64)
     created_at: datetime

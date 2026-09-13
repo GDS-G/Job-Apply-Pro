@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+import unicodedata
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from email.message import EmailMessage
@@ -16,6 +18,8 @@ from pydantic import SecretStr
 from job_apply_pro.domain.communications import (
     CalendarEventSnapshot,
     IntegrationProvider,
+    MailMode,
+    MailReplyContext,
     NormalizedMessage,
     OutboundDraft,
     ProviderSyncMode,
@@ -26,6 +30,12 @@ from job_apply_pro.domain.mail import (
     ProviderMailResult,
     VerifiedMailAttachment,
     validate_mail_bundle,
+)
+from job_apply_pro.domain.mail_threading import (
+    parse_gmail_reply_headers,
+    parse_outlook_reply_headers,
+    validate_mailbox,
+    validate_reply_context,
 )
 from job_apply_pro.integrations.communications import (
     ProviderMessageBatch,
@@ -50,39 +60,133 @@ MAX_MESSAGE_BODY_CHARACTERS = 100_000
 def _mail_post(
     client: httpx.Client,
     url: str,
-    payload: dict[str, object],
+    payload: dict[str, object] | bytes,
     tokens: AccessTokenProvider,
     provider: IntegrationProvider,
+    *,
+    reply: bool = False,
 ) -> httpx.Response:
-    encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    encoded = (
+        payload
+        if isinstance(payload, bytes)
+        else json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    )
     if len(encoded) > MAX_MAIL_WIRE_BYTES:
         raise MailAttachmentError("The encoded message exceeds the supported size limit")
     try:
-        headers = _token_headers(tokens, provider)
-    except OAuthAuthorizationError as error:
+        headers = (
+            _graph_mail_headers(tokens)
+            if provider == IntegrationProvider.OUTLOOK
+            else _token_headers(tokens, provider)
+        )
+    except Exception as error:
         raise ProviderMutationError("Mail provider authorization is unavailable") from error
     try:
         with client.stream(
             "POST",
             url,
             content=encoded,
-            headers={**headers, "Content-Type": "application/json"},
+            headers={
+                **headers,
+                "Content-Type": "text/plain" if isinstance(payload, bytes) else "application/json",
+            },
             follow_redirects=False,
         ) as response:
-            if response.status_code in {400, 401, 403, 413, 415, 422, 429}:
-                raise ProviderMutationError("The mail provider rejected the send request")
-            if response.status_code not in {200, 202}:
-                raise ProviderSendUncertainError()
-            chunks: list[bytes] = []
-            size = 0
-            for chunk in response.iter_bytes(chunk_size=16_384):
-                size += len(chunk)
-                if size > 65_536:
+            if response.status_code in {400, 401, 403, 413, 415, 422, 429} or (
+                reply and response.status_code == 404
+            ):
+                # Complete response cleanup before exposing a definite rejection.
+                pass
+            else:
+                if response.status_code not in {200, 202}:
                     raise ProviderSendUncertainError()
-                chunks.append(chunk)
-            return httpx.Response(response.status_code, content=b"".join(chunks))
-    except httpx.HTTPError as error:
+                chunks: list[bytes] = []
+                size = 0
+                for chunk in response.iter_bytes(chunk_size=16_384):
+                    size += len(chunk)
+                    if size > 65_536:
+                        raise ProviderSendUncertainError()
+                    chunks.append(chunk)
+                return httpx.Response(response.status_code, content=b"".join(chunks))
+    except ProviderSendUncertainError:
+        raise
+    except Exception as error:
         raise ProviderSendUncertainError() from error
+    raise ProviderMutationError("The mail provider rejected the send request")
+
+
+def _validated_mail_context(
+    draft: OutboundDraft, provider: IntegrationProvider
+) -> MailReplyContext | None:
+    try:
+        if (
+            draft.provider != provider
+            or not isinstance(draft.account_key, str)
+            or re.fullmatch(r"[a-f0-9]{64}", draft.account_key) is None
+            or draft.account_label is None
+            or validate_mailbox(draft.account_label) != draft.account_label
+            or validate_mailbox(draft.recipient) != draft.recipient
+            or not isinstance(draft.subject, str)
+            or len(draft.subject) > 1_000
+            or any(unicodedata.category(char).startswith("C") for char in draft.subject)
+            or any(char in "\u2028\u2029" for char in draft.subject)
+        ):
+            raise ValueError("Mail draft binding is invalid")
+        context = draft.reply_context
+        if draft.mode == MailMode.NEW_MESSAGE:
+            if context is not None or draft.provider_thread_id != "":
+                raise ValueError("New messages cannot carry reply context")
+            return None
+        if draft.mode != MailMode.REPLY or context is None:
+            raise ValueError("A source-bound reply review is required")
+        validate_reply_context(context)
+        if (
+            context.provider != draft.provider
+            or context.account_key != draft.account_key
+            or context.account_label != draft.account_label
+            or context.connection_fingerprint != draft.provider_binding_fingerprint
+            or context.source_record_id != draft.analysis_id
+            or context.source_thread_id != draft.provider_thread_id
+            or context.subject != draft.subject
+            or context.recipient != draft.recipient
+        ):
+            raise ValueError("Mail reply binding changed")
+        return context
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ProviderMutationError("The reviewed mail source or account is unavailable") from error
+
+
+def _mime_message(
+    draft: OutboundDraft,
+    attachments: tuple[VerifiedMailAttachment, ...],
+    idempotency_key: str,
+    context: MailReplyContext | None,
+) -> bytes:
+    try:
+        # References and In-Reply-To must contain literal msg-id tokens, never
+        # encoded words produced by refolding an otherwise valid long token.
+        message = EmailMessage(policy=SMTP.clone(max_line_length=998))
+        message["From"] = draft.account_label
+        message["To"] = draft.recipient
+        message["Subject"] = draft.subject
+        message["X-Job-Apply-Pro-Idempotency-Key"] = idempotency_key
+        if context is not None:
+            if context.rfc_message_id is not None:
+                message["In-Reply-To"] = context.rfc_message_id
+            if context.references:
+                message["References"] = " ".join(context.references)
+        message.set_content(draft.body_text)
+        for attachment in attachments:
+            maintype, subtype = attachment.metadata.media_type.split("/", 1)
+            message.add_attachment(
+                attachment.data,
+                maintype=maintype,
+                subtype=subtype,
+                filename=attachment.metadata.file_name,
+            )
+        return message.as_bytes()
+    except (ValueError, TypeError, UnicodeError) as error:
+        raise ProviderMutationError("The reviewed message headers are invalid") from error
 
 
 def _json(response: httpx.Response, action: str) -> dict[str, object]:
@@ -225,6 +329,13 @@ def _token_headers(tokens: AccessTokenProvider, provider: IntegrationProvider) -
     except OAuthAuthorizationError as error:
         raise ProviderMutationError(str(error)) from error
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+
+def _graph_mail_headers(tokens: AccessTokenProvider) -> dict[str, str]:
+    return {
+        **_token_headers(tokens, IntegrationProvider.OUTLOOK),
+        "Prefer": 'IdType="ImmutableId"',
+    }
 
 
 def _decode_base64url(value: str) -> str:
@@ -439,12 +550,18 @@ class GmailMessageProvider:
                     provider=self.provider,
                     provider_message_id=str(raw["id"]),
                     provider_thread_id=str(raw.get("threadId", raw["id"])),
-                    sender=headers.get("from", "unknown@example.invalid"),
+                    sender=headers.get("from", "unknown@example.invalid")[:500]
+                    or "unknown@example.invalid",
                     recipients=recipients,
-                    subject=headers.get("subject", ""),
+                    subject=headers.get("subject", "")[:1_000],
                     body_text=_gmail_body(message_payload),
                     received_at=received_at,
                     attachment_names=_gmail_attachments(message_payload),
+                    reply_headers=(
+                        parse_gmail_reply_headers(header_items)
+                        if isinstance(raw.get("threadId"), str) and raw.get("threadId")
+                        else None
+                    ),
                 )
             )
         return messages
@@ -459,29 +576,22 @@ class GmailMessageProvider:
         if not attachments:
             reject_mail_attachments(draft.document_version_ids)
         validate_mail_bundle(draft, attachments)
-        try:
-            message = EmailMessage(policy=SMTP)
-            message["To"] = draft.recipient
-            message["Subject"] = draft.subject
-            message["X-Job-Apply-Pro-Idempotency-Key"] = idempotency_key
-            message.set_content(draft.body_text)
-            for attachment in attachments:
-                maintype, subtype = attachment.metadata.media_type.split("/", 1)
-                message.add_attachment(
-                    attachment.data,
-                    maintype=maintype,
-                    subtype=subtype,
-                    filename=attachment.metadata.file_name,
-                )
-        except (ValueError, TypeError) as error:
-            raise ProviderMutationError("The reviewed message headers are invalid") from error
-        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
+        context = _validated_mail_context(draft, self.provider)
+        raw = (
+            base64.urlsafe_b64encode(_mime_message(draft, attachments, idempotency_key, context))
+            .decode("ascii")
+            .rstrip("=")
+        )
+        body: dict[str, object] = {"raw": raw}
+        if context is not None:
+            body["threadId"] = context.source_thread_id
         response = _mail_post(
             self._client,
             f"{self._base}/messages/send",
-            {"raw": raw, "threadId": draft.provider_thread_id},
+            body,
             self._tokens,
             self.provider,
+            reply=context is not None,
         )
         if response.status_code != 200:
             raise ProviderSendUncertainError()
@@ -510,7 +620,7 @@ class OutlookMessageProvider:
             "$top": "100",
             "$select": (
                 "id,conversationId,subject,bodyPreview,receivedDateTime,"
-                "sender,toRecipients,hasAttachments"
+                "from,sender,replyTo,internetMessageId,toRecipients,hasAttachments"
             ),
         }
         if since is not None:
@@ -519,7 +629,7 @@ class OutlookMessageProvider:
             self._client,
             url=f"{self._base}/messages",
             params=params,
-            headers=_token_headers(self._tokens, self.provider),
+            headers=_graph_mail_headers(self._tokens),
             path_prefix="/v1.0/me/messages",
             action="Outlook message listing",
         )
@@ -547,7 +657,7 @@ class OutlookMessageProvider:
     ) -> ProviderMessageBatch:
         select_fields = (
             "id,conversationId,subject,bodyPreview,receivedDateTime,"
-            "sender,toRecipients,hasAttachments"
+            "from,sender,replyTo,internetMessageId,toRecipients,hasAttachments"
         )
         params: dict[str, str] | None = None
         next_url = self._delta_url
@@ -557,8 +667,8 @@ class OutlookMessageProvider:
                 params["$filter"] = f"receivedDateTime ge {since.astimezone(UTC).isoformat()}"
         else:
             next_url = self._validated_delta_link(cursor.get_secret_value())
-        headers = _token_headers(self._tokens, self.provider)
-        headers["Prefer"] = "odata.maxpagesize=100"
+        headers = _graph_mail_headers(self._tokens)
+        headers["Prefer"] += ", odata.maxpagesize=100"
         values: list[dict[str, object]] = []
         seen_links: set[str] = set()
         delta_link: str | None = None
@@ -659,18 +769,24 @@ class OutlookMessageProvider:
                     provider_message_id=message_id,
                     provider_thread_id=str(raw.get("conversationId", message_id)),
                     sender=(
-                        str(sender_address.get("address", "unknown@example.invalid"))
+                        str(sender_address.get("address", "unknown@example.invalid"))[:500]
+                        or "unknown@example.invalid"
                         if isinstance(sender_address, dict)
                         else "unknown@example.invalid"
                     ),
                     recipients=recipients,
-                    subject=str(raw.get("subject", "")),
+                    subject=str(raw.get("subject", ""))[:1_000],
                     body_text=str(raw.get("bodyPreview", "")),
                     received_at=_parse_datetime(received_at),
                     attachment_names=(
                         self._attachment_names(message_id)
                         if raw.get("hasAttachments") is True
                         else []
+                    ),
+                    reply_headers=(
+                        parse_outlook_reply_headers(raw)
+                        if isinstance(raw.get("conversationId"), str) and raw.get("conversationId")
+                        else None
                     ),
                 )
             )
@@ -682,7 +798,7 @@ class OutlookMessageProvider:
             self._client,
             url=f"https://graph.microsoft.com{path}",
             params={"$select": "name,isInline,size"},
-            headers=_token_headers(self._tokens, self.provider),
+            headers=_graph_mail_headers(self._tokens),
             path_prefix=path,
             action="Outlook attachment listing",
             max_pages=MAX_ATTACHMENT_PAGES,
@@ -703,6 +819,38 @@ class OutlookMessageProvider:
         if not attachments:
             reject_mail_attachments(draft.document_version_ids)
         validate_mail_bundle(draft, attachments)
+        context = _validated_mail_context(draft, self.provider)
+        if context is not None:
+            if attachments and not context.mime_reply_supported:
+                raise ProviderMutationError(
+                    "Attachments cannot safely target this reply address; no message was sent"
+                )
+            reply_payload: dict[str, object] | bytes
+            if attachments:
+                reply_payload = base64.b64encode(
+                    _mime_message(draft, attachments, idempotency_key, context)
+                )
+            else:
+                reply_payload = {
+                    "message": {
+                        "subject": draft.subject,
+                        "body": {"contentType": "Text", "content": draft.body_text},
+                        "toRecipients": [{"emailAddress": {"address": context.recipient}}],
+                        "ccRecipients": [],
+                        "bccRecipients": [],
+                    }
+                }
+            response = _mail_post(
+                self._client,
+                f"{self._base}/messages/{_path_segment(context.source_message_id)}/reply",
+                reply_payload,
+                self._tokens,
+                self.provider,
+                reply=True,
+            )
+            if response.status_code != 202:
+                raise ProviderSendUncertainError()
+            return ProviderMailResult()
         response = _mail_post(
             self._client,
             f"{self._base}/sendMail",

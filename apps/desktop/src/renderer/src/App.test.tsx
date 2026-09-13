@@ -138,7 +138,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Greenhouse Public Discovery v0.58.0-alpha.1"),
+      screen.getByText("Source-Bound Replies v0.59.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

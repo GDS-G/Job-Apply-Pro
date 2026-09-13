@@ -2,9 +2,11 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
-## Greenhouse Public Discovery build
+## Source-Bound Replies build
 
-The active source milestone is **Greenhouse Public Discovery `v0.58.0-alpha.1`**. Manually preview a public board, review one exact posting and import it for a local candidate profile. Fixed-origin unauthenticated reads send no candidate data; snapshots and deduplication are atomic and immutable. Imported jobs remain not evaluated, without mock advancement controls or a submission. See [ADR-0068](docs/adr/0068-greenhouse-public-discovery.md) for contracts, limits and remaining real-portal work.
+The active source milestone is **Source-Bound Replies `v0.59.0-alpha.1`**. Reviewed Gmail/Outlook replies bind a verified synchronized source, stable provider account, connection epoch and immutable content. Explicit new messages cannot inherit reply authority; offline previews remain unsendable until a fresh connected review. No automatic replies or delivery claims are added. See [ADR-0069](docs/adr/0069-source-bound-replies.md).
+
+Public Greenhouse discovery remains available: manually preview a board, review one exact posting and import it for a local candidate profile. Fixed-origin unauthenticated reads send no candidate data; snapshots and deduplication are atomic and immutable. Imported jobs remain not evaluated, without mock advancement controls or a submission. See [ADR-0068](docs/adr/0068-greenhouse-public-discovery.md) for contracts, limits and remaining real-portal work.
 
 Gemini retains one invocation-local work deadline across uploads, processing waits/status reads, inference and response construction. Polls target only the original registered resource; cleanup has a separate allowance and terminal retention errors. See [ADR-0067](docs/adr/0067-gemini-processing-budget.md). This is not hard OS/gateway cancellation and does not enable an unconfigured provider.
 

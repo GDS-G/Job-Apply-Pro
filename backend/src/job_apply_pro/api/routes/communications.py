@@ -131,8 +131,11 @@ def get_communication_service(
     clients = {item.provider: item for item in configuration.oauth_clients}
     oauth = OAuthConnectionService(OAuthRepository(session, cipher), clients)
     configured = {item.provider: item for item in configuration.providers}
+    account_identities: dict[IntegrationProvider, str] = {}
     for provider, client in clients.items():
         state = oauth.state(provider)
+        if state.account_identity is not None:
+            account_identities[provider] = state.account_identity
         configured[provider] = ProviderConnectionConfig(
             provider=provider,
             credential_reference=state.credential_reference,
@@ -186,6 +189,7 @@ def get_communication_service(
         calendar_adapters=calendar_adapters or None,
         automatic_categories=configuration.automatic_categories,
         provider_configs=configured,
+        provider_account_identities=account_identities,
         knowledge_repository=CandidateKnowledgeRepository(session),
         attachment_resolver=MailAttachmentResolver(
             CandidateKnowledgeRepository(session),

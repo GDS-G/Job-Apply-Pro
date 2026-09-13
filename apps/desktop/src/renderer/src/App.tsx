@@ -1556,7 +1556,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Greenhouse Public Discovery v0.58.0-alpha.1</strong>
+              <strong>Source-Bound Replies v0.59.0-alpha.1</strong>
               <p>
                 Bundled Windows runtime, offline recovery, redacted diagnostics,
                 accessibility gates, and signed-update controls are ready for

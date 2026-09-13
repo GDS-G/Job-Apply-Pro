@@ -10,14 +10,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CommunicationMutationAudit,
   CommunicationRecord,
+  MailReplyContext,
   OutboundDraft,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
 
 import { MailDraftPanel } from "./MailDraftPanel";
 
+const context: MailReplyContext = {
+  policy_version: "mail-reply-v1",
+  provider: "GMAIL",
+  account_key: "c".repeat(64),
+  account_label: "candidate@example.invalid",
+  connection_fingerprint: "d".repeat(64),
+  source_record_id: "analysis-1",
+  source_message_id: "message-1",
+  source_thread_id: "thread-1",
+  source_id_format: "GMAIL",
+  recipient: "recruiter@example.invalid",
+  subject: "Re: Resume request",
+  rfc_message_id: "<original@example.invalid>",
+  references: [],
+  mime_reply_supported: true,
+  fingerprint: "e".repeat(64),
+};
 const record: CommunicationRecord = {
   id: "analysis-1",
+  reply_context: context,
+  reply_unavailable_reason: null,
   received_at: "2026-09-12T12:00:00Z",
   created_at: "2026-09-12T12:00:00Z",
   analysis: {
@@ -72,6 +92,10 @@ const workflow: WorkflowRunSnapshot = {
 };
 const draft: OutboundDraft = {
   id: "draft-1",
+  mode: "REPLY",
+  account_key: context.account_key,
+  account_label: context.account_label,
+  reply_context: context,
   analysis_id: record.id,
   workflow_id: workflow.workflow_id,
   provider: "GMAIL",
@@ -127,11 +151,11 @@ describe("MailDraftPanel", () => {
     vi.restoreAllMocks();
   });
 
-  function panel(backendReady = true) {
+  function panel(backendReady = true, incomingRecords = [record]) {
     return render(
       <MailDraftPanel
         backendReady={backendReady}
-        records={[record]}
+        records={incomingRecords}
         workflows={[workflow]}
       />,
     );
@@ -148,7 +172,7 @@ describe("MailDraftPanel", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Saved mail draft")).not.toBeDisabled(),
     );
-    fireEvent.change(screen.getByLabelText("Reply to imported message"), {
+    fireEvent.change(screen.getByLabelText("Imported source message"), {
       target: { value: record.id },
     });
   }
@@ -173,6 +197,13 @@ describe("MailDraftPanel", () => {
     expect(screen.getByLabelText("Recipient email")).toHaveValue(
       "recruiter@example.invalid",
     );
+    expect(screen.getByLabelText("Recipient email")).toHaveAttribute(
+      "readonly",
+    );
+    expect(screen.getByLabelText("Message subject")).toHaveAttribute(
+      "readonly",
+    );
+    expect(screen.getByLabelText("Message mode")).toHaveValue("REPLY");
     fireEvent.change(
       screen.getByLabelText("Immutable document version IDs (optional)"),
       { target: { value: "version-1" } },
@@ -182,12 +213,10 @@ describe("MailDraftPanel", () => {
     );
     await screen.findByText(/Draft saved for review only/);
     expect(api.createCommunicationDraft).toHaveBeenCalledExactlyOnceWith({
+      mode: "REPLY",
       analysis_id: "analysis-1",
       workflow_id: "workflow-1",
-      provider: "GMAIL",
-      provider_thread_id: "thread-1",
-      recipient: "recruiter@example.invalid",
-      subject: "Re: Resume request",
+      source_fingerprint: context.fingerprint,
       body_text: "Here is my reviewed resume.",
       category: "RECRUITER_INQUIRY",
       policy: "REVIEW_REQUIRED",
@@ -195,6 +224,352 @@ describe("MailDraftPanel", () => {
     });
     expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
   });
+  it("uses the backend reply target, not the displayed sender or suggested subject", async () => {
+    panel(true, [
+      {
+        ...record,
+        analysis: {
+          ...record.analysis,
+          message: {
+            ...record.analysis.message,
+            sender: "Misleading <wrong@example.invalid>",
+          },
+          reply_draft: {
+            ...record.analysis.reply_draft,
+            subject: "Unbound suggestion",
+          },
+        },
+      },
+    ]);
+    await selectSource();
+    expect(screen.getByLabelText("Recipient email")).toHaveValue(
+      context.recipient,
+    );
+    expect(screen.getByLabelText("Message subject")).toHaveValue(
+      context.subject,
+    );
+    expect(api.createCommunicationDraft).not.toHaveBeenCalled();
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+  });
+  it("requires explicit standalone mode for editable recipient and subject, with no threading input", async () => {
+    vi.mocked(api.createCommunicationDraft).mockResolvedValue({
+      ...draft,
+      mode: "NEW_MESSAGE",
+      reply_context: null,
+      provider_thread_id: "",
+      recipient: "new@example.invalid",
+      subject: "New conversation",
+    });
+    panel();
+    await selectSource();
+    fireEvent.change(screen.getByLabelText("Message mode"), {
+      target: { value: "NEW_MESSAGE" },
+    });
+    expect(screen.getByLabelText("Recipient email")).not.toHaveAttribute(
+      "readonly",
+    );
+    expect(screen.getByLabelText("Message subject")).not.toHaveAttribute(
+      "readonly",
+    );
+    fireEvent.change(screen.getByLabelText("Recipient email"), {
+      target: { value: "new@example.invalid" },
+    });
+    fireEvent.change(screen.getByLabelText("Message subject"), {
+      target: { value: "New conversation" },
+    });
+    expect(api.createCommunicationDraft).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save new message for review" }),
+    );
+    await screen.findByText(/Draft saved for review only/);
+    expect(api.createCommunicationDraft).toHaveBeenCalledExactlyOnceWith({
+      mode: "NEW_MESSAGE",
+      analysis_id: record.id,
+      workflow_id: "workflow-1",
+      provider: "GMAIL",
+      recipient: "new@example.invalid",
+      subject: "New conversation",
+      body_text: draft.body_text,
+      policy: "REVIEW_REQUIRED",
+      category: "RECRUITER_INQUIRY",
+      document_version_ids: [],
+    });
+    expect(
+      screen.getByText(/Mode: New standalone message/),
+    ).toBeInTheDocument();
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Message mode"), {
+      target: { value: "REPLY" },
+    });
+    expect(screen.getByLabelText("Saved mail draft")).toHaveValue("");
+    expect(screen.getByLabelText("Recipient email")).toHaveValue(
+      context.recipient,
+    );
+  });
+  it("never guesses threading for an unavailable source or silently falls back to new-message mode", async () => {
+    panel(true, [
+      {
+        ...record,
+        reply_context: null,
+        reply_unavailable_reason: "Missing immutable source",
+      },
+    ]);
+    await selectSource();
+    expect(
+      screen.getByRole("button", { name: "Save reply for review" }),
+    ).toBeDisabled();
+    expect(screen.getByLabelText("Message mode")).toHaveValue("REPLY");
+    expect(
+      screen.getByText(/Threaded reply is unavailable/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Recipient email")).toHaveValue("");
+    expect(api.createCommunicationDraft).not.toHaveBeenCalled();
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Message mode"), {
+      target: { value: "NEW_MESSAGE" },
+    });
+    fireEvent.change(screen.getByLabelText("Recipient email"), {
+      target: { value: "explicit@example.invalid" },
+    });
+    expect(
+      screen.getByRole("button", { name: "Save new message for review" }),
+    ).not.toBeDisabled();
+  });
+  it("saves an offline standalone preview but requires a fresh bound draft after connecting", async () => {
+    const preview: OutboundDraft = {
+      ...draft,
+      mode: "NEW_MESSAGE",
+      account_key: null,
+      account_label: null,
+      reply_context: null,
+      provider_thread_id: "",
+      document_version_ids: [],
+      attachment_manifest: null,
+    };
+    vi.mocked(api.createCommunicationDraft).mockResolvedValueOnce(preview);
+    const unboundRecord = {
+      ...record,
+      reply_context: null,
+      reply_unavailable_reason: "No source account",
+    };
+    const view = panel(true, [unboundRecord]);
+    await selectSource();
+    fireEvent.change(screen.getByLabelText("Message mode"), {
+      target: { value: "NEW_MESSAGE" },
+    });
+    fireEvent.change(screen.getByLabelText("Recipient email"), {
+      target: { value: context.recipient },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save new message for review" }),
+    );
+    await screen.findByText(/Offline standalone preview saved locally/);
+    expect(
+      screen.getByText(/Offline preview — not send-ready/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Review & send with native approval",
+      }),
+    ).toBeDisabled();
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+
+    view.rerender(
+      <MailDraftPanel backendReady records={[record]} workflows={[workflow]} />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Review & send with native approval",
+      }),
+    ).toBeDisabled();
+    vi.mocked(api.listCommunicationDrafts).mockResolvedValueOnce([preview]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh mail drafts" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Saved mail draft")).not.toBeDisabled(),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Review & send with native approval",
+      }),
+    ).toBeDisabled();
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+    expect(api.createCommunicationDraft).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reload source context" }),
+    );
+    const fresh = {
+      ...preview,
+      id: "fresh-bound-draft",
+      account_key: context.account_key,
+      account_label: context.account_label,
+    };
+    vi.mocked(api.createCommunicationDraft).mockResolvedValueOnce(fresh);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save new message for review" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Saved mail draft")).toHaveValue(fresh.id),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Review & send with native approval",
+      }),
+    ).not.toBeDisabled();
+    expect(api.createCommunicationDraft).toHaveBeenCalledTimes(2);
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+  });
+  it("preserves an empty verified reply subject", async () => {
+    panel(true, [{ ...record, reply_context: { ...context, subject: "" } }]);
+    await selectSource();
+    expect(screen.getByLabelText("Message subject")).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: "Save reply for review" }),
+    ).not.toBeDisabled();
+  });
+  it.each([
+    {
+      reply_context: {
+        ...context,
+        account_key: "f".repeat(64),
+        account_label: "other@example.invalid",
+        fingerprint: "f".repeat(64),
+      },
+    },
+    { reply_context: { ...context, connection_fingerprint: "f".repeat(64) } },
+    { reply_context: { ...context, fingerprint: "f".repeat(64) } },
+    { reply_context: null, reply_unavailable_reason: "Source unavailable" },
+  ])(
+    "invalidates preparation after source or account context changes without auto calls (%#)",
+    async (change) => {
+      const view = panel();
+      await selectSource();
+      view.rerender(
+        <MailDraftPanel
+          backendReady
+          records={[{ ...record, ...change }]}
+          workflows={[workflow]}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: "Save reply for review" }),
+      ).toBeDisabled();
+      expect(
+        screen.getByText(/Source or sending-account context changed\./),
+      ).toBeInTheDocument();
+      expect(api.createCommunicationDraft).not.toHaveBeenCalled();
+      expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+      expect(api.listCommunicationDrafts).toHaveBeenCalledTimes(1);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Reload source context" }),
+      );
+      if (change.reply_context) {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Save reply for review" }),
+        );
+        await waitFor(() =>
+          expect(api.createCommunicationDraft).toHaveBeenCalledTimes(1),
+        );
+        expect(api.createCommunicationDraft).toHaveBeenCalledWith(
+          expect.objectContaining({
+            source_fingerprint: change.reply_context.fingerprint,
+          }),
+        );
+      } else {
+        expect(
+          screen.getByRole("button", { name: "Save reply for review" }),
+        ).toBeDisabled();
+      }
+    },
+  );
+  it("does not select a late prepared draft after its source/account context changed", async () => {
+    let finish!: (value: OutboundDraft) => void;
+    vi.mocked(api.createCommunicationDraft).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const view = panel();
+    await selectSource();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save reply for review" }),
+    );
+    view.rerender(
+      <MailDraftPanel
+        backendReady
+        records={[
+          {
+            ...record,
+            reply_context: {
+              ...context,
+              connection_fingerprint: "f".repeat(64),
+            },
+          },
+        ]}
+        workflows={[workflow]}
+      />,
+    );
+    finish(draft);
+    await screen.findByText(/context changed during preparation/);
+    expect(screen.getByLabelText("Saved mail draft")).toHaveValue("");
+    expect(api.createCommunicationDraft).toHaveBeenCalledTimes(1);
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+  });
+  it("renders remote source context as plain text, without links or resources", async () => {
+    const unsafeSubject = '<img src="https://example.invalid/track">';
+    const view = panel(true, [
+      {
+        ...record,
+        reply_context: {
+          ...context,
+          subject: unsafeSubject,
+          source_message_id: "<script>remote()</script>",
+        },
+        analysis: {
+          ...record.analysis,
+          message: {
+            ...record.analysis.message,
+            provider_message_id: "<script>remote()</script>",
+          },
+        },
+      },
+    ]);
+    await selectSource();
+    expect(screen.getByLabelText("Message subject")).toHaveValue(unsafeSubject);
+    expect(screen.getByText("<script>remote()</script>")).toBeInTheDocument();
+    expect(view.container.querySelector("img,script,iframe,a")).toBeNull();
+    expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+  });
+  it.each([
+    { mode: null },
+    { account_key: null },
+    { account_label: null },
+    { reply_context: null },
+    { mode: "NEW_MESSAGE" as const, reply_context: null },
+  ])(
+    "blocks legacy or incomplete saved mode/account/reply bindings (%#)",
+    async (change) => {
+      vi.mocked(api.listCommunicationDrafts).mockResolvedValue([
+        { ...draft, ...change },
+      ]);
+      panel();
+      await selectDraft();
+      expect(
+        screen.getByText(
+          /no valid explicit mode or immutable account\/reply binding/,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: "Review & send with native approval",
+        }),
+      ).toBeDisabled();
+      expect(api.sendCommunicationDraft).not.toHaveBeenCalled();
+    },
+  );
   it("requires an owning workflow and unique bounded version IDs", async () => {
     panel();
     await selectSource();

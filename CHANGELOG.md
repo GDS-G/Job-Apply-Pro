@@ -2,6 +2,16 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.59.0-alpha.1] - Unreleased
+
+### Source-Bound Replies
+
+- Distinguish explicit new messages from replies bound to verified synchronized source, stable provider identity and connection epoch.
+- Preserve exact Gmail thread/header identity and use Outlook immutable source IDs with one reviewed reply request; reject ambiguous MIME routing.
+- Encrypt source context, isolate accounts/reconnects and preserve legacy records without inventing authority.
+- Recheck source/account/content around native approval and before one-attempt dispatch. Offline previews remain unsendable; no fallback or automatic retry.
+- Add migration, wire, concurrency, provenance, IPC and UI regressions. Delivery reconciliation and live acceptance remain separate work.
+
 ## [0.58.0-alpha.1] - Unreleased
 
 ### Greenhouse Public Discovery
