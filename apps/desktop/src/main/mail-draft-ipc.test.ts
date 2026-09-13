@@ -73,6 +73,10 @@ const accepted: CommunicationMutationAudit = {
   error_code: null,
   occurred_at: "2026-09-12T12:00:00Z",
 };
+const notDispatched = {
+  outcome: "NOT_DISPATCHED",
+  reason: "REVIEW_UNAVAILABLE",
+} as const;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -267,14 +271,17 @@ describe("mail IPC native approval boundary", () => {
     },
   );
   it.each(["ACCEPTED", "UNCERTAIN", "PLANNED", "CONFIRMED", "FAILED"] as const)(
-    "blocks a durable %s send audit before native approval",
+    "returns a durable %s send audit and blocks another review",
     async (status) => {
       client.listCommunicationAudits.mockResolvedValue([
         { ...accepted, status },
       ]);
       await expect(
         invoke("communications:draft-send", draft.id, draft.fingerprint),
-      ).rejects.toThrow(/prior send/);
+      ).resolves.toEqual({ ...accepted, status });
+      await expect(
+        invoke("communications:draft-send", draft.id, draft.fingerprint),
+      ).rejects.toThrow(/already/);
       expect(showMessageBox).not.toHaveBeenCalled();
       expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
     },
@@ -282,7 +289,7 @@ describe("mail IPC native approval boundary", () => {
   it("blocks stale review and changed draft contents after native approval", async () => {
     await expect(
       invoke("communications:draft-send", draft.id, "c".repeat(64)),
-    ).rejects.toThrow(/changed/);
+    ).resolves.toEqual(notDispatched);
     expect(showMessageBox).not.toHaveBeenCalled();
     client.getCommunicationDraft
       .mockResolvedValueOnce(draft)
@@ -292,8 +299,11 @@ describe("mail IPC native approval boundary", () => {
       });
     await expect(
       invoke("communications:draft-send", draft.id, draft.fingerprint),
-    ).rejects.toThrow(/changed during/);
+    ).resolves.toEqual(notDispatched);
     expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
+    await invoke("communications:draft-send", draft.id, draft.fingerprint);
+    expect(showMessageBox).toHaveBeenCalledTimes(2);
+    expect(client.sendCommunicationDraft).toHaveBeenCalledTimes(1);
   });
   it.each([
     { ...draft, attachment_manifest: null },
@@ -327,7 +337,7 @@ describe("mail IPC native approval boundary", () => {
       client.getCommunicationDraft.mockResolvedValue(value);
       await expect(
         invoke("communications:draft-send", draft.id, draft.fingerprint),
-      ).rejects.toThrow(TypeError);
+      ).resolves.toEqual(notDispatched);
       expect(showMessageBox).not.toHaveBeenCalled();
       expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
     },
@@ -352,10 +362,44 @@ describe("mail IPC native approval boundary", () => {
     });
     await expect(
       invoke("communications:draft-send", draft.id, draft.fingerprint),
-    ).rejects.toThrow(/version manifest/);
+    ).resolves.toEqual(notDispatched);
     expect(showMessageBox).not.toHaveBeenCalled();
     expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
   });
+  it.each(["draft", "audits", "dialog", "final-draft"] as const)(
+    "returns only sanitized pre-dispatch state after a %s failure and permits fresh approval",
+    async (stage) => {
+      const privateError = new Error(
+        "private document, account and transport details",
+      );
+      if (stage === "draft")
+        client.getCommunicationDraft.mockRejectedValueOnce(privateError);
+      else if (stage === "audits")
+        client.listCommunicationAudits.mockRejectedValueOnce(privateError);
+      else if (stage === "dialog")
+        showMessageBox.mockRejectedValueOnce(privateError);
+      else
+        client.getCommunicationDraft
+          .mockResolvedValueOnce(draft)
+          .mockRejectedValueOnce(privateError);
+
+      await expect(
+        invoke("communications:draft-send", draft.id, draft.fingerprint),
+      ).resolves.toEqual(notDispatched);
+      expect(client.sendCommunicationDraft).not.toHaveBeenCalled();
+      expect(showMessageBox).toHaveBeenCalledTimes(
+        stage === "dialog" || stage === "final-draft" ? 1 : 0,
+      );
+
+      await expect(
+        invoke("communications:draft-send", draft.id, draft.fingerprint),
+      ).resolves.toBe(accepted);
+      expect(showMessageBox).toHaveBeenCalledTimes(
+        stage === "dialog" || stage === "final-draft" ? 2 : 1,
+      );
+      expect(client.sendCommunicationDraft).toHaveBeenCalledTimes(1);
+    },
+  );
   it("blocks concurrent dialogs and never automatically retries a lost send response", async () => {
     let approve!: (value: { response: number }) => void;
     showMessageBox.mockImplementationOnce(
@@ -374,10 +418,12 @@ describe("mail IPC native approval boundary", () => {
       invoke("communications:draft-send", draft.id, draft.fingerprint),
     ).rejects.toThrow(/already/);
     client.sendCommunicationDraft.mockRejectedValueOnce(
-      new Error("lost HTTP response"),
+      new Error("private provider payload from lost HTTP response"),
     );
     approve({ response: 1 });
-    await expect(send).rejects.toThrow("lost HTTP response");
+    await expect(send).rejects.toThrow(
+      "Mail send outcome is unresolved; inspect the provider account.",
+    );
     await expect(
       invoke("communications:draft-send", draft.id, draft.fingerprint),
     ).rejects.toThrow(/already/);

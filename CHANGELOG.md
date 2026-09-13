@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.55.0-alpha.1] - Unreleased
+
+### Verified Mail Attachments
+
+- Resolve encrypted candidate PDF/DOCX originals through owning workflows, bound file/container limits, and immutable ordered review manifests; recheck exact bytes before provider access.
+- Deliver selected bytes as Gmail MIME or inline Outlook attachments using `Mail.Send`; distinguish provider acceptance, explicit failure and transport uncertainty without invented delivery evidence.
+- Bind drafts and token refresh to the reviewed OAuth connection, reserve each draft atomically before sending, and preserve exact-key replay while rejecting a second attempt under a new key.
+- Block database restore that would discard or change existing mail attempts or claims, including legacy, failed and uncertain outcomes; keep staged snapshots from reopening already attempted drafts.
+- Add a native-confirmed mail review panel with strict IPC validation and no plaintext attachment bytes in the renderer.
+- Separate proven pre-dispatch review failures from uncertain sends; permit another manual review only after an explicit successful refresh for the former.
+- Exercise synthetic PDF/DOCX manifests, encrypted draft round-trip and disabled-provider send admission through the packaged API.
+- Explicitly load backend strict mypy configuration in local/CI checks; earlier root runs did not load that configuration despite historical documentation describing them as strict.
+
 ## [0.54.0-alpha.1] - Unreleased
 
 ### Fixed

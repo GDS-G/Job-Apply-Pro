@@ -272,6 +272,61 @@ describe("MailDraftPanel", () => {
     ).not.toBeDisabled();
     expect(api.sendCommunicationDraft).toHaveBeenCalledTimes(1);
   });
+  it("requires a successful refresh after a proven pre-dispatch failure before another user review", async () => {
+    vi.mocked(api.sendCommunicationDraft).mockResolvedValueOnce({
+      outcome: "NOT_DISPATCHED",
+      reason: "REVIEW_UNAVAILABLE",
+    });
+    panel();
+    await selectDraft();
+    const send = screen.getByRole("button", {
+      name: "Review & send with native approval",
+    });
+    fireEvent.click(send);
+    await screen.findByText(
+      "No send was dispatched by this review. Refresh mail drafts and review again.",
+    );
+    expect(send).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/result is unresolved/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/outcome is uncertain/)).not.toBeInTheDocument();
+    expect(api.sendCommunicationDraft).toHaveBeenCalledTimes(1);
+    expect(api.listCommunicationDrafts).toHaveBeenCalledTimes(1);
+    expect(api.listCommunicationAudits).toHaveBeenCalledTimes(1);
+
+    const refreshed = { ...draft, fingerprint: "c".repeat(64) };
+    vi.mocked(api.listCommunicationDrafts).mockResolvedValue([refreshed]);
+    vi.mocked(api.listCommunicationAudits).mockRejectedValueOnce(
+      new Error("private preflight audit error"),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh mail drafts" }),
+    );
+    await screen.findByRole("alert");
+    expect(send).toBeDisabled();
+    expect(screen.queryByText(/private preflight/)).not.toBeInTheDocument();
+    expect(api.sendCommunicationDraft).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh mail drafts" }),
+    );
+    await waitFor(() => expect(send).not.toBeDisabled());
+    expect(screen.queryByText(/result is unresolved/)).not.toBeInTheDocument();
+    expect(api.sendCommunicationDraft).toHaveBeenCalledTimes(1);
+    vi.mocked(api.sendCommunicationDraft).mockResolvedValueOnce({
+      ...audit,
+      fingerprint: refreshed.fingerprint,
+    });
+    fireEvent.click(send);
+    await waitFor(() =>
+      expect(api.sendCommunicationDraft).toHaveBeenCalledTimes(2),
+    );
+    expect(api.sendCommunicationDraft).toHaveBeenLastCalledWith(
+      draft.id,
+      refreshed.fingerprint,
+    );
+    expect(api.createCommunicationDraft).not.toHaveBeenCalled();
+  });
   it("does not expose errors or automatically retry an ambiguous send", async () => {
     vi.mocked(api.sendCommunicationDraft).mockRejectedValue(
       new Error("private-token-and-provider-body"),
@@ -294,12 +349,40 @@ describe("MailDraftPanel", () => {
     await waitFor(() =>
       expect(api.listCommunicationAudits).toHaveBeenCalledTimes(2),
     );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Saved mail draft")).not.toBeDisabled(),
+    );
     expect(
       screen.getByRole("button", {
         name: "Review & send with native approval",
       }),
     ).toBeDisabled();
     expect(api.sendCommunicationDraft).toHaveBeenCalledTimes(1);
+  });
+  it("keeps a returned uncertain audit blocked after refresh without retrying", async () => {
+    vi.mocked(api.sendCommunicationDraft).mockResolvedValue({
+      ...audit,
+      status: "UNCERTAIN",
+      provider_resource_id: null,
+    });
+    panel();
+    await selectDraft();
+    const send = screen.getByRole("button", {
+      name: "Review & send with native approval",
+    });
+    fireEvent.click(send);
+    await screen.findAllByText(/Send outcome is uncertain/);
+    expect(send).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Refresh mail drafts" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Saved mail draft")).not.toBeDisabled(),
+    );
+    expect(send).toBeDisabled();
+    expect(screen.getByText(/result is unresolved/)).toBeInTheDocument();
+    expect(api.sendCommunicationDraft).toHaveBeenCalledTimes(1);
+    expect(api.createCommunicationDraft).not.toHaveBeenCalled();
   });
   it("blocks legacy attachment drafts without a verified manifest", async () => {
     vi.mocked(api.listCommunicationDrafts).mockResolvedValue([

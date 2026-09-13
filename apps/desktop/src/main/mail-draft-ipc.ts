@@ -4,6 +4,7 @@ import { BrowserWindow, dialog, ipcMain } from "electron";
 
 import type {
   CommunicationDraftCreate,
+  CommunicationDraftSendResult,
   MessageCategory,
   OutboundDraft,
 } from "@job-apply-pro/contracts";
@@ -241,7 +242,10 @@ export function registerMailDraftIpc(client: BackendClient): void {
   );
   ipcMain.handle(
     "communications:draft-send",
-    async (event, ...args: unknown[]) => {
+    async (
+      event,
+      ...args: unknown[]
+    ): Promise<CommunicationDraftSendResult> => {
       if (args.length !== 2)
         throw new TypeError("Draft id and reviewed fingerprint are required.");
       const id = identifier(args[0]);
@@ -257,15 +261,12 @@ export function registerMailDraftIpc(client: BackendClient): void {
           throw new Error("Draft changed; refresh and review.");
         const detail = reviewDetails(draft);
         const audits = await client.listCommunicationAudits();
-        if (
-          audits.some(
-            (audit) =>
-              audit.kind === "SEND_MESSAGE" && audit.resource_id === id,
-          )
-        ) {
-          throw new Error(
-            "This draft has a prior send attempt; inspect its outcome.",
-          );
+        const prior = audits.find(
+          (audit) => audit.kind === "SEND_MESSAGE" && audit.resource_id === id,
+        );
+        if (prior) {
+          attempts.set(id, "dispatched");
+          return prior;
         }
         const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
         const options = {
@@ -296,6 +297,17 @@ export function registerMailDraftIpc(client: BackendClient): void {
           idempotency_key: randomUUID(),
           confirmed_by: "desktop-user",
         });
+      } catch {
+        if (attempts.get(id) === "reviewing") {
+          // Reads, validation and the native dialog have no provider side effect.
+          // Do not expose backend, dialog or document details through IPC errors.
+          return { outcome: "NOT_DISPATCHED", reason: "REVIEW_UNAVAILABLE" };
+        }
+        // Dispatch may have succeeded even when its response was lost. Never
+        // return a retryable preflight result or the private underlying error.
+        throw new Error(
+          "Mail send outcome is unresolved; inspect the provider account.",
+        );
       } finally {
         if (attempts.get(id) === "reviewing") attempts.delete(id);
       }

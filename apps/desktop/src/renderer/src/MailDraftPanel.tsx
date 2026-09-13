@@ -208,6 +208,17 @@ export function MailDraftPanel({
       if (request !== generation.current) return;
       if (result === null) {
         setNotice("Native approval cancelled. No message was sent.");
+      } else if ("outcome" in result) {
+        if (
+          result.outcome !== "NOT_DISPATCHED" ||
+          result.reason !== "REVIEW_UNAVAILABLE"
+        ) {
+          throw new Error("Mail review result is invalid.");
+        }
+        setLoaded(false);
+        setNotice(
+          "No send was dispatched by this review. Refresh mail drafts and review again.",
+        );
       } else {
         setBlocked((ids) => new Set([...ids, draft.id]));
         setAudits((items) => [

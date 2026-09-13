@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Bounded Backend Lifecycle",
-  version: "0.54.0-alpha.1",
+  name: "Verified Mail Attachments",
+  version: "0.55.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -716,6 +716,13 @@ export interface CommunicationMutationAudit {
   error_code: string | null;
   occurred_at: string;
 }
+
+// Only the main process can establish that this review never dispatched a send.
+// A rejected IPC response provides no such guarantee and must remain blocked.
+export type CommunicationDraftSendResult =
+  | CommunicationMutationAudit
+  | null
+  | { outcome: "NOT_DISPATCHED"; reason: "REVIEW_UNAVAILABLE" };
 
 export interface CalendarEventSnapshot {
   provider_event_id: string;
@@ -1749,7 +1756,7 @@ export interface DesktopBridge {
     sendCommunicationDraft(
       id: string,
       fingerprint: string,
-    ): Promise<CommunicationMutationAudit | null>;
+    ): Promise<CommunicationDraftSendResult>;
     listCommunicationAudits(): Promise<CommunicationMutationAudit[]>;
     getDailyCommunicationSummary(): Promise<DailyCommunicationSummary>;
     getDesktopNotificationStatus(): Promise<DesktopNotificationStatus>;
