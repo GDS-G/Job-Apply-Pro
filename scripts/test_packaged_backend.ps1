@@ -53,8 +53,115 @@ $env:JAP_BROWSER_HEADLESS = "true"
 
 function Initialize-SmokeLifecycle {
     $script:smokeOwnedBackends = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokePinnedBackends = [Collections.Generic.List[System.Diagnostics.Process]]::new()
     $script:smokeOwnedWorkers = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokeWorkerParents = [Collections.Generic.Dictionary[System.Diagnostics.Process, System.Diagnostics.Process]]::new()
+    $script:smokeOwnedCommands = [Collections.Generic.List[System.Diagnostics.Process]]::new()
     $script:smokePreserveArtifacts = $false
+}
+
+function Get-SmokeWorker {
+    param([System.Diagnostics.Process]$Parent)
+
+    try {
+        if ($null -eq $Parent -or -not $script:smokeOwnedBackends.Contains($Parent) -or
+            -not $script:smokePinnedBackends.Contains($Parent)) {
+            throw "Worker parent is not a captured backend"
+        }
+        # Reuse only the previously verified handle, even after its parent exits.
+        # This smoke does not request browser work/restart after capture; the old
+        # handle is never evidence for an unobserved replacement worker.
+        if ($script:smokeWorkerParents.ContainsKey($Parent)) {
+            return $script:smokeWorkerParents[$Parent]
+        }
+        $parentHandle = $Parent.Handle
+        if ($null -eq $parentHandle -or $parentHandle -eq 0) { throw "Parent handle could not be pinned" }
+        if ($Parent.HasExited) { throw "Worker parent already exited" }
+        $parentStarted = $Parent.StartTime.ToUniversalTime()
+        $records = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Parent.Id)" -ErrorAction Stop | Where-Object {
+            $_.Name -eq "job-apply-pro-browser-worker.exe"
+        })
+        if ($records.Count -gt 1) { throw "Ambiguous API worker ownership" }
+        if ($records.Count -eq 0) { return $null }
+        $record = $records[0]
+        if ($record.ParentProcessId -ne $Parent.Id -or $record.ExecutablePath -ne $browserWorker -or
+            $record.CreationDate -isnot [datetime] -or $record.CreationDate.Kind -eq [DateTimeKind]::Unspecified) {
+            throw "Incomplete API worker identity"
+        }
+        $candidate = Get-Process -Id $record.ProcessId -ErrorAction Stop
+        if ($null -eq $candidate) { throw "API worker handle unavailable" }
+        # CIM is only a discovery hint: its PID may already have been reused.
+        # Pin first, then compare the actual executable and creation identity.
+        $candidateHandle = $candidate.Handle
+        if ($null -eq $candidateHandle -or $candidateHandle -eq 0) { throw "Worker handle could not be pinned" }
+        if ($candidate.HasExited) { throw "API worker exited before capture" }
+        $actualPath = $candidate.MainModule.FileName
+        $actualStarted = $candidate.StartTime.ToUniversalTime()
+        $recordStarted = $record.CreationDate.ToUniversalTime()
+        # CIM truncates creation time to microseconds; .NET retains 100 ns ticks.
+        $actualTicks = $actualStarted.Ticks - ($actualStarted.Ticks % 10)
+        $recordTicks = $recordStarted.Ticks - ($recordStarted.Ticks % 10)
+        if ($candidate.Id -ne $record.ProcessId -or $actualPath -ne $browserWorker -or
+            $actualTicks -ne $recordTicks -or $actualStarted -lt $parentStarted -or
+            $actualStarted -gt [datetime]::UtcNow -or $candidate.HasExited -or
+            $Parent.HasExited -or $Parent.StartTime.ToUniversalTime() -ne $parentStarted) {
+            throw "API worker identity changed during capture"
+        }
+        # Never register or return an object whose pinned identity was unverified.
+        $script:smokeOwnedWorkers.Add($candidate)
+        $script:smokeWorkerParents.Add($Parent, $candidate)
+        return $candidate
+    }
+    catch {
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged API worker ownership could not be verified. Preserve the synthetic workspace."
+    }
+}
+
+function Wait-SmokeCommand {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [ValidateRange(1, 120000)][int]$TimeoutMilliseconds = 120000
+    )
+
+    try {
+        if ($null -eq $Process -or -not $script:smokeOwnedCommands.Contains($Process)) {
+            throw "Command handle is not owned"
+        }
+        $commandHandle = $Process.Handle
+        if ($null -eq $commandHandle -or $commandHandle -eq 0) { throw "Command handle could not be pinned" }
+        if (-not $Process.WaitForExit($TimeoutMilliseconds) -or $Process.ExitCode -ne 0) {
+            throw "Command did not complete successfully"
+        }
+    }
+    catch {
+        # Migration/restore may have written multiple files. Never kill a writer
+        # on an observation deadline or treat acceptance of a kill as exit proof.
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged command failed or its exit is unproved. Preserve the synthetic workspace and captured writer; do not restart or delete its evidence."
+    }
+}
+
+function Invoke-SmokeCommand {
+    param(
+        [string]$Executable,
+        [string[]]$Arguments,
+        [ValidateRange(1, 120000)][int]$TimeoutMilliseconds = 120000
+    )
+
+    try {
+        $started = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru -ErrorAction Stop
+        if ($null -eq $started) { throw "Command returned no process handle" }
+        # No Start-Process -Wait assignment gap: retain before observing exit.
+        $script:smokeOwnedCommands.Add($started)
+        $commandHandle = $started.Handle
+        if ($null -eq $commandHandle -or $commandHandle -eq 0) { throw "Command handle could not be pinned" }
+        Wait-SmokeCommand -Process $started -TimeoutMilliseconds $TimeoutMilliseconds
+    }
+    catch {
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged command failed or its exit is unproved. Preserve the synthetic workspace and captured writer; do not restart or delete its evidence."
+    }
 }
 
 function Start-SmokeBackend {
@@ -72,7 +179,9 @@ function Start-SmokeBackend {
         # Retain the exact handle even if startup throws before the caller's
         # assignment completes. Never recover ownership by image-name lookup.
         $script:smokeOwnedBackends.Add($started)
-        $null = $started.Handle
+        $backendHandle = $started.Handle
+        if ($null -eq $backendHandle -or $backendHandle -eq 0) { throw "Backend handle could not be pinned" }
+        $script:smokePinnedBackends.Add($started)
         $observation = [Diagnostics.Stopwatch]::StartNew()
         do {
             Start-Sleep -Milliseconds 250
@@ -89,14 +198,12 @@ function Start-SmokeBackend {
         return $started
     }
     catch {
-        if ($null -eq $started) {
-            # An exceptional creation path supplied no usable exit-proof handle.
-            $script:smokePreserveArtifacts = $true
-        } else {
+        $script:smokePreserveArtifacts = $true
+        if ($null -ne $started) {
             try { Stop-SmokeBackend -Process $started }
             catch { $script:smokePreserveArtifacts = $true }
         }
-        throw "Packaged backend startup failed. Preserve smoke artifacts if captured process exit cannot be verified."
+        throw "Packaged backend startup failed. Preserve the synthetic workspace for review."
     }
 }
 
@@ -107,43 +214,38 @@ function Stop-SmokeBackend {
     )
 
     $failed = $false
+    $ownedProcess = $null
+    $ownedWorker = $null
     try {
-        if ($null -ne $Process -and -not $script:smokeOwnedBackends.Contains($Process)) {
-            $script:smokeOwnedBackends.Add($Process)
-            $null = $Process.Handle
-        }
-        if ($null -eq $WorkerProcess -and $null -ne $Process -and -not $Process.HasExited) {
-            $ownedWorkers = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id)" -ErrorAction Stop | Where-Object {
-                $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
-            })
-            if ($ownedWorkers.Count -gt 1) { throw "Unexpected API worker ownership" }
-            if ($ownedWorkers.Count -eq 1) {
-                $WorkerProcess = Get-Process -Id $ownedWorkers[0].ProcessId -ErrorAction Stop
-                if ($null -eq $WorkerProcess) { throw "API worker handle could not be captured" }
+        if ($null -ne $Process) {
+            if (-not $script:smokeOwnedBackends.Contains($Process) -or -not $script:smokePinnedBackends.Contains($Process)) {
+                throw "Backend handle is not owned and pinned"
             }
+            $ownedProcess = $Process
         }
-        if ($null -ne $WorkerProcess -and -not $script:smokeOwnedWorkers.Contains($WorkerProcess)) {
-            $script:smokeOwnedWorkers.Add($WorkerProcess)
-            $null = $WorkerProcess.Handle
+        if ($null -ne $WorkerProcess) {
+            if (-not $script:smokeOwnedWorkers.Contains($WorkerProcess)) { throw "Worker handle is not verified" }
+            $ownedWorker = $WorkerProcess
+        } elseif ($null -ne $ownedProcess -and -not $ownedProcess.HasExited) {
+            $ownedWorker = Get-SmokeWorker -Parent $ownedProcess
         }
     } catch { $failed = $true }
-    if ($null -ne $Process) {
-        try { if (-not $Process.HasExited) { $Process.Kill() } }
+    if ($null -ne $ownedProcess) {
+        try { if (-not $ownedProcess.HasExited) { $ownedProcess.Kill() } }
         catch { $failed = $true }
         # Kill acceptance (or failure) is never substituted for exit proof.
-        try { if (-not $Process.WaitForExit(10000)) { $failed = $true } }
+        try { if (-not $ownedProcess.WaitForExit(10000)) { $failed = $true } }
         catch { $failed = $true }
     }
-    if ($null -ne $WorkerProcess) {
+    if ($null -ne $ownedWorker) {
         try {
-            if (-not $WorkerProcess.WaitForExit(15000)) {
-                # Only the captured fixed-sibling child is eligible for cleanup.
-                # Forced cleanup remains a smoke failure even if exit is proven.
+            # Workers normally close after backend pipe EOF. This helper neither
+            # force-kills a discovered worker nor claims process-tree containment.
+            if (-not $ownedWorker.WaitForExit(15000)) {
                 $failed = $true
-                try { $WorkerProcess.Kill() } catch { $failed = $true }
-                if (-not $WorkerProcess.WaitForExit(10000)) { $failed = $true }
+            } elseif ($ownedWorker.ExitCode -ne 0) {
+                $failed = $true
             }
-            if ($WorkerProcess.ExitCode -ne 0) { $failed = $true }
         } catch { $failed = $true }
     }
     if ($failed) {
@@ -163,8 +265,12 @@ function Complete-SmokeCleanup {
         try { Stop-SmokeBackend -WorkerProcess $ownedWorker }
         catch { $script:smokePreserveArtifacts = $true }
     }
+    foreach ($ownedCommand in @($script:smokeOwnedCommands.ToArray())) {
+        try { Wait-SmokeCommand -Process $ownedCommand -TimeoutMilliseconds 1000 }
+        catch { $script:smokePreserveArtifacts = $true }
+    }
     if ($script:smokePreserveArtifacts) {
-        throw "Synthetic smoke workspace preserved after failed shutdown or missing exit proof. Do not delete its artifacts until captured processes have exited and recovery is reviewed."
+        throw "Synthetic smoke workspace preserved after smoke verification failure, failed shutdown, or missing exit proof. Do not delete its artifacts until captured processes have exited and the failure is reviewed."
     }
     $absoluteDirectory = [IO.Path]::GetFullPath($Directory)
     $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd("\", "/") + [IO.Path]::DirectorySeparatorChar
@@ -265,8 +371,7 @@ if __name__ == "__main__":
 $process = $null
 $apiWorkerProcess = $null
 try {
-    $migration = Start-Process -FilePath $backend -ArgumentList "migrate" -WindowStyle Hidden -Wait -PassThru
-    if ($migration.ExitCode -ne 0) { throw "Packaged backend migration failed" }
+    Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")
     $documentPath = Join-Path $env:JAP_DOCUMENT_DATA_DIR "restore-smoke.enc"
     $originalDocument = "verified-packaged-restore-fixture"
     Set-Content -LiteralPath $documentPath -Value $originalDocument -Encoding utf8 -NoNewline
@@ -311,14 +416,10 @@ try {
     }
     & $PythonPath (Join-Path $PSScriptRoot "test_packaged_browser.py") --worker $browserWorker --test-root $resolvedTestRoot --api-url $apiRoot
     if ($LASTEXITCODE -ne 0) { throw "Packaged loopback browser smoke failed" }
-    $workerRecords = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($process.Id)" | Where-Object {
-        $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
-    })
-    if ($workerRecords.Count -ne 1) {
+    $apiWorkerProcess = Get-SmokeWorker -Parent $process
+    if ($null -eq $apiWorkerProcess) {
         throw "Packaged API did not retain exactly one fixed-sibling browser worker"
     }
-    $apiWorkerProcess = Get-Process -Id $workerRecords[0].ProcessId -ErrorAction Stop
-    $null = $apiWorkerProcess.Handle
     & $PythonPath (Join-Path $PSScriptRoot "test_packaged_mail.py") --api-url $apiRoot
     if ($LASTEXITCODE -ne 0) { throw "Packaged verified mail attachment smoke failed" }
     $backupBody = @{
@@ -343,8 +444,7 @@ try {
         @(Get-ChildItem -LiteralPath $restoreOperationsPath -Directory | Select-Object -ExpandProperty Name)
     } else { @() }
     $restoreArguments = @("restore", "--plan-id", $plan.id, "--fingerprint", $plan.fingerprint)
-    $restore = Start-Process -FilePath $backend -ArgumentList $restoreArguments -WindowStyle Hidden -Wait -PassThru
-    if ($restore.ExitCode -ne 0) { throw "Packaged offline restore failed" }
+    Invoke-SmokeCommand -Executable $backend -Arguments $restoreArguments
     if ((Get-Content -Raw -LiteralPath $documentPath) -ne $originalDocument) {
         throw "Packaged offline restore did not recover the staged document"
     }
@@ -361,8 +461,7 @@ try {
     & $PythonPath -c $restoreEvidenceScript $resolvedTestRoot $freshRestoreOperations[0].Name $previousDatabaseHash $previousDatabaseSize $plan.id
     if ($LASTEXITCODE -ne 0) { throw "Packaged offline restore evidence failed authenticated verification" }
 
-    $postRestoreMigration = Start-Process -FilePath $backend -ArgumentList "migrate" -WindowStyle Hidden -Wait -PassThru
-    if ($postRestoreMigration.ExitCode -ne 0) { throw "Post-restore migration failed" }
+    Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")
     $postRestoreStdout = Join-Path $resolvedTestRoot "post-restore.stdout.log"
     $postRestoreStderr = Join-Path $resolvedTestRoot "post-restore.stderr.log"
     $process = Start-SmokeBackend -Executable $backend -StdoutPath $postRestoreStdout -StderrPath $postRestoreStderr
@@ -393,6 +492,12 @@ try {
         }
     }
     Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, encrypted backup and offline restore smoke passed."
+}
+catch {
+    # Functional verification failures also need their logs and recovery evidence,
+    # even when every captured process subsequently exits successfully.
+    $script:smokePreserveArtifacts = $true
+    throw
 }
 finally {
     try {
