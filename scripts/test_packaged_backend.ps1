@@ -463,7 +463,9 @@ try {
     if (Test-Path -LiteralPath "$databasePath.pre-restore") {
         throw "Packaged offline restore unexpectedly created a plaintext database recovery copy"
     }
-    & $PythonPath -c $restoreEvidenceScript $resolvedTestRoot $freshRestoreOperations[0].Name $previousDatabaseHash $previousDatabaseSize $plan.id
+    # Windows PowerShell's native -c argument rewriting can strip Python quotes.
+    # Source travels over stdin; only the bounded synthetic values are arguments.
+    $restoreEvidenceScript | & $PythonPath - $resolvedTestRoot $freshRestoreOperations[0].Name $previousDatabaseHash $previousDatabaseSize $plan.id
     if ($LASTEXITCODE -ne 0) { throw "Packaged offline restore evidence failed authenticated verification" }
 
     Invoke-SmokeCommand -Executable $backend -Arguments @("migrate")

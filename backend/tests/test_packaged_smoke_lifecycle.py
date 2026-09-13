@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,42 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "test_packaged_backend.ps1"
 POWERSHELL = shutil.which("powershell.exe") or shutil.which("pwsh")
 pytestmark = pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is required")
+
+
+def test_real_powershell_preserves_restore_verifier_source_quotes(tmp_path: Path) -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assignment = source.split("$restoreEvidenceScript = @'", 1)[1].split("\n'@", 1)[0]
+    invocation = next(
+        line.strip()
+        for line in source.splitlines()
+        if line.strip().startswith("$restoreEvidenceScript | & $PythonPath - ")
+    )
+    python = sys.executable.replace("'", "''")
+    workspace = str(tmp_path).replace("'", "''")
+    command = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$PythonPath = '{python}'\n"
+        f"$resolvedTestRoot = '{workspace}'\n"
+        "$freshRestoreOperations = @([pscustomobject]@{Name='not-a-uuid'})\n"
+        "$previousDatabaseHash = 'unused'\n"
+        "$previousDatabaseSize = 0\n"
+        "$plan = [pscustomobject]@{id='unused'}\n"
+        f"$restoreEvidenceScript = @'{assignment}\n'@\n"
+        f"{invocation}\nexit $LASTEXITCODE\n"
+    )
+    assert POWERSHELL is not None
+    completed = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0
+    assert "Packaged durable restore evidence verification failed." in output
+    assert "SyntaxError" not in output
+
 
 HARNESS = r"""
 $ErrorActionPreference = 'Stop'
