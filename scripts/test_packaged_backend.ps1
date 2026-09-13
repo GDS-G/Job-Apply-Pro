@@ -445,6 +445,8 @@ try {
     }
     & $PythonPath (Join-Path $PSScriptRoot "test_packaged_mail.py") --api-url $apiRoot
     if ($LASTEXITCODE -ne 0) { throw "Packaged verified mail attachment smoke failed" }
+    $originalMailDrafts = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($originalMailDrafts.Count -ne 2) { throw "Packaged offline mail previews are incomplete" }
     $backupBody = @{
         label = "Packaged restore smoke"
         categories = @("DATABASE", "DOCUMENTS")
@@ -498,24 +500,33 @@ try {
     if ($diagnostics.process_status -ne "READY") { throw "Post-restore diagnostics are not ready" }
     $restoredCleanup = Invoke-RestMethod -Uri "$apiRoot/api/v1/ai/media-cleanup" -Headers $headers -TimeoutSec 5
     if (@($restoredCleanup.items).Count -ne 0) { throw "Restored packaged cleanup journal is not empty" }
-    # Windows PowerShell emits a JSON array as one pipeline object; enumerate
-    # it explicitly before checking count and replaying individual audit rows.
+    # Offline previews have no provider identity and cannot reserve/send mail.
+    # Verify their exact encrypted round-trip after restore without manufacturing
+    # fake provider attempts just to preserve an older smoke expectation.
     $restoredMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
-    if ($restoredMailAudits.Count -ne 2) { throw "Restored packaged mail history is incomplete" }
-    foreach ($mailAudit in $restoredMailAudits) {
-        if ($mailAudit.status -ne "FAILED" -or $mailAudit.error_code -ne "ProviderNotConfiguredError" -or $null -ne $mailAudit.provider_resource_id) {
-            throw "Restored packaged mail history changed its failed outcome"
+    if ($restoredMailAudits.Count -ne 0) { throw "Offline mail previews unexpectedly recorded provider attempts" }
+    $restoredMailDrafts = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($restoredMailDrafts.Count -ne $originalMailDrafts.Count) { throw "Restored mail preview inventory changed" }
+    foreach ($originalMailDraft in $originalMailDrafts) {
+        $restoredMailDraft = Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/drafts/$($originalMailDraft.id)" -Headers $headers -TimeoutSec 5
+        if (($restoredMailDraft | ConvertTo-Json -Depth 30 -Compress) -ne ($originalMailDraft | ConvertTo-Json -Depth 30 -Compress)) {
+            throw "Restored offline mail preview changed"
         }
         $mailReplayBody = @{
-            fingerprint = $mailAudit.fingerprint
-            idempotency_key = $mailAudit.idempotency_key
+            fingerprint = $originalMailDraft.fingerprint
+            idempotency_key = "post-restore-offline-" + [guid]::NewGuid().ToString("N")
             confirmed_by = "synthetic-package-probe"
         } | ConvertTo-Json
-        $mailReplay = Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($mailAudit.resource_id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5
-        if ($mailReplay.id -ne $mailAudit.id -or $mailReplay.status -ne "FAILED") {
-            throw "Restored packaged mail attempt did not replay its original outcome"
+        try {
+            Invoke-RestMethod -Method Post -Uri "$apiRoot/api/v1/communications/drafts/$($originalMailDraft.id)/send" -Headers $headers -ContentType "application/json" -Body $mailReplayBody -TimeoutSec 5 | Out-Null
+            throw "Restored unbound mail preview unexpectedly allowed sending"
+        }
+        catch {
+            if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 409) { throw }
         }
     }
+    $postRestoreMailAudits = @(Invoke-RestMethod -Uri "$apiRoot/api/v1/communications/mutation-audits" -Headers $headers -TimeoutSec 5 | ForEach-Object { $_ })
+    if ($postRestoreMailAudits.Count -ne 0) { throw "Restored unbound previews created provider audit attempts" }
     Write-Output "Packaged startup, migration, image decoding/rejection, cleanup API, loopback browser/worker lifecycle, verified mail attachment review, encrypted backup and offline restore smoke passed."
 }
 catch {

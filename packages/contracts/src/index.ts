@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Greenhouse Public Discovery",
-  version: "0.58.0-alpha.1",
+  name: "Source-Bound Replies",
+  version: "0.59.0-alpha.1",
   channel: "alpha",
 } as const;
 

@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Greenhouse Public Discovery"
+    BUILD_NAME = "Source-Bound Replies"
 
     def __init__(
         self,

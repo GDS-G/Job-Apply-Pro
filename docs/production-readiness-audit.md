@@ -4,7 +4,13 @@
 
 This audit maps the documented Phase 12 exit criteria to direct evidence. It deliberately distinguishes source completion, packaged-candidate validation, signed-release validation, and authorized live-integration validation.
 
-The active source milestone is **Greenhouse Public Discovery `v0.58.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in reviewed qualification/application flows, broader mail/reply capability and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation is a newly identified gap. Signing and live acceptance alone cannot complete the unfinished features.
+The active source milestone is **Source-Bound Replies `v0.59.0-alpha.1`**. Exact-version validation is recorded separately below; earlier sections retain historical evidence. Public import is not a complete application adapter. First-party source work remains in reviewed qualification/application flows, delivery reconciliation and recovery procedures. Forward restore currently preserves recorded mail sends/claims and blocks unresolved media; broader external-effect/replay history preservation remains a gap. Signing and live acceptance alone cannot complete unfinished features.
+
+### Source-Bound Replies integration
+
+Integrated v0.59 source passes **1,003 collected backend tests**, **85.74% coverage** (13,335 statements, 1,902 missed), **355 default desktop tests** with one opt-in skipped, strict explicit-config mypy **171 files**, Ruff lint/format **199 files**, TypeScript, frozen installation and production build. After updating the packaged helper for truthful offline previews, all **44 helper lifecycle/verifier tests** pass again. ADR-0069 documents source provenance, stable identity, epochs, strict headers, migration 0026, single-request provider wires and review/claim boundaries. Installer validation and protected integration are in progress; no live provider or delivered-window acceptance is claimed.
+
+The offline package probe no longer fabricates a configured sender or expects a provider-attempt audit. It requires two encrypted unbound new-message previews, repeated 409 pre-claim refusal with zero mutation audits, exact draft round-trip through backup/restore and continued refusal. Accepted/uncertain send-history preservation is source-tested; this offline package probe does not exercise it.
 
 ### Greenhouse Public Discovery integration
 

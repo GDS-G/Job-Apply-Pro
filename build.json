@@ -1,6 +1,6 @@
 {
-  "name": "Greenhouse Public Discovery",
-  "version": "0.58.0-alpha.1",
+  "name": "Source-Bound Replies",
+  "version": "0.59.0-alpha.1",
   "channel": "alpha",
   "roadmap_phases": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
   "production_automation_enabled": false
