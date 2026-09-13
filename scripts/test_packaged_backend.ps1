@@ -51,30 +51,53 @@ $env:JAP_COMMUNICATION_CONFIG_JSON = '{"providers":[],"oauth_clients":[]}'
 $env:JAP_AUTOMATION_ENABLED = "false"
 $env:JAP_BROWSER_HEADLESS = "true"
 
+function Initialize-SmokeLifecycle {
+    $script:smokeOwnedBackends = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokeOwnedWorkers = [Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $script:smokePreserveArtifacts = $false
+}
+
 function Start-SmokeBackend {
     param(
         [string]$Executable,
         [string]$StdoutPath,
-        [string]$StderrPath
+        [string]$StderrPath,
+        [ValidateRange(1, 60000)][int]$StartupTimeoutMilliseconds = 60000
     )
 
-    $started = Start-Process -FilePath $Executable -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    do {
-        Start-Sleep -Milliseconds 250
-        try {
-            $health = Invoke-RestMethod -Uri "$apiRoot/api/v1/health" -TimeoutSec 2
+    $started = $null
+    try {
+        $started = Start-Process -FilePath $Executable -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath -ErrorAction Stop
+        if ($null -eq $started) { throw "No owned backend handle was returned" }
+        # Retain the exact handle even if startup throws before the caller's
+        # assignment completes. Never recover ownership by image-name lookup.
+        $script:smokeOwnedBackends.Add($started)
+        $null = $started.Handle
+        $observation = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            Start-Sleep -Milliseconds 250
+            try {
+                $health = Invoke-RestMethod -Uri "$apiRoot/api/v1/health" -TimeoutSec 2
+            }
+            catch {
+                $health = $null
+            }
+        } while ($null -eq $health -and $observation.ElapsedMilliseconds -lt $StartupTimeoutMilliseconds -and -not $started.HasExited)
+        if ($null -eq $health -or $started.HasExited -or $health.status -ne "ok" -or $health.service -ne "job-apply-pro-backend" -or $health.environment -ne $env:JAP_ENVIRONMENT) {
+            throw "Packaged backend did not report its expected healthy identity"
         }
-        catch {
-            $health = $null
-        }
-    } while ($null -eq $health -and [DateTime]::UtcNow -lt $deadline -and -not $started.HasExited)
-    if ($null -eq $health -or $health.status -ne "ok" -or $health.service -ne "job-apply-pro-backend" -or $health.environment -ne $env:JAP_ENVIRONMENT) {
-        $stderrText = if (Test-Path -LiteralPath $StderrPath) { Get-Content -Raw -LiteralPath $StderrPath } else { "" }
-        if (-not $started.HasExited) { $started.Kill() }
-        throw "Packaged backend did not report healthy before the deadline. $stderrText"
+        return $started
     }
-    return $started
+    catch {
+        if ($null -eq $started) {
+            # An exceptional creation path supplied no usable exit-proof handle.
+            $script:smokePreserveArtifacts = $true
+        } else {
+            try { Stop-SmokeBackend -Process $started }
+            catch { $script:smokePreserveArtifacts = $true }
+        }
+        throw "Packaged backend startup failed. Preserve smoke artifacts if captured process exit cannot be verified."
+    }
 }
 
 function Stop-SmokeBackend {
@@ -83,29 +106,77 @@ function Stop-SmokeBackend {
         [System.Diagnostics.Process]$WorkerProcess = $null
     )
 
-    if ($null -eq $WorkerProcess -and $null -ne $Process -and -not $Process.HasExited) {
-        $ownedWorkers = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id)" | Where-Object {
-            $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
-        })
-        if ($ownedWorkers.Count -eq 1) {
-            $WorkerProcess = Get-Process -Id $ownedWorkers[0].ProcessId -ErrorAction SilentlyContinue
-            if ($null -ne $WorkerProcess) { $null = $WorkerProcess.Handle }
+    $failed = $false
+    try {
+        if ($null -ne $Process -and -not $script:smokeOwnedBackends.Contains($Process)) {
+            $script:smokeOwnedBackends.Add($Process)
+            $null = $Process.Handle
         }
+        if ($null -eq $WorkerProcess -and $null -ne $Process -and -not $Process.HasExited) {
+            $ownedWorkers = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id)" -ErrorAction Stop | Where-Object {
+                $_.Name -eq "job-apply-pro-browser-worker.exe" -and $_.ExecutablePath -eq $browserWorker
+            })
+            if ($ownedWorkers.Count -gt 1) { throw "Unexpected API worker ownership" }
+            if ($ownedWorkers.Count -eq 1) {
+                $WorkerProcess = Get-Process -Id $ownedWorkers[0].ProcessId -ErrorAction Stop
+                if ($null -eq $WorkerProcess) { throw "API worker handle could not be captured" }
+            }
+        }
+        if ($null -ne $WorkerProcess -and -not $script:smokeOwnedWorkers.Contains($WorkerProcess)) {
+            $script:smokeOwnedWorkers.Add($WorkerProcess)
+            $null = $WorkerProcess.Handle
+        }
+    } catch { $failed = $true }
+    if ($null -ne $Process) {
+        try { if (-not $Process.HasExited) { $Process.Kill() } }
+        catch { $failed = $true }
+        # Kill acceptance (or failure) is never substituted for exit proof.
+        try { if (-not $Process.WaitForExit(10000)) { $failed = $true } }
+        catch { $failed = $true }
     }
-    if ($null -ne $Process -and -not $Process.HasExited) {
-        $Process.Kill()
-        if (-not $Process.WaitForExit(10000)) { throw "Packaged backend exit could not be verified" }
+    if ($null -ne $WorkerProcess) {
+        try {
+            if (-not $WorkerProcess.WaitForExit(15000)) {
+                # Only the captured fixed-sibling child is eligible for cleanup.
+                # Forced cleanup remains a smoke failure even if exit is proven.
+                $failed = $true
+                try { $WorkerProcess.Kill() } catch { $failed = $true }
+                if (-not $WorkerProcess.WaitForExit(10000)) { $failed = $true }
+            }
+            if ($WorkerProcess.ExitCode -ne 0) { $failed = $true }
+        } catch { $failed = $true }
     }
-    if ($null -ne $WorkerProcess -and -not $WorkerProcess.WaitForExit(15000)) {
-        # Only this previously verified backend child is eligible for cleanup.
-        $WorkerProcess.Kill()
-        if (-not $WorkerProcess.WaitForExit(10000)) { throw "Packaged API-owned worker cleanup could not be verified" }
-        throw "Packaged API-owned worker did not exit after its parent's IPC pipe closed"
-    }
-    if ($null -ne $WorkerProcess -and $WorkerProcess.ExitCode -ne 0) {
-        throw "Packaged API-owned worker exited unsuccessfully after parent shutdown"
+    if ($failed) {
+        $script:smokePreserveArtifacts = $true
+        throw "Packaged smoke shutdown failed or captured process exit is unproved. Preserve the synthetic workspace until recovery is reviewed."
     }
 }
+
+function Complete-SmokeCleanup {
+    param([string]$Directory)
+
+    foreach ($ownedBackend in @($script:smokeOwnedBackends.ToArray())) {
+        try { Stop-SmokeBackend -Process $ownedBackend }
+        catch { $script:smokePreserveArtifacts = $true }
+    }
+    foreach ($ownedWorker in @($script:smokeOwnedWorkers.ToArray())) {
+        try { Stop-SmokeBackend -WorkerProcess $ownedWorker }
+        catch { $script:smokePreserveArtifacts = $true }
+    }
+    if ($script:smokePreserveArtifacts) {
+        throw "Synthetic smoke workspace preserved after failed shutdown or missing exit proof. Do not delete its artifacts until captured processes have exited and recovery is reviewed."
+    }
+    $absoluteDirectory = [IO.Path]::GetFullPath($Directory)
+    $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd("\", "/") + [IO.Path]::DirectorySeparatorChar
+    if (-not $absoluteDirectory.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or -not ([IO.Path]::GetFileName($absoluteDirectory)).StartsWith("job-apply-pro-package-smoke-", [StringComparison]::Ordinal)) {
+        throw "Refusing cleanup outside the owned synthetic smoke workspace"
+    }
+    if (Test-Path -LiteralPath $absoluteDirectory) {
+        Remove-Item -LiteralPath $absoluteDirectory -Recurse -Force -ErrorAction Stop
+    }
+}
+
+Initialize-SmokeLifecycle
 
 # This helper authenticates synthetic restore evidence without opening SQLite or
 # printing keys, decrypted bytes, filesystem paths, or database hashes.
@@ -327,9 +398,6 @@ finally {
     try {
         Stop-SmokeBackend -Process $process -WorkerProcess $apiWorkerProcess
     }
-    finally {
-        if (Test-Path -LiteralPath $resolvedTestRoot) {
-            Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
-        }
-    }
+    catch { $script:smokePreserveArtifacts = $true }
+    Complete-SmokeCleanup -Directory $resolvedTestRoot
 }
