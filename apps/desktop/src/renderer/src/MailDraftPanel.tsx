@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   CommunicationDraftCreate,
+  CommunicationDraftMode,
   CommunicationMutationAudit,
   CommunicationRecord,
   OutboundDraft,
@@ -23,9 +24,19 @@ function outcome(audit: CommunicationMutationAudit): string {
   }
 }
 
-function address(sender: string): string {
-  const match = /<([^<>]+)>$/.exec(sender);
-  return (match?.[1] ?? sender).trim();
+function sourceSignature(record: CommunicationRecord | undefined): string {
+  return JSON.stringify(
+    record
+      ? {
+          id: record.id,
+          provider: record.analysis.message.provider,
+          message: record.analysis.message.provider_message_id,
+          thread: record.analysis.message.provider_thread_id,
+          context: record.reply_context,
+          unavailable: record.reply_unavailable_reason,
+        }
+      : null,
+  );
 }
 
 export function MailDraftPanel({
@@ -41,6 +52,8 @@ export function MailDraftPanel({
   const [audits, setAudits] = useState<CommunicationMutationAudit[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [recordId, setRecordId] = useState("");
+  const [mode, setMode] = useState<CommunicationDraftMode>("REPLY");
+  const [preparedSource, setPreparedSource] = useState<string | null>(null);
   const [workflowId, setWorkflowId] = useState("");
   const [recipient, setRecipient] = useState("");
   const [subject, setSubject] = useState("");
@@ -103,6 +116,20 @@ export function MailDraftPanel({
       record.analysis.message.provider === "OUTLOOK",
   );
   const source = mailRecords.find((record) => record.id === recordId);
+  const sourceKey = sourceSignature(source);
+  const currentSource = useRef(sourceKey);
+  currentSource.current = sourceKey;
+  const sourceChanged = preparedSource !== null && preparedSource !== sourceKey;
+  const reply = source?.reply_context;
+  const replyAvailable =
+    !!reply &&
+    !source?.reply_unavailable_reason &&
+    reply.source_record_id === source?.id &&
+    reply.provider === source?.analysis.message.provider &&
+    reply.source_message_id === source?.analysis.message.provider_message_id &&
+    reply.source_thread_id === source?.analysis.message.provider_thread_id &&
+    (reply.provider !== "GMAIL" ||
+      (!!reply.rfc_message_id && reply.mime_reply_supported));
   const draft = drafts.find((item) => item.id === selectedId);
   const prior = draft
     ? audits.find(
@@ -121,12 +148,28 @@ export function MailDraftPanel({
     loaded &&
     !busy &&
     !!source &&
+    !sourceChanged &&
     versionsValid &&
-    !!recipient.trim() &&
-    !!subject.trim() &&
+    (mode === "REPLY"
+      ? replyAvailable && (!versions.length || reply?.mime_reply_supported)
+      : !!recipient.trim() && !!subject.trim()) &&
     !!body.trim();
   const manifestMissing =
     !!draft?.document_version_ids.length && !draft.attachment_manifest;
+  const bindingMissing =
+    !!draft &&
+    (!draft.account_key ||
+      !draft.account_label ||
+      (draft.mode !== "REPLY" && draft.mode !== "NEW_MESSAGE") ||
+      (draft.mode === "REPLY" && !draft.reply_context) ||
+      (draft.mode === "NEW_MESSAGE" &&
+        (draft.reply_context !== null || draft.provider_thread_id !== "")));
+  const offlinePreview =
+    draft?.mode === "NEW_MESSAGE" &&
+    draft.account_key === null &&
+    draft.account_label === null &&
+    draft.reply_context === null &&
+    draft.provider_thread_id === "";
   const canSend =
     backendReady &&
     loaded &&
@@ -135,16 +178,32 @@ export function MailDraftPanel({
     draft.policy === "REVIEW_REQUIRED" &&
     !prior &&
     !blocked.has(draft.id) &&
+    !bindingMissing &&
     !manifestMissing;
 
   function chooseRecord(id: string) {
     setRecordId(id);
     const record = mailRecords.find((item) => item.id === id);
+    setPreparedSource(sourceSignature(record));
+    setSelectedId("");
     setWorkflowId(record?.analysis.correlation.workflow_id ?? "");
-    setRecipient(record ? address(record.analysis.message.sender) : "");
-    setSubject(record?.analysis.reply_draft.subject ?? "");
+    setRecipient(record?.reply_context?.recipient ?? "");
+    setSubject(
+      record?.reply_context?.subject ??
+        record?.analysis.reply_draft.subject ??
+        "",
+    );
     setBody(record?.analysis.reply_draft.body_text ?? "");
     setVersionInput("");
+    setNotice(null);
+    setError(null);
+  }
+
+  function chooseMode(nextMode: CommunicationDraftMode) {
+    setMode(nextMode);
+    setSelectedId("");
+    setRecipient(reply?.recipient ?? "");
+    setSubject(reply?.subject ?? source?.analysis.reply_draft.subject ?? "");
     setNotice(null);
     setError(null);
   }
@@ -156,29 +215,50 @@ export function MailDraftPanel({
     setBusy(true);
     setError(null);
     setNotice(null);
-    const input: CommunicationDraftCreate = {
+    const common = {
       analysis_id: source.id,
       workflow_id: workflowId || null,
-      provider: source.analysis.message.provider as "GMAIL" | "OUTLOOK",
-      provider_thread_id: source.analysis.message.provider_thread_id,
-      recipient,
-      subject,
       body_text: body,
       category: source.analysis.reply_draft.category,
-      policy: "REVIEW_REQUIRED",
+      policy: "REVIEW_REQUIRED" as const,
       document_version_ids: versions,
     };
+    const input: CommunicationDraftCreate =
+      mode === "REPLY"
+        ? {
+            ...common,
+            mode: "REPLY",
+            source_fingerprint: reply!.fingerprint,
+          }
+        : {
+            ...common,
+            mode: "NEW_MESSAGE",
+            provider: source.analysis.message.provider as "GMAIL" | "OUTLOOK",
+            recipient,
+            subject,
+          };
     try {
       const created =
         await window.jobApplyPro.workbench.createCommunicationDraft(input);
       if (request !== generation.current) return;
+      if (currentSource.current !== sourceKey) {
+        setSelectedId("");
+        setNotice(
+          "Source or sending-account context changed during preparation. Refresh mail drafts and reload the source before preparing a fresh draft. No send was requested.",
+        );
+        return;
+      }
       setDrafts((items) => [
         created,
         ...items.filter((item) => item.id !== created.id),
       ]);
       setSelectedId(created.id);
       setNotice(
-        "Draft saved for review only. Nothing has been sent. Review the verified manifest before native approval.",
+        created.mode === "NEW_MESSAGE" &&
+          created.account_key === null &&
+          created.account_label === null
+          ? "Offline standalone preview saved locally. It is not send-ready. Connect the provider and prepare a fresh draft for native review; this preview will not be bound to a new account. Nothing has been sent."
+          : "Draft saved for review only. Nothing has been sent. Review the verified manifest before native approval.",
       );
     } catch {
       if (request === generation.current)
@@ -252,7 +332,8 @@ export function MailDraftPanel({
         <div>
           <h3 id="mail-draft-title">Reviewed email & verified attachments</h3>
           <p>
-            Replies are never sent automatically. Attachment contents stay in
+            Messages are never sent automatically. Choose a source-bound reply
+            or an explicit standalone new message. Attachment contents stay in
             the encrypted backend; only verified metadata is shown here.
           </p>
         </div>
@@ -286,7 +367,7 @@ export function MailDraftPanel({
         }}
       >
         <label>
-          Reply to imported message
+          Imported source message
           <select
             value={recordId}
             disabled={!backendReady || busy}
@@ -301,6 +382,76 @@ export function MailDraftPanel({
             ))}
           </select>
         </label>
+        <label>
+          Message mode
+          <select
+            value={mode}
+            disabled={!backendReady || busy}
+            onChange={(event) =>
+              chooseMode(event.target.value as CommunicationDraftMode)
+            }
+          >
+            <option value="REPLY">Reply in the source conversation</option>
+            <option value="NEW_MESSAGE">
+              New standalone message (not a reply)
+            </option>
+          </select>
+        </label>
+        {source && (
+          <div className="mail-draft-panel__wide">
+            <p>
+              Source: {source.analysis.message.provider} ·{" "}
+              {source.analysis.message.subject}
+            </p>
+            <p>Received: {source.analysis.message.received_at}</p>
+            {reply && (
+              <>
+                <p>Source account: {reply.account_label}</p>
+                <p>
+                  Source message: <code>{reply.source_message_id}</code> ·
+                  Thread: <code>{reply.source_thread_id}</code>
+                </p>
+                <p>
+                  Source fingerprint: <code>{reply.fingerprint}</code>
+                </p>
+              </>
+            )}
+            {mode === "REPLY" && (
+              <p>
+                Reply recipient and subject are fixed by the verified source.
+                Reply-all and recipient overrides are not supported.
+              </p>
+            )}
+            {mode === "REPLY" && !replyAvailable && (
+              <p role="status">
+                Threaded reply is unavailable for this source. Sync an eligible
+                source message, or explicitly choose a new standalone message.
+                No automatic fallback.
+              </p>
+            )}
+            {mode === "NEW_MESSAGE" && (
+              <p>
+                This is a new standalone message, not a reply. Review its
+                sending account, recipient and subject in native approval.
+              </p>
+            )}
+            {sourceChanged && (
+              <p role="status">
+                Source or sending-account context changed. Reload the source and
+                review it again before saving.
+              </p>
+            )}
+            {sourceChanged && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => chooseRecord(recordId)}
+              >
+                Reload source context
+              </button>
+            )}
+          </div>
+        )}
         <label>
           Owning workflow (required for attachments)
           <select
@@ -326,25 +477,27 @@ export function MailDraftPanel({
           Recipient email
           <input
             type="email"
-            required
-            value={recipient}
-            maxLength={254}
+            required={mode === "NEW_MESSAGE"}
+            value={mode === "REPLY" ? (reply?.recipient ?? "") : recipient}
+            maxLength={mode === "REPLY" ? 320 : 254}
             disabled={!source || busy}
+            readOnly={mode === "REPLY"}
             onChange={(event) => setRecipient(event.target.value)}
           />
         </label>
         <label>
-          Reply subject
+          Message subject
           <input
-            required
-            value={subject}
+            required={mode === "NEW_MESSAGE"}
+            value={mode === "REPLY" ? (reply?.subject ?? "") : subject}
             maxLength={1000}
             disabled={!source || busy}
+            readOnly={mode === "REPLY"}
             onChange={(event) => setSubject(event.target.value)}
           />
         </label>
         <label className="mail-draft-panel__wide">
-          Reply body
+          Message body
           <textarea
             required
             value={body}
@@ -387,7 +540,9 @@ export function MailDraftPanel({
           type="submit"
           disabled={!canCreate}
         >
-          Save reply for review
+          {mode === "REPLY"
+            ? "Save reply for review"
+            : "Save new message for review"}
         </button>
       </form>
       <label className="mail-draft-panel__selection">
@@ -413,10 +568,73 @@ export function MailDraftPanel({
         <article className="mail-draft-review">
           <h4>Exact saved message</h4>
           <p>
+            Mode:{" "}
+            {draft.mode === "REPLY"
+              ? "Reply in the source conversation"
+              : draft.mode === "NEW_MESSAGE"
+                ? "New standalone message (not a reply)"
+                : "Legacy draft — mode unavailable"}
+          </p>
+          <p>
+            Sending account: {draft.account_label ?? "Unavailable"} · Account
+            binding: <code>{draft.account_key ?? "Unavailable"}</code>
+          </p>
+          <p>
             Provider: {draft.provider} · Recipient: {draft.recipient}
           </p>
           <p>Subject: {draft.subject}</p>
           <pre>{draft.body_text}</pre>
+          {draft.reply_context && (
+            <>
+              <h4>Immutable reply context</h4>
+              <p>
+                Source record:{" "}
+                <code>{draft.reply_context.source_record_id}</code> · Message:{" "}
+                <code>{draft.reply_context.source_message_id}</code> · Thread:{" "}
+                <code>{draft.reply_context.source_thread_id}</code>
+              </p>
+              <p>
+                Source ID format: {draft.reply_context.source_id_format} ·
+                Policy: {draft.reply_context.policy_version}
+              </p>
+              <p>
+                Connection fingerprint:{" "}
+                <code>{draft.reply_context.connection_fingerprint}</code>
+              </p>
+              <p>
+                RFC Message-ID:{" "}
+                <code>{draft.reply_context.rfc_message_id ?? "None"}</code>
+              </p>
+              <p>
+                References:{" "}
+                <code>{JSON.stringify(draft.reply_context.references)}</code>
+              </p>
+              <p>
+                MIME reply supported:{" "}
+                {draft.reply_context.mime_reply_supported ? "Yes" : "No"}
+              </p>
+              <p>
+                Source fingerprint:{" "}
+                <code>{draft.reply_context.fingerprint}</code>
+              </p>
+            </>
+          )}
+          {offlinePreview ? (
+            <p className="warning-banner">
+              Offline preview — not send-ready. No sending account is bound.
+              After connecting the provider, prepare a fresh draft for native
+              review. Connecting or refreshing cannot make this preview
+              sendable.
+            </p>
+          ) : (
+            bindingMissing && (
+              <p className="warning-banner">
+                This draft has no valid explicit mode or immutable account/reply
+                binding. Prepare a fresh reviewed draft; this draft cannot be
+                sent.
+              </p>
+            )
+          )}
           <p>
             Workflow: {draft.workflow_id ?? "None"} · Attachment profile:{" "}
             {draft.attachment_manifest?.profile_id ?? "None"}

@@ -14,12 +14,13 @@ from job_apply_pro.api.routes.communications import get_oauth_service
 from job_apply_pro.config import get_settings
 from job_apply_pro.domain.communications import (
     CalendarEventSnapshot,
-    DraftCreate,
     IntegrationProvider,
     IntegrationStatus,
+    MailMode,
     MessageCategory,
     OAuthTokenSet,
     OutboundDraft,
+    OutboundPolicy,
 )
 from job_apply_pro.integrations.communications import ProviderMutationError
 from job_apply_pro.integrations.configuration import OAuthClientConfig
@@ -243,18 +244,20 @@ def test_loopback_callback_uses_one_time_state_without_exposing_local_api_token(
 
 
 def _draft(provider: IntegrationProvider) -> OutboundDraft:
-    command = DraftCreate(
+    return OutboundDraft(
+        id="draft-1",
         analysis_id="analysis-1",
         provider=provider,
-        provider_thread_id="thread-1",
+        provider_thread_id="",
+        mode=MailMode.NEW_MESSAGE,
+        account_key="a" * 64,
+        account_label="owner@example.test",
         recipient="recruiter@example.test",
         subject="Re: Interview",
         body_text="Thank you. I am available Thursday.",
         category=MessageCategory.INTERVIEW_REQUEST,
-    )
-    return OutboundDraft(
-        id="draft-1",
-        **command.model_dump(),
+        policy=OutboundPolicy.REVIEW_REQUIRED,
+        document_version_ids=[],
         fingerprint="f" * 64,
         created_at=datetime(2026, 8, 11, 18, tzinfo=UTC),
         updated_at=datetime(2026, 8, 11, 18, tzinfo=UTC),
@@ -609,7 +612,10 @@ def test_outlook_sync_uses_folder_delta_links_and_recovers_reset_state() -> None
     assert [item.provider_message_id for item in incremental.messages] == ["outlook-2"]
     assert incremental.cursor.get_secret_value().endswith("$deltatoken=two")
     assert recovery.mode.value == "RECOVERY"
-    assert any(request.headers.get("Prefer") == "odata.maxpagesize=100" for request in requests)
+    assert all(
+        request.headers.get("Prefer") == 'IdType="ImmutableId", odata.maxpagesize=100'
+        for request in requests
+    )
     with pytest.raises(ProviderMutationError, match="untrusted next link"):
         provider.sync_messages(
             cursor=SecretStr("https://attacker.example/v1.0/me/mailFolders/inbox/messages/delta")

@@ -16,6 +16,8 @@ from job_apply_pro.domain.communications import (
     FollowUpStatus,
     IntegrationProvider,
     MailAttachmentManifest,
+    MailMode,
+    MailReplyContext,
     MessageCategory,
     MutationAudit,
     MutationKind,
@@ -53,6 +55,10 @@ class CommunicationRepository:
                 CommunicationRecordRow.provider == record.analysis.message.provider.value,
                 CommunicationRecordRow.provider_message_id
                 == record.analysis.message.provider_message_id,
+                CommunicationRecordRow.source_account_key
+                == (record.source_account_key or "0" * 64),
+                CommunicationRecordRow.source_connection_fingerprint
+                == (record.source_connection_fingerprint or "0" * 64),
             )
         )
         if existing is not None:
@@ -62,6 +68,8 @@ class CommunicationRepository:
                 id=record.id,
                 provider=record.analysis.message.provider.value,
                 provider_message_id=record.analysis.message.provider_message_id,
+                source_account_key=record.source_account_key or "0" * 64,
+                source_connection_fingerprint=record.source_connection_fingerprint or "0" * 64,
                 provider_thread_id=record.analysis.message.provider_thread_id,
                 category=record.analysis.classification.category.value,
                 workflow_id=record.analysis.correlation.workflow_id,
@@ -70,7 +78,17 @@ class CommunicationRepository:
                     or record.analysis.correlation.requires_review
                 ),
                 encrypted_analysis=self._cipher.encrypt_json(
-                    record.analysis.model_dump(mode="json"),
+                    {
+                        **record.analysis.model_dump(mode="json"),
+                        "source_account_key": record.source_account_key,
+                        "source_connection_fingerprint": record.source_connection_fingerprint,
+                        "reply_context": (
+                            record.reply_context.model_dump(mode="json")
+                            if record.reply_context is not None
+                            else None
+                        ),
+                        "reply_unavailable_reason": record.reply_unavailable_reason,
+                    },
                     context=f"communication:{record.id}:analysis",
                 ),
                 received_at=record.received_at,
@@ -273,6 +291,14 @@ class CommunicationRepository:
                             else None
                         ),
                         "provider_binding_fingerprint": draft.provider_binding_fingerprint,
+                        "mode": draft.mode.value if draft.mode is not None else None,
+                        "account_key": draft.account_key,
+                        "account_label": draft.account_label,
+                        "reply_context": (
+                            draft.reply_context.model_dump(mode="json")
+                            if draft.reply_context is not None
+                            else None
+                        ),
                     },
                     context=f"communication-draft:{draft.id}:payload",
                 ),
@@ -481,11 +507,26 @@ class CommunicationRepository:
         payload = self._cipher.decrypt_json(
             row.encrypted_analysis, context=f"communication:{row.id}:analysis"
         )
+        source_account_key = payload.get("source_account_key")
+        if (source_account_key or "0" * 64) != row.source_account_key:
+            raise ValueError("Stored correspondence account binding could not be verified")
+        if (
+            payload.get("source_connection_fingerprint") or "0" * 64
+        ) != row.source_connection_fingerprint:
+            raise ValueError("Stored correspondence connection binding could not be verified")
         return CommunicationRecord(
             id=row.id,
             analysis=CommunicationAnalysis.model_validate(payload),
             received_at=_utc(row.received_at),
             created_at=_utc(row.created_at),
+            source_account_key=source_account_key,
+            source_connection_fingerprint=payload.get("source_connection_fingerprint"),
+            reply_context=(
+                MailReplyContext.model_validate(payload["reply_context"])
+                if payload.get("reply_context") is not None
+                else None
+            ),
+            reply_unavailable_reason=payload.get("reply_unavailable_reason"),
         )
 
     def _draft(self, row: OutboundDraftRow) -> OutboundDraft:
@@ -510,6 +551,14 @@ class CommunicationRepository:
                 else None
             ),
             provider_binding_fingerprint=payload.get("provider_binding_fingerprint"),
+            mode=MailMode(str(payload["mode"])) if payload.get("mode") is not None else None,
+            account_key=payload.get("account_key"),
+            account_label=payload.get("account_label"),
+            reply_context=(
+                MailReplyContext.model_validate(payload["reply_context"])
+                if payload.get("reply_context") is not None
+                else None
+            ),
             fingerprint=row.fingerprint,
             created_at=_utc(row.created_at),
             updated_at=_utc(row.updated_at),

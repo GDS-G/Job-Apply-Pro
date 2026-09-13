@@ -18,6 +18,10 @@ from job_apply_pro.domain.mail import (
     VerifiedMailAttachment,
     validate_mail_bundle,
 )
+from job_apply_pro.domain.mail_threading import (
+    parse_gmail_reply_headers,
+    parse_outlook_reply_headers,
+)
 
 
 class ProviderMessageBatch:
@@ -44,9 +48,9 @@ def normalize_gmail_message(payload: dict[str, object]) -> NormalizedMessage:
         provider=IntegrationProvider.GMAIL,
         provider_message_id=str(payload["id"]),
         provider_thread_id=str(payload["threadId"]),
-        sender=str(payload["from"]),
+        sender=str(payload["from"])[:500],
         recipients=[str(value) for value in recipients] if isinstance(recipients, list) else [],
-        subject=str(payload.get("subject", "")),
+        subject=str(payload.get("subject", ""))[:1_000],
         body_text=str(payload.get("text", "")),
         received_at=datetime.fromisoformat(str(payload["receivedAt"])),
         attachment_names=(
@@ -56,6 +60,7 @@ def normalize_gmail_message(payload: dict[str, object]) -> NormalizedMessage:
             [str(value) for value in identifiers] if isinstance(identifiers, list) else []
         ),
         referenced_urls=[str(value) for value in urls] if isinstance(urls, list) else [],
+        reply_headers=parse_gmail_reply_headers(payload.get("headers")),
     )
 
 
@@ -63,6 +68,9 @@ def normalize_outlook_message(payload: dict[str, object]) -> NormalizedMessage:
     sender = payload.get("sender", {})
     if not isinstance(sender, dict):
         sender = {}
+    sender_address = sender.get("emailAddress", sender)
+    if not isinstance(sender_address, dict):
+        sender_address = {}
     recipients = payload.get("toRecipients", [])
     attachments = payload.get("attachments", [])
     identifiers = payload.get("identifiers", [])
@@ -73,11 +81,11 @@ def normalize_outlook_message(payload: dict[str, object]) -> NormalizedMessage:
         provider=IntegrationProvider.OUTLOOK,
         provider_message_id=str(payload["id"]),
         provider_thread_id=str(payload["conversationId"]),
-        sender=str(sender.get("address", "")),
+        sender=str(sender_address.get("address", "unknown@example.invalid"))[:500],
         recipients=[
             str(item.get("address", "")) for item in recipient_items if isinstance(item, dict)
         ],
-        subject=str(payload.get("subject", "")),
+        subject=str(payload.get("subject", ""))[:1_000],
         body_text=str(payload.get("bodyPreview", "")),
         received_at=datetime.fromisoformat(str(payload["receivedDateTime"])),
         attachment_names=[
@@ -87,6 +95,7 @@ def normalize_outlook_message(payload: dict[str, object]) -> NormalizedMessage:
             [str(value) for value in identifiers] if isinstance(identifiers, list) else []
         ),
         referenced_urls=[str(value) for value in urls] if isinstance(urls, list) else [],
+        reply_headers=parse_outlook_reply_headers(payload),
     )
 
 

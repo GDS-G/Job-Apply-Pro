@@ -674,6 +674,8 @@ export interface NormalizedMessage {
 
 export interface CommunicationRecord {
   id: string;
+  reply_context: MailReplyContext | null;
+  reply_unavailable_reason: string | null;
   analysis: {
     message: NormalizedMessage;
     classification: {
@@ -726,21 +728,52 @@ export interface MailAttachmentManifest {
   policy_version: "mail-attachments-v1";
 }
 
-export interface CommunicationDraftCreate {
-  analysis_id: string;
-  workflow_id?: string | null;
+export type CommunicationDraftMode = "REPLY" | "NEW_MESSAGE";
+
+export interface MailReplyContext {
+  policy_version: "mail-reply-v1";
   provider: "GMAIL" | "OUTLOOK";
-  provider_thread_id: string;
+  account_key: string;
+  account_label: string;
+  connection_fingerprint: string;
+  source_record_id: string;
+  source_message_id: string;
+  source_thread_id: string;
+  source_id_format: "GMAIL" | "GRAPH_IMMUTABLE";
   recipient: string;
   subject: string;
+  rfc_message_id: string | null;
+  references: string[];
+  mime_reply_supported: boolean;
+  fingerprint: string;
+}
+
+interface CommunicationDraftCreateCommon {
+  analysis_id: string;
+  workflow_id: string | null;
   body_text: string;
   category: MessageCategory;
-  policy?: "REVIEW_REQUIRED";
+  policy: "REVIEW_REQUIRED";
   document_version_ids: string[];
 }
 
+export type CommunicationDraftCreate = CommunicationDraftCreateCommon &
+  (
+    | { mode: "REPLY"; source_fingerprint: string }
+    | {
+        mode: "NEW_MESSAGE";
+        provider: "GMAIL" | "OUTLOOK";
+        recipient: string;
+        subject: string;
+      }
+  );
+
 export interface OutboundDraft {
   id: string;
+  mode: CommunicationDraftMode | null;
+  account_key: string | null;
+  account_label: string | null;
+  reply_context: MailReplyContext | null;
   analysis_id: string;
   workflow_id: string | null;
   provider: "GMAIL" | "OUTLOOK";
