@@ -12,6 +12,17 @@ Integrated v0.59 source passes **1,003 collected backend tests**, **85.74% cover
 
 The offline package probe no longer fabricates a configured sender or expects a provider-attempt audit. It requires two encrypted unbound new-message previews, repeated 409 pre-claim refusal with zero mutation audits, exact draft round-trip through backup/restore and continued refusal. Accepted/uncertain send-history preservation is source-tested; this offline package probe does not exercise it.
 
+### Source-Bound Replies unsigned Windows candidate
+
+Runtime checkpoint `a61029e360e7cda0b79dfc3d19b8323f89827f83` produced the installer and unpacked app. Both full backend-dist and delivered-backend probes pass: migrations/startup, image rejection/normalization, cleanup API, no-network discovery admission, direct/API browser lifecycle, exact PDF/DOCX manifests, encrypted offline draft round-trip, pre-claim send refusal and authenticated backup/offline restore. The separately enabled actual-supervisor test passes two start/stop cycles (8.15 seconds), giving **356 distinct desktop tests** across default and opt-in runs. Node and Python dependency audits report no known vulnerabilities; Python excludes only the editable unpublished local package, with no vulnerability exclusion required.
+
+- `Job-Apply-Pro-0.59.0-alpha.1-x64.exe`: 188730931 bytes; SHA-256 `ADB29D6B7500D4A064A4E70EB27DDA8E423E337E3034D5EE3E8FA643B11B5156`.
+- Unpacked desktop executable: 225500672 bytes; SHA-256 `3061E9DFAE8E5AC3602F554E964457E3FEC4B95C917642FD8C5C5CEDE35C2BB3`.
+- Bundled backend executable: 18668141 bytes; SHA-256 `8165439152CC6599D7C3CEA900DEAAFE16C7B38011B52B47DB716441C8C6A4EF`.
+- Bundled browser-worker executable: 18672237 bytes; SHA-256 `C443FCA9782C97395BF5165574DE35A055312C9CC0587B289B158E5ADA16CC30`.
+
+Both bundled executable hashes match backend-dist originals. All four distinct artifacts report `NotSigned`; publication metadata rejects the unsigned desktop before creating publication outputs. Local candidate validation is complete within this scope. No live mailbox acceptance, physical Electron-window acceptance, signed update/rollback or production release is claimed. Protected integration remains separately tracked. The prior v0.56 protected merge `129a61cbf20c5a88194715624467f8cd5b169d7d` also passed post-merge main CI `34731255682` and Security `34731255706`.
+
 ### Greenhouse Public Discovery integration
 
 Runtime checkpoint `1071ab762f0989016cc9731d1868936d599ba150` passes all **846 collected backend tests** with **85.42% coverage** and **282 default desktop tests** (one opt-in packaged test skipped). Strict explicit-config mypy passes **166 files**, Ruff lint/format **193 files**, and TypeScript, frozen installation and production build pass. ADR-0068 records fixed public GETs, bounded normalized source review, atomic immutable local import and backend-enforced rejection of mock/fabricated transitions on real jobs. Package and protected integration are in progress. No live board or applicant account is used by this evidence.
