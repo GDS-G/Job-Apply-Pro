@@ -29,6 +29,8 @@ import type {
   ChallengeModelRoute,
   ChallengeSessionCreate,
   ChallengeSessionSnapshot,
+  CalendarMutationCreate,
+  CalendarMutationPlan,
   CommunicationRecord,
   CommunicationDraftCreate,
   CommunicationMutationAudit,
@@ -747,6 +749,39 @@ export class BackendClient {
 
   listSyncedCalendarEvents(): Promise<SyncedCalendarEvent[]> {
     return this.request("/communications/calendar/events");
+  }
+
+  createCalendarPlan(
+    input: CalendarMutationCreate,
+  ): Promise<CalendarMutationPlan> {
+    return this.request("/communications/calendar/plans", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  getCalendarPlan(id: string): Promise<CalendarMutationPlan> {
+    return this.request(
+      `/communications/calendar/plans/${encodeURIComponent(id)}`,
+    );
+  }
+
+  executeCalendarPlan(
+    id: string,
+    confirmation: {
+      fingerprint: string;
+      idempotency_key: string;
+      confirmed_by: "desktop-user";
+    },
+  ): Promise<CommunicationMutationAudit> {
+    return this.request(
+      `/communications/calendar/plans/${encodeURIComponent(id)}/execute`,
+      {
+        method: "POST",
+        body: JSON.stringify(confirmation),
+      },
+      30_000,
+    );
   }
 
   listCommunicationRecords(): Promise<CommunicationRecord[]> {

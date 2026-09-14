@@ -3,11 +3,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from pydantic import SecretStr
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.communications import (
+    CalendarCreateFields,
     CalendarEventSnapshot,
     CalendarMutationPlan,
     CommunicationAnalysis,
@@ -29,6 +30,8 @@ from job_apply_pro.domain.communications import (
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.storage.models import (
+    ApplicationRow,
+    CalendarMutationClaimRow,
     CalendarMutationPlanRow,
     CommunicationMutationAuditRow,
     CommunicationRecordRow,
@@ -42,6 +45,13 @@ from job_apply_pro.storage.models import (
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+def _optional_text(payload: dict[str, object], field: str) -> str | None:
+    value = payload.get(field)
+    if value is None or isinstance(value, str):
+        return value
+    raise ValueError("Stored communication data could not be verified")
 
 
 class CommunicationRepository:
@@ -331,6 +341,25 @@ class CommunicationRepository:
         return [self._draft(row) for row in rows]
 
     def save_calendar_plan(self, plan: CalendarMutationPlan) -> CalendarMutationPlan:
+        payload: dict[str, object] = {
+            "event": plan.event.model_dump(mode="json"),
+            "prior_event": (
+                plan.prior_event.model_dump(mode="json") if plan.prior_event is not None else None
+            ),
+        }
+        if plan.policy_version is not None:
+            payload.update(
+                {
+                    "policy_version": plan.policy_version,
+                    "wire_contract_version": plan.wire_contract_version,
+                    "account_key": plan.account_key,
+                    "account_label": plan.account_label,
+                    "provider_binding_fingerprint": plan.provider_binding_fingerprint,
+                    "calendar_target": plan.calendar_target,
+                    "id_assignment": plan.id_assignment,
+                    "provider_dedupe_policy": plan.provider_dedupe_policy,
+                }
+            )
         self._session.add(
             CalendarMutationPlanRow(
                 id=plan.id,
@@ -339,15 +368,7 @@ class CommunicationRepository:
                 kind=plan.kind.value,
                 fingerprint=plan.fingerprint,
                 encrypted_payload=self._cipher.encrypt_json(
-                    {
-                        "event": plan.event.model_dump(mode="json"),
-                        "prior_event": (
-                            plan.prior_event.model_dump(mode="json")
-                            if plan.prior_event is not None
-                            else None
-                        ),
-                    },
-                    context=f"calendar-plan:{plan.id}:payload",
+                    payload, context=f"calendar-plan:{plan.id}:payload"
                 ),
                 created_at=plan.created_at,
             )
@@ -362,19 +383,41 @@ class CommunicationRepository:
         payload = self._cipher.decrypt_json(
             row.encrypted_payload, context=f"calendar-plan:{row.id}:payload"
         )
-        return CalendarMutationPlan(
-            id=row.id,
-            provider=IntegrationProvider(row.provider),
-            workflow_id=row.workflow_id,
-            event=CalendarEventSnapshot.model_validate(payload["event"]),
-            prior_event=(
-                CalendarEventSnapshot.model_validate(payload["prior_event"])
-                if payload["prior_event"] is not None
-                else None
-            ),
-            kind=MutationKind(row.kind),
-            fingerprint=row.fingerprint,
-            created_at=_utc(row.created_at),
+        return CalendarMutationPlan.model_validate(
+            {
+                "id": row.id,
+                "provider": row.provider,
+                "workflow_id": row.workflow_id,
+                "event": (
+                    CalendarCreateFields.model_validate(payload["event"])
+                    if payload.get("policy_version") == "calendar-attempt-v1"
+                    else CalendarEventSnapshot.model_validate(payload["event"])
+                ),
+                "prior_event": (
+                    CalendarEventSnapshot.model_validate(payload["prior_event"])
+                    if payload["prior_event"] is not None
+                    else None
+                ),
+                "kind": row.kind,
+                "fingerprint": row.fingerprint,
+                "created_at": _utc(row.created_at),
+                "policy_version": payload.get("policy_version"),
+                "wire_contract_version": payload.get("wire_contract_version"),
+                "account_key": payload.get("account_key"),
+                "account_label": payload.get("account_label"),
+                "provider_binding_fingerprint": payload.get("provider_binding_fingerprint"),
+                "calendar_target": payload.get("calendar_target"),
+                "id_assignment": payload.get("id_assignment"),
+                "provider_dedupe_policy": payload.get("provider_dedupe_policy"),
+            }
+        )
+
+    def workflow_exists(self, workflow_id: str) -> bool:
+        return (
+            self._session.scalar(
+                select(ApplicationRow.id).where(ApplicationRow.workflow_id == workflow_id)
+            )
+            is not None
         )
 
     def add_audit(self, audit: MutationAudit) -> MutationAudit:
@@ -407,6 +450,19 @@ class CommunicationRepository:
                 or row.fingerprint != audit.fingerprint
             ):
                 raise ValueError("Idempotency key is already bound to a different mutation")
+            if row.kind in {
+                MutationKind.CREATE_CALENDAR_EVENT.value,
+                MutationKind.UPDATE_CALENDAR_EVENT.value,
+            } and self._session.scalar(
+                select(CalendarMutationClaimRow.audit_id).where(
+                    CalendarMutationClaimRow.audit_id == row.id
+                )
+            ):
+                if self._audit(row) == audit:
+                    return audit
+                raise ValueError(
+                    "Claimed calendar outcomes require the immutable terminal transition"
+                )
             row.status = audit.status.value
             row.confirmed_by = audit.confirmed_by
             row.provider_resource_id = audit.provider_resource_id
@@ -469,6 +525,156 @@ class CommunicationRepository:
                 raise ValueError("Mail send reservation could not be verified") from None
             return winner, False
 
+    def find_calendar_audit(self, plan_id: str) -> MutationAudit | None:
+        row = self._session.scalar(
+            select(CommunicationMutationAuditRow)
+            .join(
+                CalendarMutationClaimRow,
+                CalendarMutationClaimRow.audit_id == CommunicationMutationAuditRow.id,
+            )
+            .where(
+                CalendarMutationClaimRow.plan_id == plan_id,
+                CommunicationMutationAuditRow.kind.in_(
+                    (
+                        MutationKind.CREATE_CALENDAR_EVENT.value,
+                        MutationKind.UPDATE_CALENDAR_EVENT.value,
+                    )
+                ),
+            )
+            .limit(1)
+        )
+        return self._audit(row) if row else None
+
+    def _has_unclaimed_calendar_audit(self, plan_id: str) -> bool:
+        return (
+            self._session.scalar(
+                select(CommunicationMutationAuditRow.id)
+                .outerjoin(
+                    CalendarMutationClaimRow,
+                    CalendarMutationClaimRow.audit_id == CommunicationMutationAuditRow.id,
+                )
+                .where(
+                    CommunicationMutationAuditRow.resource_id == plan_id,
+                    CommunicationMutationAuditRow.kind.in_(
+                        (
+                            MutationKind.CREATE_CALENDAR_EVENT.value,
+                            MutationKind.UPDATE_CALENDAR_EVENT.value,
+                        )
+                    ),
+                    CalendarMutationClaimRow.audit_id.is_(None),
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    def claim_calendar_mutation(self, audit: MutationAudit) -> tuple[MutationAudit, bool]:
+        if (
+            audit.kind
+            not in {MutationKind.CREATE_CALENDAR_EVENT, MutationKind.UPDATE_CALENDAR_EVENT}
+            or audit.provider
+            not in {
+                IntegrationProvider.GOOGLE_CALENDAR,
+                IntegrationProvider.OUTLOOK_CALENDAR,
+            }
+            or audit.status is not MutationStatus.PLANNED
+            or audit.provider_resource_id is not None
+            or audit.error_code is not None
+        ):
+            raise ValueError("Invalid calendar mutation reservation")
+        prior = self.find_calendar_audit(audit.resource_id)
+        if prior is not None:
+            return prior, False
+        if self._has_unclaimed_calendar_audit(audit.resource_id):
+            raise ValueError(
+                "Calendar mutation history is unclaimed; inspect and restore the database"
+            )
+        try:
+            self._session.add(
+                CommunicationMutationAuditRow(
+                    id=audit.id,
+                    kind=audit.kind.value,
+                    provider=audit.provider.value,
+                    resource_id=audit.resource_id,
+                    idempotency_key=audit.idempotency_key,
+                    fingerprint=audit.fingerprint,
+                    status=audit.status.value,
+                    confirmed_by=audit.confirmed_by,
+                    provider_resource_id=audit.provider_resource_id,
+                    error_code=audit.error_code,
+                    occurred_at=audit.occurred_at,
+                )
+            )
+            # Flush the audit first for immediate foreign-key enforcement; it
+            # remains uncommitted until the unique per-plan claim also succeeds.
+            self._session.flush()
+            self._session.add(
+                CalendarMutationClaimRow(plan_id=audit.resource_id, audit_id=audit.id)
+            )
+            self._session.commit()
+            return audit, True
+        except IntegrityError:
+            self._session.rollback()
+            winner = self.find_calendar_audit(audit.resource_id) or self.find_audit_by_idempotency(
+                audit.idempotency_key
+            )
+            if winner is None:
+                raise ValueError("Calendar mutation reservation could not be verified") from None
+            return winner, False
+
+    def finish_calendar_mutation(self, audit: MutationAudit) -> MutationAudit:
+        provider_id = audit.provider_resource_id
+        if audit.status is MutationStatus.CONFIRMED:
+            valid = (
+                provider_id is not None
+                and provider_id.isascii()
+                and all(32 < ord(character) < 127 for character in provider_id)
+                and audit.error_code is None
+            )
+        elif audit.status in {MutationStatus.FAILED, MutationStatus.UNCERTAIN}:
+            valid = provider_id is None and bool(audit.error_code)
+        else:
+            valid = False
+        if not valid:
+            raise ValueError("Invalid calendar mutation outcome")
+        result = self._session.execute(
+            update(CommunicationMutationAuditRow)
+            .where(
+                CommunicationMutationAuditRow.id == audit.id,
+                CommunicationMutationAuditRow.kind == audit.kind.value,
+                CommunicationMutationAuditRow.provider == audit.provider.value,
+                CommunicationMutationAuditRow.resource_id == audit.resource_id,
+                CommunicationMutationAuditRow.idempotency_key == audit.idempotency_key,
+                CommunicationMutationAuditRow.fingerprint == audit.fingerprint,
+                CommunicationMutationAuditRow.confirmed_by == audit.confirmed_by,
+                CommunicationMutationAuditRow.status == MutationStatus.PLANNED.value,
+                exists().where(
+                    CalendarMutationClaimRow.plan_id == audit.resource_id,
+                    CalendarMutationClaimRow.audit_id == audit.id,
+                    CalendarMutationPlanRow.id == CalendarMutationClaimRow.plan_id,
+                    CalendarMutationPlanRow.provider == audit.provider.value,
+                    CalendarMutationPlanRow.kind == audit.kind.value,
+                    CalendarMutationPlanRow.fingerprint == audit.fingerprint,
+                ),
+            )
+            .values(
+                status=audit.status.value,
+                provider_resource_id=audit.provider_resource_id,
+                error_code=audit.error_code,
+                occurred_at=audit.occurred_at,
+            )
+        )
+        if getattr(result, "rowcount", None) != 1:
+            self._session.rollback()
+            existing = self.find_calendar_audit(audit.resource_id)
+            if existing == audit:
+                return existing
+            raise ValueError(
+                "Calendar mutation outcome could not be recorded; inspect the provider and plan"
+            )
+        self._session.commit()
+        return audit
+
     def list_audits(self) -> list[MutationAudit]:
         rows = self._session.scalars(
             select(CommunicationMutationAuditRow).order_by(
@@ -507,12 +713,11 @@ class CommunicationRepository:
         payload = self._cipher.decrypt_json(
             row.encrypted_analysis, context=f"communication:{row.id}:analysis"
         )
-        source_account_key = payload.get("source_account_key")
+        source_account_key = _optional_text(payload, "source_account_key")
+        source_connection_fingerprint = _optional_text(payload, "source_connection_fingerprint")
         if (source_account_key or "0" * 64) != row.source_account_key:
             raise ValueError("Stored correspondence account binding could not be verified")
-        if (
-            payload.get("source_connection_fingerprint") or "0" * 64
-        ) != row.source_connection_fingerprint:
+        if (source_connection_fingerprint or "0" * 64) != row.source_connection_fingerprint:
             raise ValueError("Stored correspondence connection binding could not be verified")
         return CommunicationRecord(
             id=row.id,
@@ -520,13 +725,13 @@ class CommunicationRepository:
             received_at=_utc(row.received_at),
             created_at=_utc(row.created_at),
             source_account_key=source_account_key,
-            source_connection_fingerprint=payload.get("source_connection_fingerprint"),
+            source_connection_fingerprint=source_connection_fingerprint,
             reply_context=(
                 MailReplyContext.model_validate(payload["reply_context"])
                 if payload.get("reply_context") is not None
                 else None
             ),
-            reply_unavailable_reason=payload.get("reply_unavailable_reason"),
+            reply_unavailable_reason=_optional_text(payload, "reply_unavailable_reason"),
         )
 
     def _draft(self, row: OutboundDraftRow) -> OutboundDraft:
@@ -550,10 +755,10 @@ class CommunicationRepository:
                 if payload.get("attachment_manifest") is not None
                 else None
             ),
-            provider_binding_fingerprint=payload.get("provider_binding_fingerprint"),
+            provider_binding_fingerprint=_optional_text(payload, "provider_binding_fingerprint"),
             mode=MailMode(str(payload["mode"])) if payload.get("mode") is not None else None,
-            account_key=payload.get("account_key"),
-            account_label=payload.get("account_label"),
+            account_key=_optional_text(payload, "account_key"),
+            account_label=_optional_text(payload, "account_label"),
             reply_context=(
                 MailReplyContext.model_validate(payload["reply_context"])
                 if payload.get("reply_context") is not None

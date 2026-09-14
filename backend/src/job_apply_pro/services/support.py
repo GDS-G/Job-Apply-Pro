@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Durable Restore Rollback"
+    BUILD_NAME = "Calendar Attempt Admission"
 
     def __init__(
         self,

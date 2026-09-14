@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
+import time
 import unicodedata
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -10,12 +12,14 @@ from email.message import EmailMessage
 from email.policy import SMTP
 from typing import cast
 from urllib.parse import quote, urlsplit
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from pydantic import SecretStr
 
 from job_apply_pro.domain.communications import (
+    CalendarCreateFields,
     CalendarEventSnapshot,
     IntegrationProvider,
     MailMode,
@@ -38,10 +42,14 @@ from job_apply_pro.domain.mail_threading import (
     validate_reply_context,
 )
 from job_apply_pro.integrations.communications import (
+    MAX_CALENDAR_CREATE_WIRE_BYTES,
+    ProviderCalendarNotAppliedError,
+    ProviderCalendarUncertainError,
     ProviderMessageBatch,
     ProviderMutationError,
     ProviderSendUncertainError,
     reject_mail_attachments,
+    validate_calendar_create,
 )
 from job_apply_pro.integrations.oauth import AccessTokenProvider, OAuthAuthorizationError
 
@@ -55,6 +63,131 @@ MAX_CONTINUATION_TOKEN_CHARACTERS = 8_000
 MAX_GMAIL_MIME_PARTS = 500
 MAX_ENCODED_MESSAGE_BODY_CHARACTERS = 200_000
 MAX_MESSAGE_BODY_CHARACTERS = 100_000
+MAX_CALENDAR_RESPONSE_BYTES = 65_536
+CALENDAR_POST_TIMEOUT_SECONDS = 30.0
+
+
+def _calendar_native_attempt_key(idempotency_key: str, provider: IntegrationProvider) -> str:
+    """Derive a provider-native replay key without exposing the local approval key."""
+    if not isinstance(idempotency_key, str) or not 8 <= len(idempotency_key) <= 200:
+        raise ProviderCalendarNotAppliedError("Calendar attempt identity is invalid")
+    digest = hashlib.sha256(
+        b"job-apply-pro-calendar-v1\0" + idempotency_key.encode("utf-8")
+    ).digest()
+    if provider is IntegrationProvider.GOOGLE_CALENDAR:
+        return base64.b32hexencode(digest).decode("ascii").rstrip("=").lower()
+    if provider is IntegrationProvider.OUTLOOK_CALENDAR:
+        return str(UUID(bytes=digest[:16], version=5))
+    raise ProviderCalendarNotAppliedError("Calendar provider is unsupported")
+
+
+def _calendar_post(
+    client: httpx.Client,
+    payload: dict[str, object],
+    tokens: AccessTokenProvider,
+    provider: IntegrationProvider,
+    idempotency_key: str,
+) -> str:
+    """One bounded CREATE attempt with a provider-native reconciliation key."""
+    targets = {
+        IntegrationProvider.GOOGLE_CALENDAR: (
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=none",
+            200,
+            re.compile(r"[0-9a-v]{5,500}"),
+        ),
+        IntegrationProvider.OUTLOOK_CALENDAR: (
+            "https://graph.microsoft.com/v1.0/me/events",
+            201,
+            re.compile(r"[A-Za-z0-9_+/-]+={0,2}"),
+        ),
+    }
+    try:
+        url, expected_status, identifier = targets[provider]
+        native_key = _calendar_native_attempt_key(idempotency_key, provider)
+        request_payload = dict(payload)
+        request_payload[
+            "id" if provider is IntegrationProvider.GOOGLE_CALENDAR else "transactionId"
+        ] = native_key
+        encoded = json.dumps(
+            request_payload, ensure_ascii=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        if len(encoded) > MAX_CALENDAR_CREATE_WIRE_BYTES:
+            raise ValueError
+    except ProviderCalendarNotAppliedError:
+        raise
+    except (KeyError, ValueError, TypeError, UnicodeError) as error:
+        raise ProviderCalendarNotAppliedError(
+            "Calendar creation payload is invalid or unsupported"
+        ) from error
+    try:
+        token = tokens.access_token(provider)
+        if (
+            not isinstance(token, str)
+            or not 1 <= len(token) <= 16_384
+            or any(not 33 <= ord(character) <= 126 for character in token)
+        ):
+            raise ValueError
+    except Exception as error:
+        raise ProviderCalendarNotAppliedError(
+            "Calendar provider authorization is unavailable"
+        ) from error
+    deadline = time.monotonic() + CALENDAR_POST_TIMEOUT_SECONDS
+    result: str | None = None
+    try:
+        with client.stream(
+            "POST",
+            url,
+            content=encoded,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "Accept-Encoding": "identity",
+                "Content-Type": "application/json",
+            },
+            timeout=CALENDAR_POST_TIMEOUT_SECONDS,
+            follow_redirects=False,
+            auth=None,
+        ) as response:
+            if time.monotonic() >= deadline:
+                raise ProviderCalendarUncertainError()
+            if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+                raise ProviderCalendarUncertainError()
+            if response.status_code in {400, 401, 403, 404, 413, 415, 422, 429}:
+                # Only a cleanly closed response establishes a definite rejection.
+                pass
+            else:
+                if response.status_code != expected_status:
+                    raise ProviderCalendarUncertainError()
+                body = bytearray()
+                # Count raw transport chunks without decompression or chunk aggregation.
+                # This bounds retained bytes, not the transport's peak allocation.
+                for chunk in response.iter_raw():
+                    if (
+                        len(body) + len(chunk) > MAX_CALENDAR_RESPONSE_BYTES
+                        or time.monotonic() >= deadline
+                    ):
+                        raise ProviderCalendarUncertainError()
+                    body.extend(chunk)
+                data = json.loads(body)
+                value = data.get("id") if isinstance(data, dict) else None
+                if (
+                    not isinstance(value, str)
+                    or len(value) > 500
+                    or identifier.fullmatch(value) is None
+                    or (provider is IntegrationProvider.GOOGLE_CALENDAR and value != native_key)
+                    or time.monotonic() >= deadline
+                ):
+                    raise ProviderCalendarUncertainError()
+                result = value
+        if time.monotonic() >= deadline:
+            raise ProviderCalendarUncertainError()
+    except ProviderCalendarUncertainError:
+        raise
+    except Exception as error:
+        raise ProviderCalendarUncertainError() from error
+    if result is None:
+        raise ProviderCalendarNotAppliedError("The calendar provider rejected the create request")
+    return result
 
 
 def _mail_post(
@@ -891,7 +1024,7 @@ class GoogleCalendarProvider:
 
     def __init__(self, tokens: AccessTokenProvider, *, client: httpx.Client | None = None) -> None:
         self._tokens = tokens
-        self._client = client or httpx.Client(timeout=30)
+        self._client = client or httpx.Client(timeout=30, follow_redirects=False)
 
     def list_events(self, *, start_at: datetime, end_at: datetime) -> list[CalendarEventSnapshot]:
         items = _google_collection(
@@ -910,33 +1043,18 @@ class GoogleCalendarProvider:
         )
         return [self._event(item) for item in items]
 
-    def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
-        payload = _json(
-            self._client.post(
-                self._base,
-                json=self._payload(event),
-                headers={
-                    **_token_headers(self._tokens, self.provider),
-                    "X-Job-Apply-Pro-Idempotency-Key": idempotency_key,
-                },
-            ),
-            "Google Calendar event creation",
-        )
-        return self._identifier(payload, "Google Calendar create")
+    def create_event(self, event: CalendarCreateFields, *, idempotency_key: str) -> str:
+        try:
+            payload = self._payload(validate_calendar_create(event))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ProviderCalendarNotAppliedError(
+                "Calendar creation payload is invalid or unsupported"
+            ) from error
+        return _calendar_post(self._client, payload, self._tokens, self.provider, idempotency_key)
 
     def update_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
-        payload = _json(
-            self._client.put(
-                f"{self._base}/{_path_segment(event.provider_event_id)}",
-                json=self._payload(event),
-                headers={
-                    **_token_headers(self._tokens, self.provider),
-                    "X-Job-Apply-Pro-Idempotency-Key": idempotency_key,
-                },
-            ),
-            "Google Calendar event update",
-        )
-        return self._identifier(payload, "Google Calendar update")
+        del event, idempotency_key
+        raise ProviderMutationError("Calendar updates are not supported; no update was requested")
 
     @staticmethod
     def _event(raw: dict[str, object]) -> CalendarEventSnapshot:
@@ -964,21 +1082,17 @@ class GoogleCalendarProvider:
         )
 
     @staticmethod
-    def _payload(event: CalendarEventSnapshot) -> dict[str, object]:
+    def _payload(event: CalendarCreateFields) -> dict[str, object]:
         return {
             "summary": event.title,
             "start": {"dateTime": event.start_at.isoformat(), "timeZone": event.time_zone},
             "end": {"dateTime": event.end_at.isoformat(), "timeZone": event.time_zone},
             "attendees": [{"email": value} for value in event.attendees],
             "location": event.location,
+            "reminders": {"useDefault": False, "overrides": []},
+            "visibility": "private",
+            "transparency": "opaque",
         }
-
-    @staticmethod
-    def _identifier(payload: dict[str, object], action: str) -> str:
-        value = payload.get("id")
-        if not isinstance(value, str) or not value:
-            raise ProviderMutationError(f"{action} did not return an event identifier")
-        return value
 
 
 class OutlookCalendarProvider:
@@ -987,7 +1101,7 @@ class OutlookCalendarProvider:
 
     def __init__(self, tokens: AccessTokenProvider, *, client: httpx.Client | None = None) -> None:
         self._tokens = tokens
-        self._client = client or httpx.Client(timeout=30)
+        self._client = client or httpx.Client(timeout=30, follow_redirects=False)
 
     def list_events(self, *, start_at: datetime, end_at: datetime) -> list[CalendarEventSnapshot]:
         values = _graph_collection(
@@ -1004,33 +1118,18 @@ class OutlookCalendarProvider:
         )
         return [self._event(item) for item in values if item.get("isCancelled") is not True]
 
-    def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
-        payload = _json(
-            self._client.post(
-                self._base,
-                json=self._payload(event),
-                headers={
-                    **_token_headers(self._tokens, self.provider),
-                    "X-Job-Apply-Pro-Idempotency-Key": idempotency_key,
-                },
-            ),
-            "Outlook Calendar event creation",
-        )
-        return self._identifier(payload, "Outlook Calendar create")
+    def create_event(self, event: CalendarCreateFields, *, idempotency_key: str) -> str:
+        try:
+            payload = self._payload(validate_calendar_create(event))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ProviderCalendarNotAppliedError(
+                "Calendar creation payload is invalid or unsupported"
+            ) from error
+        return _calendar_post(self._client, payload, self._tokens, self.provider, idempotency_key)
 
     def update_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
-        payload = _json(
-            self._client.patch(
-                f"{self._base}/{_path_segment(event.provider_event_id)}",
-                json=self._payload(event),
-                headers={
-                    **_token_headers(self._tokens, self.provider),
-                    "X-Job-Apply-Pro-Idempotency-Key": idempotency_key,
-                },
-            ),
-            "Outlook Calendar event update",
-        )
-        return self._identifier(payload, "Outlook Calendar update")
+        del event, idempotency_key
+        raise ProviderMutationError("Calendar updates are not supported; no update was requested")
 
     @staticmethod
     def _event(raw: dict[str, object]) -> CalendarEventSnapshot:
@@ -1066,21 +1165,25 @@ class OutlookCalendarProvider:
         )
 
     @staticmethod
-    def _payload(event: CalendarEventSnapshot) -> dict[str, object]:
+    def _payload(event: CalendarCreateFields) -> dict[str, object]:
         return {
             "subject": event.title,
-            "start": {"dateTime": event.start_at.isoformat(), "timeZone": event.time_zone},
-            "end": {"dateTime": event.end_at.isoformat(), "timeZone": event.time_zone},
+            "start": {
+                "dateTime": event.start_at.replace(tzinfo=None).isoformat(),
+                "timeZone": event.time_zone,
+            },
+            "end": {
+                "dateTime": event.end_at.replace(tzinfo=None).isoformat(),
+                "timeZone": event.time_zone,
+            },
             "attendees": [
                 {"emailAddress": {"address": value}, "type": "required"}
                 for value in event.attendees
             ],
             "location": {"displayName": event.location} if event.location else None,
+            "allowNewTimeProposals": False,
+            "isReminderOn": False,
+            "sensitivity": "private",
+            "showAs": "busy",
+            "responseRequested": False,
         }
-
-    @staticmethod
-    def _identifier(payload: dict[str, object], action: str) -> str:
-        value = payload.get("id")
-        if not isinstance(value, str) or not value:
-            raise ProviderMutationError(f"{action} did not return an event identifier")
-        return value

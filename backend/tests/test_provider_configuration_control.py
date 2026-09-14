@@ -1,18 +1,22 @@
 import json
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
+from job_apply_pro.domain.communications import IntegrationProvider, OAuthTokenSet
 from job_apply_pro.main import create_app
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.models import CommunicationConfigurationRow
+from job_apply_pro.storage.oauth_repository import OAuthRepository
 
 
 def _configuration() -> dict[str, object]:
@@ -163,4 +167,77 @@ def test_configuration_import_rejects_secrets_and_environment_override(
         )
     finally:
         environment_client.close()
+        get_settings.cache_clear()
+
+
+def test_explicit_calendar_write_disable_remains_an_authoritative_service_gate(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _client(session, monkeypatch)
+    headers = {"X-Job-Apply-Pro-Token": "configuration-api-token"}
+    write_scope = "https://www.googleapis.com/auth/calendar.events"
+    configuration = {
+        "providers": [
+            {
+                "provider": "GOOGLE_CALENDAR",
+                "credential_reference": "configured-calendar-reference",
+                "account_hint": "candidate@example.test",
+                "granted_scopes": [write_scope],
+                "read_enabled": True,
+                "write_enabled": False,
+            }
+        ],
+        "oauth_clients": [
+            {
+                "provider": "GOOGLE_CALENDAR",
+                "client_id": "public-calendar-client",
+                "requested_scopes": ["openid", "email", write_scope],
+            }
+        ],
+    }
+    now = datetime.now(UTC)
+    try:
+        imported = client.post(
+            "/api/v1/communications/configuration/import",
+            headers=headers,
+            json={"configuration_json": json.dumps(configuration)},
+        )
+        assert imported.status_code == 200
+        OAuthRepository(session, SensitiveDataCipher(StaticKeyProvider(b"c" * 32))).save_tokens(
+            IntegrationProvider.GOOGLE_CALENDAR,
+            "oauth:synthetic-calendar-policy",
+            OAuthTokenSet(
+                access_token=SecretStr("synthetic-calendar-token"),
+                refresh_token=SecretStr("synthetic-calendar-refresh"),
+                expires_at=now + timedelta(hours=1),
+                granted_scopes=["openid", "email", write_scope],
+                account_hint="candidate@example.test",
+                account_identity="synthetic-calendar-account",
+            ),
+            now=now,
+        )
+        response = client.post(
+            "/api/v1/communications/calendar/plans",
+            headers=headers,
+            json={
+                "provider": "GOOGLE_CALENDAR",
+                "event": {
+                    "title": "Policy-gated interview",
+                    "start_at": "2026-10-01T10:00:00-05:00",
+                    "end_at": "2026-10-01T11:00:00-05:00",
+                    "time_zone": "America/Chicago",
+                    "attendees": [],
+                    "attendee_notification_policy": "NONE",
+                    "reminder_policy": "NONE",
+                    "visibility_policy": "PRIVATE",
+                    "availability_policy": "BUSY",
+                    "conferencing_url": None,
+                    "location": None,
+                },
+            },
+        )
+        assert response.status_code == 422
+        assert "write authorization is unavailable" in response.json()["detail"]
+    finally:
+        client.close()
         get_settings.cache_clear()

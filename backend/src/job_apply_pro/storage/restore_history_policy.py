@@ -1,4 +1,4 @@
-"""Explicit schema-0027 forward-restore policy; never reflect an untrusted database.
+"""Explicit schema-0028 forward-restore policy; never reflect an untrusted database.
 
 Source control review is required to admit a new table, column or schema revision.
 The broad dependency set deliberately trades restore availability for preservation.
@@ -277,6 +277,17 @@ TABLES: dict[str, Table] = {
         ),
         ("id",),
         (),
+    ),
+    "calendar_mutation_claims": Table(
+        (
+            Column("plan_id", "text", False, 36),
+            Column("audit_id", "text", False, 36),
+        ),
+        ("plan_id",),
+        (
+            ("plan_id", "calendar_mutation_plans", "id"),
+            ("audit_id", "communication_mutation_audits", "id"),
+        ),
     ),
     "candidate_claims": Table(
         (
@@ -815,6 +826,7 @@ ROOTS = frozenset(
     {
         "communication_mutation_audits",
         "mail_send_claims",
+        "calendar_mutation_claims",
         "calendar_mutation_plans",
         "oauth_credentials",
         "oauth_authorization_sessions",
@@ -853,7 +865,7 @@ EXACT_SETS = frozenset(
 # These mutable snapshots also trigger admission when there is no mutation audit.
 ROOTS = ROOTS | EXACT_SETS
 
-MODERN_REVISION = "20260913_0027"
+MODERN_REVISION = "20260913_0028"
 OPERATIONAL_TABLES = frozenset(
     {"alembic_version", "backup_manifests", "backup_schedules", "restore_plans", "error_records"}
 )
@@ -911,8 +923,9 @@ ENUM_FIELDS.update(
 # Only these complete near-modern shapes are admitted without recorded history.
 # Older, unversioned or unknown schemas need an independently reviewed recovery path.
 LEGACY_EMPTY_REVISIONS = {
-    "20260913_0025": frozenset({"job_readiness_reviews"}),
-    "20260913_0026": frozenset({"job_readiness_reviews"}),
+    "20260913_0025": frozenset({"job_readiness_reviews", "calendar_mutation_claims"}),
+    "20260913_0026": frozenset({"job_readiness_reviews", "calendar_mutation_claims"}),
+    "20260913_0027": frozenset({"calendar_mutation_claims"}),
 }
 
 # SQL uniqueness is checked explicitly even when a corrupted database lost its constraints.
@@ -945,6 +958,7 @@ UNIQUES: dict[str, tuple[tuple[str, ...], ...]] = {
     "oauth_credentials": (("provider",),),
     "communication_mutation_audits": (("idempotency_key",),),
     "mail_send_claims": (("audit_id",),),
+    "calendar_mutation_claims": (("audit_id",),),
     "communication_follow_ups": (("dedupe_key",),),
 }
 

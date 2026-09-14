@@ -54,6 +54,7 @@ from job_apply_pro.integrations.configuration import (
 )
 from job_apply_pro.integrations.oauth import (
     OAUTH_PROVIDERS,
+    BoundCalendarTokenProvider,
     BoundMailTokenProvider,
     OAuthAuthorizationError,
     OAuthConfigurationError,
@@ -133,6 +134,7 @@ def get_communication_service(
     configured = {item.provider: item for item in configuration.providers}
     account_identities: dict[IntegrationProvider, str] = {}
     for provider, client in clients.items():
+        explicit_policy = configured.get(provider)
         state = oauth.state(provider)
         if state.account_identity is not None:
             account_identities[provider] = state.account_identity
@@ -141,12 +143,13 @@ def get_communication_service(
             credential_reference=state.credential_reference,
             account_hint=state.account_hint,
             granted_scopes=state.granted_scopes or client.requested_scopes,
-            read_enabled=True,
-            write_enabled=any(
+            read_enabled=(explicit_policy.read_enabled if explicit_policy is not None else True),
+            write_enabled=(explicit_policy is None or explicit_policy.write_enabled)
+            and any(
                 scope.endswith(
                     ("gmail.send", "Mail.Send", "calendar.events", "Calendars.ReadWrite")
                 )
-                for scope in (state.granted_scopes or client.requested_scopes)
+                for scope in state.granted_scopes
             ),
         )
     message_adapters: dict[IntegrationProvider, MessageProviderAdapter] = {}
@@ -177,12 +180,24 @@ def get_communication_service(
         IntegrationProvider.GOOGLE_CALENDAR in clients
         and oauth.state(IntegrationProvider.GOOGLE_CALENDAR).status.value == "CONNECTED"
     ):
-        calendar_adapters[IntegrationProvider.GOOGLE_CALENDAR] = GoogleCalendarProvider(oauth)
+        calendar_adapters[IntegrationProvider.GOOGLE_CALENDAR] = GoogleCalendarProvider(
+            BoundCalendarTokenProvider(
+                oauth,
+                IntegrationProvider.GOOGLE_CALENDAR,
+                configured[IntegrationProvider.GOOGLE_CALENDAR].credential_reference or "",
+            )
+        )
     if (
         IntegrationProvider.OUTLOOK_CALENDAR in clients
         and oauth.state(IntegrationProvider.OUTLOOK_CALENDAR).status.value == "CONNECTED"
     ):
-        calendar_adapters[IntegrationProvider.OUTLOOK_CALENDAR] = OutlookCalendarProvider(oauth)
+        calendar_adapters[IntegrationProvider.OUTLOOK_CALENDAR] = OutlookCalendarProvider(
+            BoundCalendarTokenProvider(
+                oauth,
+                IntegrationProvider.OUTLOOK_CALENDAR,
+                configured[IntegrationProvider.OUTLOOK_CALENDAR].credential_reference or "",
+            )
+        )
     return CommunicationService(
         CommunicationRepository(session, cipher),
         message_adapters=message_adapters or None,
@@ -489,6 +504,16 @@ def create_calendar_plan(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
         ) from error
+
+
+@router.get("/calendar/plans/{plan_id}", response_model=CalendarMutationPlan)
+def get_calendar_plan(plan_id: str, service: ServiceDependency) -> CalendarMutationPlan:
+    try:
+        return service.get_calendar_plan(plan_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 @router.post("/calendar/plans/{plan_id}/execute", response_model=MutationAudit)

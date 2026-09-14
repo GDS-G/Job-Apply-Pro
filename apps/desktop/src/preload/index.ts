@@ -7,6 +7,7 @@ import type {
   FieldAutomationPermission,
   AnswerLibraryInput,
   BackendRuntimeStatus,
+  CalendarMutationCreate,
   CandidateDocumentImportInput,
   DesktopNotificationDestination,
   DesktopNotificationStatus,
@@ -239,6 +240,14 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("communications:calendar-sync", provider),
     listSyncedCalendarEvents: () =>
       ipcRenderer.invoke("communications:calendar-events"),
+    createCalendarPlan: (input: CalendarMutationCreate) =>
+      ipcRenderer.invoke("communications:calendar-plan-create", input),
+    reviewAndCreateCalendarEvent: (id: string, fingerprint: string) =>
+      ipcRenderer.invoke(
+        "communications:calendar-plan-review-create",
+        id,
+        fingerprint,
+      ),
     listCommunicationRecords: () =>
       ipcRenderer.invoke("communications:records"),
     listCommunicationDrafts: () =>

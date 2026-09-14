@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -622,15 +623,17 @@ def test_outlook_sync_uses_folder_delta_links_and_recovers_reset_state() -> None
         )
 
 
-def test_official_calendar_adapters_list_create_and_update() -> None:
+def test_official_calendar_adapters_list_create_and_refuse_update() -> None:
     start = datetime(2026, 8, 20, 15, tzinfo=UTC)
-    event = CalendarEventSnapshot(
-        provider_event_id="event-1",
+    from job_apply_pro.domain.communications import CalendarCreateFields
+
+    event = CalendarCreateFields(
         title="Interview",
         start_at=start,
         end_at=start + timedelta(hours=1),
         time_zone="UTC",
-        attendees=["owner@example.test", "recruiter@example.test"],
+        attendees=[],
+        attendee_notification_policy="NONE",
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -654,7 +657,11 @@ def test_official_calendar_adapters_list_create_and_update() -> None:
                 },
             )
         if "/calendar/v3/calendars/primary/events" in path:
-            return httpx.Response(200, json={"id": "google-event-saved"})
+            identifier = json.loads(request.content)["id"]
+            return httpx.Response(
+                200,
+                stream=httpx.ByteStream(json.dumps({"id": identifier}).encode()),
+            )
         if path.endswith("/v1.0/me/calendarView"):
             return httpx.Response(
                 200,
@@ -674,7 +681,7 @@ def test_official_calendar_adapters_list_create_and_update() -> None:
                 },
             )
         if "/v1.0/me/events" in path:
-            return httpx.Response(200, json={"id": "outlook-event-saved"})
+            return httpx.Response(201, stream=httpx.ByteStream(b'{"id":"outlook-event-saved"}'))
         return httpx.Response(404)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -686,14 +693,24 @@ def test_official_calendar_adapters_list_create_and_update() -> None:
     assert outlook.list_events(start_at=start, end_at=start + timedelta(days=1))[0].title == (
         "Interview"
     )
-    assert google.create_event(event, idempotency_key="google-create-1") == ("google-event-saved")
-    assert google.update_event(event, idempotency_key="google-update-1") == ("google-event-saved")
+    assert google.create_event(event, idempotency_key="google-create-1")
     assert outlook.create_event(event, idempotency_key="outlook-create-1") == (
         "outlook-event-saved"
     )
-    assert outlook.update_event(event, idempotency_key="outlook-update-1") == (
-        "outlook-event-saved"
+    prior = CalendarEventSnapshot(
+        provider_event_id="event-1",
+        **event.model_dump(
+            exclude={
+                "attendee_notification_policy",
+                "reminder_policy",
+                "visibility_policy",
+                "availability_policy",
+            }
+        ),
     )
+    for adapter in (google, outlook):
+        with pytest.raises(ProviderMutationError):
+            adapter.update_event(prior, idempotency_key="disabled-update")
 
 
 def test_calendar_adapters_normalize_all_day_and_omit_cancelled_events() -> None:

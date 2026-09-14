@@ -1,15 +1,25 @@
 """Forward restore preserves recorded history; this is not a pre-call intent journal."""
 
 import hashlib
+import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from job_apply_pro.domain.communications import (
+    CalendarCreateFields,
+    CalendarEventSnapshot,
+    CalendarMutationPlan,
+    IntegrationProvider,
+    MutationKind,
+)
 from job_apply_pro.domain.job_readiness import (
     QualificationReview,
     ReadinessSelectionReview,
     RequirementsReview,
 )
+from job_apply_pro.domain.mail_threading import validate_mailbox
+from job_apply_pro.integrations.communications import validate_calendar_create
 from job_apply_pro.security.encryption import DecryptionError, SensitiveDataCipher
 from job_apply_pro.security.keys import KeyConfigurationError
 from job_apply_pro.storage.restore_gate_repository import RestoreAdmissionError, checked_path
@@ -80,6 +90,114 @@ ENCRYPTED = {
 }
 
 
+def _calendar_plan_payload(row: Mapping[str, object], payload: dict[str, object]) -> None:
+    """Authenticate the executable meaning of modern and legacy calendar plans."""
+    try:
+        modern = payload.get("policy_version") == "calendar-attempt-v1"
+        expected_keys = (
+            {
+                "event",
+                "prior_event",
+                "policy_version",
+                "wire_contract_version",
+                "account_key",
+                "account_label",
+                "provider_binding_fingerprint",
+                "calendar_target",
+                "id_assignment",
+                "provider_dedupe_policy",
+            }
+            if modern
+            else {"event", "prior_event"}
+        )
+        if set(payload) != expected_keys:
+            raise ValueError
+        event = (
+            validate_calendar_create(CalendarCreateFields.model_validate(payload["event"]))
+            if modern
+            else CalendarEventSnapshot.model_validate(payload["event"])
+        )
+        prior = (
+            CalendarEventSnapshot.model_validate(payload["prior_event"])
+            if payload["prior_event"] is not None
+            else None
+        )
+        plan = CalendarMutationPlan.model_validate(
+            {
+                "id": row["id"],
+                "provider": row["provider"],
+                "workflow_id": row["workflow_id"],
+                "event": event,
+                "prior_event": prior,
+                "kind": row["kind"],
+                "fingerprint": row["fingerprint"],
+                "created_at": row["created_at"],
+                "policy_version": payload.get("policy_version"),
+                "wire_contract_version": payload.get("wire_contract_version"),
+                "account_key": payload.get("account_key"),
+                "account_label": payload.get("account_label"),
+                "provider_binding_fingerprint": payload.get("provider_binding_fingerprint"),
+                "calendar_target": payload.get("calendar_target"),
+                "id_assignment": payload.get("id_assignment"),
+                "provider_dedupe_policy": payload.get("provider_dedupe_policy"),
+            }
+        )
+        if modern and (
+            plan.kind is not MutationKind.CREATE_CALENDAR_EVENT
+            or plan.prior_event is not None
+            or plan.wire_contract_version != "calendar-create-wire-v1"
+            or plan.account_key is None
+            or plan.account_label is None
+            or validate_mailbox(plan.account_label) != plan.account_label
+            or plan.provider_binding_fingerprint is None
+            or plan.calendar_target != "PRIMARY"
+            or plan.id_assignment != "PROVIDER_NATIVE_DEDUPLICATED"
+            or plan.provider_dedupe_policy != "NATIVE_ATTEMPT_KEY_V1"
+        ):
+            raise ValueError
+        if plan.provider not in {
+            IntegrationProvider.GOOGLE_CALENDAR,
+            IntegrationProvider.OUTLOOK_CALENDAR,
+        } or plan.kind not in {
+            MutationKind.CREATE_CALENDAR_EVENT,
+            MutationKind.UPDATE_CALENDAR_EVENT,
+        }:
+            raise ValueError
+        if not modern and (
+            (plan.kind is MutationKind.CREATE_CALENDAR_EVENT and plan.prior_event is not None)
+            or (plan.kind is MutationKind.UPDATE_CALENDAR_EVENT and plan.prior_event is None)
+        ):
+            raise ValueError
+        fingerprint_payload = {
+            "id": plan.id,
+            "provider": plan.provider.value,
+            "workflow_id": plan.workflow_id,
+            "event": plan.event.model_dump(mode="json"),
+            "prior_event": (plan.prior_event.model_dump(mode="json") if plan.prior_event else None),
+        }
+        if modern:
+            fingerprint_payload.update(
+                {
+                    "kind": plan.kind.value,
+                    "policy_version": plan.policy_version,
+                    "wire_contract_version": plan.wire_contract_version,
+                    "account_key": plan.account_key,
+                    "account_label": plan.account_label,
+                    "provider_binding": plan.provider_binding_fingerprint,
+                    "calendar_target": plan.calendar_target,
+                    "id_assignment": plan.id_assignment,
+                    "provider_dedupe_policy": plan.provider_dedupe_policy,
+                }
+            )
+        expected = hashlib.sha256(
+            json.dumps(fingerprint_payload, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest()
+        if expected != plan.fingerprint:
+            raise ValueError
+    except (KeyError, TypeError, ValueError, UnicodeError):
+        raise RestoreHistoryError(UNAVAILABLE) from None
+
+
 def _authenticate(snapshot: HistorySnapshot, cipher: SensitiveDataCipher, deadline: float) -> None:
     reviews: dict[str, RequirementsReview | QualificationReview | ReadinessSelectionReview] = {}
     for table, fields in ENCRYPTED.items():
@@ -107,6 +225,9 @@ def _authenticate(snapshot: HistorySnapshot, cipher: SensitiveDataCipher, deadli
                         for key in ("source_account_key", "source_connection_fingerprint"):
                             if (payload.get(key) or "0" * 64) != row.get(key):
                                 raise RestoreHistoryError(UNAVAILABLE)
+                    if table == "calendar_mutation_plans":
+                        assert isinstance(payload, dict)
+                        _calendar_plan_payload(row, payload)
                     if table == "job_readiness_reviews":
                         record: RequirementsReview | QualificationReview | ReadinessSelectionReview
                         if row["kind"] == "REQUIREMENTS":

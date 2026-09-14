@@ -138,12 +138,10 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Durable Restore Rollback v0.61.0-alpha.1"),
+      screen.getByText("Calendar Attempt Admission v0.62.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        /production submission and provider writes are disabled/i,
-      ),
+      screen.getByText(/production application submission remains disabled/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/reference ATS vertical slice/i),
@@ -318,7 +316,69 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("syncs a connected calendar and reports reconciliation counts", async () => {
+  it.each([false, true])(
+    "keeps connected calendar write=%s sync-only and reports reconciliation counts",
+    async (writeEnabled) => {
+      vi.spyOn(
+        window.jobApplyPro.workbench,
+        "listIntegrationHealth",
+      ).mockResolvedValue([
+        {
+          provider: "GOOGLE_CALENDAR",
+          status: "CONNECTED",
+          message: "Provider adapter is connected",
+          read_enabled: true,
+          write_enabled: writeEnabled,
+          granted_scopes: ["calendar.readonly"],
+        },
+      ]);
+      const sync = vi
+        .spyOn(window.jobApplyPro.workbench, "syncProviderCalendar")
+        .mockResolvedValue({
+          provider: "GOOGLE_CALENDAR",
+          fetched_count: 3,
+          stored_count: 3,
+          removed_count: 1,
+          window_start: "2026-08-10T00:00:00Z",
+          window_end: "2026-10-10T00:00:00Z",
+          synced_at: "2026-08-11T00:00:00Z",
+        });
+
+      render(<App />);
+      fireEvent.click(
+        await screen.findByRole("button", { name: /sync calendar/i }),
+      );
+
+      expect(sync).toHaveBeenCalledWith("GOOGLE_CALENDAR");
+      expect(
+        await screen.findByText(/fetched 3, stored 3, removed 1 stale events/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: /create event|update event|confirm calendar|execute calendar/i,
+        }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it("shows calendar creation only with configured and actually granted write capability", async () => {
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "getProviderConfigurationStatus",
+    ).mockResolvedValue({
+      source: "ENCRYPTED_DATABASE",
+      providers: [
+        {
+          provider: "GOOGLE_CALENDAR",
+          oauth_configured: true,
+          requested_scopes: ["https://www.googleapis.com/auth/calendar.events"],
+          read_enabled: true,
+          write_enabled: true,
+        },
+      ],
+      automatic_categories: [],
+      updated_at: "2026-09-13T10:00:00.000Z",
+    });
     vi.spyOn(
       window.jobApplyPro.workbench,
       "listIntegrationHealth",
@@ -328,31 +388,23 @@ describe("App", () => {
         status: "CONNECTED",
         message: "Provider adapter is connected",
         read_enabled: true,
-        write_enabled: false,
-        granted_scopes: ["calendar.readonly"],
+        write_enabled: true,
+        granted_scopes: ["https://www.googleapis.com/auth/calendar.events"],
+        account_hint: "candidate@example.invalid",
       },
     ]);
-    const sync = vi
-      .spyOn(window.jobApplyPro.workbench, "syncProviderCalendar")
-      .mockResolvedValue({
-        provider: "GOOGLE_CALENDAR",
-        fetched_count: 3,
-        stored_count: 3,
-        removed_count: 1,
-        window_start: "2026-08-10T00:00:00Z",
-        window_end: "2026-10-10T00:00:00Z",
-        synced_at: "2026-08-11T00:00:00Z",
-      });
 
     render(<App />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: /sync calendar/i }),
-    );
 
-    expect(sync).toHaveBeenCalledWith("GOOGLE_CALENDAR");
     expect(
-      await screen.findByText(/fetched 3, stored 3, removed 1 stale events/i),
+      await screen.findByRole("heading", {
+        name: "Reviewed calendar event creation",
+      }),
     ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/attendee/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Fixed event policy/i)).toHaveTextContent(
+      /private.*busy.*reminders are disabled.*attendees.*none/i,
+    );
   });
 
   it("imports a reviewed provider configuration without exposing its contents", async () => {

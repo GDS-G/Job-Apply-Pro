@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from job_apply_pro.api.routes.communications import get_communication_service
 from job_apply_pro.config import get_settings
 from job_apply_pro.domain.communications import (
+    CalendarCreateFields,
     CalendarEventSnapshot,
     CalendarMutationCreate,
     DraftCreate,
@@ -77,9 +78,19 @@ def _service(
                 provider=IntegrationProvider.GMAIL,
                 credential_reference="fixture-epoch",
                 account_hint="candidate@example.test",
-            )
+            ),
+            IntegrationProvider.GOOGLE_CALENDAR: ProviderConnectionConfig(
+                provider=IntegrationProvider.GOOGLE_CALENDAR,
+                credential_reference="fixture-calendar-epoch",
+                account_hint="candidate@example.test",
+                granted_scopes=["https://www.googleapis.com/auth/calendar.events"],
+                write_enabled=True,
+            ),
         },
-        provider_account_identities={IntegrationProvider.GMAIL: "fixture-account"},
+        provider_account_identities={
+            IntegrationProvider.GMAIL: "fixture-account",
+            IntegrationProvider.GOOGLE_CALENDAR: "fixture-calendar-account",
+        },
     )
 
 
@@ -508,15 +519,13 @@ def test_calendar_mutation_and_follow_up_are_audited_and_deduplicated(
     plan = service.plan_calendar_mutation(
         CalendarMutationCreate(
             provider=IntegrationProvider.GOOGLE_CALENDAR,
-            workflow_id="workflow-1",
-            event=CalendarEventSnapshot(
-                provider_event_id="local-interview-1",
+            event=CalendarCreateFields(
                 title="Interview with Example Co",
                 start_at=start,
                 end_at=start + timedelta(hours=1),
                 time_zone="UTC",
-                attendees=["candidate@example.test", "recruiter@example.test"],
-                conferencing_url="https://meet.example.test/sanitized",
+                attendees=[],
+                attendee_notification_policy="NONE",
             ),
         )
     )

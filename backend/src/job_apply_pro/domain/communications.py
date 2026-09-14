@@ -440,7 +440,7 @@ class DraftCreate(BaseModel):
 
     analysis_id: str = Field(min_length=1, max_length=100)
     mode: MailMode
-    workflow_id: str | None = Field(default=None, max_length=100)
+    workflow_id: str | None = Field(default=None, min_length=1, max_length=100)
     provider: IntegrationProvider | None = None
     recipient: str | None = Field(default=None, min_length=1, max_length=500)
     subject: str | None = Field(default=None, min_length=1, max_length=1_000)
@@ -520,24 +520,63 @@ class MutationAudit(BaseModel):
     occurred_at: datetime
 
 
+class CalendarCreateFields(BaseModel):
+    """Reviewed CREATE values with invitations disabled for this release."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    title: str = Field(min_length=1, max_length=1_000)
+    start_at: datetime
+    end_at: datetime
+    time_zone: str = Field(min_length=1, max_length=100)
+    attendees: list[str] = Field(default_factory=list, max_length=100)
+    attendee_notification_policy: Literal["NONE"] = "NONE"
+    reminder_policy: Literal["NONE"] = "NONE"
+    visibility_policy: Literal["PRIVATE"] = "PRIVATE"
+    availability_policy: Literal["BUSY"] = "BUSY"
+    conferencing_url: str | None = Field(default=None, max_length=2_000)
+    location: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> "CalendarCreateFields":
+        if any(
+            value.tzinfo is None or value.utcoffset() is None
+            for value in (self.start_at, self.end_at)
+        ):
+            raise ValueError("calendar event timestamps must include UTC offsets")
+        if self.end_at <= self.start_at:
+            raise ValueError("calendar event end_at must be after start_at")
+        return self
+
+
 class CalendarMutationCreate(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     provider: IntegrationProvider
     workflow_id: str | None = Field(default=None, max_length=100)
-    event: CalendarEventSnapshot
+    event: CalendarCreateFields
     prior_event: CalendarEventSnapshot | None = None
 
 
 class CalendarMutationPlan(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str = Field(min_length=1, max_length=100)
     provider: IntegrationProvider
     workflow_id: str | None = None
-    event: CalendarEventSnapshot
+    event: CalendarCreateFields | CalendarEventSnapshot
     prior_event: CalendarEventSnapshot | None = None
     kind: MutationKind
+    policy_version: Literal["calendar-attempt-v1"] | None = None
+    wire_contract_version: Literal["calendar-create-wire-v1"] | None = None
+    account_key: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    account_label: str | None = Field(default=None, max_length=320)
+    provider_binding_fingerprint: str | None = Field(
+        default=None, pattern=r"^[a-f0-9]{64}$", exclude=True
+    )
+    calendar_target: Literal["PRIMARY"] | None = None
+    id_assignment: Literal["PROVIDER_NATIVE_DEDUPLICATED"] | None = None
+    provider_dedupe_policy: Literal["NATIVE_ATTEMPT_KEY_V1"] | None = None
     fingerprint: str = Field(min_length=64, max_length=64)
     created_at: datetime
 

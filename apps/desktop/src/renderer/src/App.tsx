@@ -71,6 +71,10 @@ import type {
 
 import { MediaCleanupPanel } from "./MediaCleanupPanel";
 import { MailDraftPanel } from "./MailDraftPanel";
+import {
+  CalendarEventPanel,
+  eligibleCalendarWriteProviders,
+} from "./CalendarEventPanel";
 import { GreenhouseDiscoveryPanel } from "./GreenhouseDiscoveryPanel";
 import { JobReadinessPanel } from "./JobReadinessPanel";
 
@@ -207,6 +211,11 @@ export function App() {
     workflows.find((workflow) => workflow.workflow_id === selectedId) ??
     workflows[0] ??
     null;
+  const calendarWriteProviders = useMemo(
+    () =>
+      eligibleCalendarWriteProviders(integrationHealth, providerConfiguration),
+    [integrationHealth, providerConfiguration],
+  );
 
   const refreshWorkflows = useCallback(async () => {
     try {
@@ -1482,8 +1491,9 @@ export function App() {
               <ShieldCheck size={18} /> <strong>Supervised mode</strong>
             </div>
             <p>
-              Production submission and provider writes are disabled. Every
-              email or calendar mutation requires an exact review fingerprint.
+              Production application submission remains disabled. Provider
+              writes require a configured, connected write scope and an exact
+              native review fingerprint.
             </p>
           </div>
           <button className="nav-item" type="button">
@@ -1557,11 +1567,11 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Durable Restore Rollback v0.61.0-alpha.1</strong>
+              <strong>Calendar Attempt Admission v0.62.0-alpha.1</strong>
               <p>
-                Bundled Windows runtime, offline recovery, redacted diagnostics,
-                accessibility gates, and signed-update controls are ready for
-                release validation.
+                Account-bound, create-only calendar plans now require exact
+                native review and one durable provider attempt, with invitations
+                disabled.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3868,6 +3878,13 @@ export function App() {
                 </article>
               ))}
             </div>
+            {calendarWriteProviders.length ? (
+              <CalendarEventPanel
+                backendReady={status.state === "ready"}
+                providers={calendarWriteProviders}
+                workflows={workflows}
+              />
+            ) : null}
             {providerSyncMessage ? (
               <div className="provider-sync-status" role="status">
                 <Check size={16} />
