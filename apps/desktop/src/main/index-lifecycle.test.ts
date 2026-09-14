@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     restore: () => void;
   }[],
   lock: true,
+  packaged: false,
   appQuit: vi.fn(),
   key: vi.fn(async () => "synthetic-key"),
   createSupervisor: vi.fn(),
@@ -24,12 +25,15 @@ const mocks = vi.hoisted(() => ({
   notificationStop: vi.fn(),
   errorBox: vi.fn(),
   admission: vi.fn<() => void>(),
+  recovery: vi.fn(async () => "cancelled" as const),
   installGate: undefined as (() => Promise<void>) | undefined,
 }));
 
 vi.mock("electron", () => ({
   app: {
-    isPackaged: false,
+    get isPackaged() {
+      return mocks.packaged;
+    },
     requestSingleInstanceLock: () => mocks.lock,
     quit: mocks.appQuit,
     whenReady: async () => undefined,
@@ -66,8 +70,8 @@ vi.mock("electron", () => ({
 }));
 vi.mock("./backend-supervisor.js", () => ({
   BackendSupervisor: class {
-    constructor() {
-      mocks.createSupervisor();
+    constructor(options: unknown) {
+      mocks.createSupervisor(options);
     }
     shutdown = mocks.shutdown;
     prepareUpdate = mocks.prepareUpdate;
@@ -81,6 +85,11 @@ vi.mock("./backend-supervisor.js", () => ({
   },
 }));
 vi.mock("./secret-store.js", () => ({ loadOrCreateMasterKey: mocks.key }));
+vi.mock("./restore-recovery-controller.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./restore-recovery-controller.js")>();
+  return { ...actual, runInstalledRestoreRecovery: mocks.recovery };
+});
 vi.mock("./restore-admission.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("./restore-admission.js")>();
@@ -122,18 +131,21 @@ describe("desktop terminal lifecycle callers", () => {
     mocks.handlers.clear();
     mocks.windows.length = 0;
     mocks.lock = true;
+    mocks.packaged = false;
     mocks.installGate = undefined;
     vi.clearAllMocks();
     mocks.key.mockImplementation(async () => "synthetic-key");
     mocks.shutdown.mockImplementation(async () => undefined);
     mocks.prepareUpdate.mockImplementation(async () => undefined);
     mocks.admission.mockImplementation(() => undefined);
+    mocks.recovery.mockImplementation(async () => "cancelled");
     vi.stubGlobal("__dirname", "C:/synthetic/out/main");
     vi.stubEnv("JAP_MASTER_KEY", "");
     // Empty is an explicit override, so remove it for key-initialization tests.
     delete process.env.JAP_MASTER_KEY;
   });
   afterEach(() => {
+    Reflect.deleteProperty(process, "resourcesPath");
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -183,6 +195,93 @@ describe("desktop terminal lifecycle callers", () => {
       expect(mocks.installGate).toBeUndefined();
     },
   );
+
+  it("enters packaged recovery-only startup without constructing normal services", async () => {
+    mocks.packaged = true;
+    Object.defineProperty(process, "resourcesPath", {
+      configurable: true,
+      value: "C:/synthetic/resources",
+    });
+    vi.stubEnv("JAP_PROJECT_ROOT", "D:/untrusted-project-override");
+    vi.stubEnv(
+      "JAP_DATABASE_URL",
+      "sqlite:///D:/untrusted-database-override.db",
+    );
+    mocks.admission.mockImplementation(() => {
+      throw new RestoreAdmissionError();
+    });
+
+    await import("./index.js");
+    await settle();
+
+    expect(mocks.recovery).toHaveBeenCalledExactlyOnceWith({
+      dataRoot: "C:/synthetic/workspace",
+      databaseUrl: "sqlite:///C:/synthetic/workspace/job-apply-pro.db",
+      projectRoot: "C:/synthetic/resources",
+      resourcesPath: "C:/synthetic/resources",
+      masterKeyPath: "C:\\synthetic\\workspace\\secrets\\master-key.bin",
+    });
+    expect(mocks.key).not.toHaveBeenCalled();
+    expect(mocks.createSupervisor).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.notificationStop).not.toHaveBeenCalled();
+    expect(mocks.installGate).toBeUndefined();
+    expect(mocks.windows).toHaveLength(0);
+    expect(mocks.appQuit).toHaveBeenCalledOnce();
+  });
+
+  it("ignores project and database environment overrides during normal packaged startup", async () => {
+    mocks.packaged = true;
+    Object.defineProperty(process, "resourcesPath", {
+      configurable: true,
+      value: "C:/synthetic/resources",
+    });
+    vi.stubEnv("JAP_PROJECT_ROOT", "D:/untrusted-project-override");
+    vi.stubEnv(
+      "JAP_DATABASE_URL",
+      "sqlite:///D:/untrusted-database-override.db",
+    );
+
+    await import("./index.js");
+    await settle();
+
+    expect(mocks.createSupervisor).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        projectRoot: "C:/synthetic/resources",
+        dataRoot: "C:/synthetic/workspace",
+        databaseUrl: "sqlite:///C:/synthetic/workspace/job-apply-pro.db",
+        backendExecutable:
+          "C:\\synthetic\\resources\\backend\\job-apply-pro-backend.exe",
+        browserEngine: "msedge",
+      }),
+    );
+    expect(mocks.recovery).not.toHaveBeenCalled();
+    expect(mocks.start).toHaveBeenCalledOnce();
+    expect(mocks.installGate).toBeTypeOf("function");
+  });
+
+  it("enters recovery-only startup if a guard appears while loading an existing key", async () => {
+    mocks.packaged = true;
+    Object.defineProperty(process, "resourcesPath", {
+      configurable: true,
+      value: "C:/synthetic/resources",
+    });
+    mocks.admission
+      .mockImplementationOnce(() => undefined)
+      .mockImplementation(() => {
+        throw new RestoreAdmissionError();
+      });
+
+    await import("./index.js");
+    await settle();
+
+    expect(mocks.key).toHaveBeenCalledOnce();
+    expect(mocks.recovery).toHaveBeenCalledOnce();
+    expect(mocks.createSupervisor).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.installGate).toBeUndefined();
+    expect(mocks.appQuit).toHaveBeenCalledOnce();
+  });
 
   it("rechecks admission after asynchronous key loading before constructing services", async () => {
     mocks.admission

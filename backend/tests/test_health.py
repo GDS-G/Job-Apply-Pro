@@ -10,8 +10,8 @@ def test_health_reports_current_build() -> None:
     assert response.json() == {
         "status": "ok",
         "service": "job-apply-pro-backend",
-        "version": "0.60.0-alpha.1",
-        "build": "Reviewed Job Readiness",
+        "version": "0.61.0-alpha.1",
+        "build": "Durable Restore Rollback",
         "environment": "development",
     }
 

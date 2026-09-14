@@ -277,13 +277,7 @@ class BackupService:
                 backups=self._backup_dir,
             )
 
-            def commit_result(applied: RestorePlan) -> None:
-                try:
-                    self._repository.save_restore_result(manifest, applied)
-                finally:
-                    self._repository.close_for_offline_restore()
-
-            return recovery.apply(intent, commit_result)
+            return recovery.apply(intent)
         except (OSError, ValueError, RestoreAdmissionError):
             raise BackupError(
                 "Restore files are missing, changed or require recovery; "
@@ -355,15 +349,45 @@ class BackupService:
         """
         try:
             current_audits, current_claims = cls._mail_restore_evidence(current_database)
-            if not current_audits and not current_claims:
-                return
             staged_audits, staged_claims = cls._mail_restore_evidence(staged_database)
         except (OSError, ValueError, sqlite3.Error):
             raise BackupError(
                 "Mail send history cannot be inspected safely; restore was not applied"
             ) from None
-        if any(staged_audits.get(key) != row for key, row in current_audits.items()) or not (
-            current_claims <= staged_claims
+        cls._compare_mail_restore_evidence(
+            current_audits, current_claims, staged_audits, staged_claims
+        )
+
+    @classmethod
+    def _require_preserved_mail_attempts_connection(
+        cls, current_database: Path, candidate: sqlite3.Connection
+    ) -> None:
+        """Recheck final in-memory restore bytes after private bookkeeping.
+
+        Keeping this check connection-based avoids ever materializing a plaintext
+        scratch database on disk. The caller owns the candidate connection and
+        must still hold exclusive offline-restore ownership.
+        """
+        try:
+            current_audits, current_claims = cls._mail_restore_evidence(current_database)
+            staged_audits, staged_claims = cls._mail_restore_evidence_connection(candidate)
+        except (OSError, ValueError, sqlite3.Error):
+            raise BackupError(
+                "Mail send history cannot be inspected safely; restore was not applied"
+            ) from None
+        cls._compare_mail_restore_evidence(
+            current_audits, current_claims, staged_audits, staged_claims
+        )
+
+    @staticmethod
+    def _compare_mail_restore_evidence(
+        current_audits: dict[str, tuple[str | None, ...]],
+        current_claims: set[tuple[str, str]],
+        candidate_audits: dict[str, tuple[str | None, ...]],
+        candidate_claims: set[tuple[str, str]],
+    ) -> None:
+        if any(candidate_audits.get(key) != row for key, row in current_audits.items()) or not (
+            current_claims <= candidate_claims
         ):
             raise BackupError(
                 "Database restore would discard or change recorded mail send attempts; "
@@ -381,95 +405,97 @@ class BackupService:
         with closing(
             sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)
         ) as connection:
-            # Bound each SQLite value/row before Python materializes it. Individual
-            # audit values are checked more narrowly below; no bytes/content are read.
-            connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 65_536)
+            return BackupService._mail_restore_evidence_connection(connection)
 
-            def table_exists(name: str) -> bool:
-                rows = connection.execute(
-                    "SELECT type FROM sqlite_master WHERE name = ? COLLATE NOCASE", (name,)
-                ).fetchmany(2)
-                if rows and rows != [("table",)]:
-                    raise ValueError("Invalid history schema")
-                return bool(rows)
+    @staticmethod
+    def _mail_restore_evidence_connection(
+        connection: sqlite3.Connection,
+    ) -> tuple[dict[str, tuple[str | None, ...]], set[tuple[str, str]]]:
+        # Bound each SQLite value/row before Python materializes it. Individual
+        # audit values are checked more narrowly below; no message bytes are read.
+        connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 65_536)
 
-            revision = None
-            if table_exists("alembic_version"):
-                revisions = connection.execute("SELECT version_num FROM alembic_version").fetchmany(
-                    2
-                )
-                if len(revisions) != 1 or not isinstance(revisions[0][0], str):
-                    raise ValueError("Invalid schema revision")
-                revision = revisions[0][0]
-            has_audits = table_exists("communication_mutation_audits")
-            has_claims = table_exists("mail_send_claims")
-            if not has_audits:
-                if has_claims or (revision is not None and revision not in _PRE_MAIL_REVISIONS):
-                    raise ValueError("Missing history table")
-                return {}, set()
-            if not has_claims and revision not in _PRE_CLAIM_MAIL_REVISIONS:
-                raise ValueError("Missing claim table")
-
-            audits: dict[str, tuple[str | None, ...]] = {}
-            seen_ids: set[str] = set()
-            seen_keys: set[str] = set()
+        def table_exists(name: str) -> bool:
             rows = connection.execute(
-                f"SELECT {', '.join(_MAIL_AUDIT_COLUMNS)} FROM communication_mutation_audits "
-                "LIMIT ?",
-                (_MAIL_RESTORE_MAX_ROWS + 1,),
-            )
-            for index, row in enumerate(rows):
+                "SELECT type FROM sqlite_master WHERE name = ? COLLATE NOCASE", (name,)
+            ).fetchmany(2)
+            if rows and rows != [("table",)]:
+                raise ValueError("Invalid history schema")
+            return bool(rows)
+
+        revision = None
+        if table_exists("alembic_version"):
+            revisions = connection.execute("SELECT version_num FROM alembic_version").fetchmany(2)
+            if len(revisions) != 1 or not isinstance(revisions[0][0], str):
+                raise ValueError("Invalid schema revision")
+            revision = revisions[0][0]
+        has_audits = table_exists("communication_mutation_audits")
+        has_claims = table_exists("mail_send_claims")
+        if not has_audits:
+            if has_claims or (revision is not None and revision not in _PRE_MAIL_REVISIONS):
+                raise ValueError("Missing history table")
+            return {}, set()
+        if not has_claims and revision not in _PRE_CLAIM_MAIL_REVISIONS:
+            raise ValueError("Missing claim table")
+
+        audits: dict[str, tuple[str | None, ...]] = {}
+        seen_ids: set[str] = set()
+        seen_keys: set[str] = set()
+        rows = connection.execute(
+            f"SELECT {', '.join(_MAIL_AUDIT_COLUMNS)} FROM communication_mutation_audits LIMIT ?",
+            (_MAIL_RESTORE_MAX_ROWS + 1,),
+        )
+        for index, row in enumerate(rows):
+            if index >= _MAIL_RESTORE_MAX_ROWS:
+                raise ValueError("History inspection exceeds the bounded limit")
+            values: list[str | None] = []
+            for column, (value, limit) in enumerate(zip(row, _MAIL_AUDIT_LIMITS, strict=True)):
+                if value is None and column in {7, 8, 9}:
+                    values.append(None)
+                elif not isinstance(value, str) or not value or len(value) > limit:
+                    raise ValueError("Invalid history value")
+                else:
+                    values.append(value)
+            audit_id, kind, _, _, key = values[:5]
+            assert audit_id is not None and key is not None
+            if (
+                audit_id in seen_ids
+                or key in seen_keys
+                or kind not in {"SEND_MESSAGE", "CREATE_CALENDAR_EVENT", "UPDATE_CALENDAR_EVENT"}
+            ):
+                raise ValueError("Ambiguous history identity")
+            seen_ids.add(audit_id)
+            seen_keys.add(key)
+            if kind == "SEND_MESSAGE":
+                audits[audit_id] = tuple(values)
+        claims: set[tuple[str, str]] = set()
+        if has_claims:
+            seen_drafts: set[str] = set()
+            seen_audits: set[str] = set()
+            for index, row in enumerate(
+                connection.execute(
+                    "SELECT draft_id, audit_id FROM mail_send_claims LIMIT ?",
+                    (_MAIL_RESTORE_MAX_ROWS + 1,),
+                )
+            ):
                 if index >= _MAIL_RESTORE_MAX_ROWS:
-                    raise ValueError("History inspection exceeds the bounded limit")
-                values: list[str | None] = []
-                for column, (value, limit) in enumerate(zip(row, _MAIL_AUDIT_LIMITS, strict=True)):
-                    if value is None and column in {7, 8, 9}:
-                        values.append(None)
-                    elif not isinstance(value, str) or not value or len(value) > limit:
-                        raise ValueError("Invalid history value")
-                    else:
-                        values.append(value)
-                audit_id, kind, _, _, key = values[:5]
-                assert audit_id is not None and key is not None
+                    raise ValueError("Claim inspection exceeds the bounded limit")
+                draft_id, audit_id = row
                 if (
-                    audit_id in seen_ids
-                    or key in seen_keys
-                    or kind
-                    not in {"SEND_MESSAGE", "CREATE_CALENDAR_EVENT", "UPDATE_CALENDAR_EVENT"}
+                    not isinstance(draft_id, str)
+                    or not 0 < len(draft_id) <= 100
+                    or not isinstance(audit_id, str)
+                    or not 0 < len(audit_id) <= 100
+                    or draft_id in seen_drafts
+                    or audit_id in seen_audits
+                    or audit_id not in audits
+                    or audits[audit_id][3] != draft_id
                 ):
-                    raise ValueError("Ambiguous history identity")
-                seen_ids.add(audit_id)
-                seen_keys.add(key)
-                if kind == "SEND_MESSAGE":
-                    audits[audit_id] = tuple(values)
-            claims: set[tuple[str, str]] = set()
-            if has_claims:
-                seen_drafts: set[str] = set()
-                seen_audits: set[str] = set()
-                for index, row in enumerate(
-                    connection.execute(
-                        "SELECT draft_id, audit_id FROM mail_send_claims LIMIT ?",
-                        (_MAIL_RESTORE_MAX_ROWS + 1,),
-                    )
-                ):
-                    if index >= _MAIL_RESTORE_MAX_ROWS:
-                        raise ValueError("Claim inspection exceeds the bounded limit")
-                    draft_id, audit_id = row
-                    if (
-                        not isinstance(draft_id, str)
-                        or not 0 < len(draft_id) <= 100
-                        or not isinstance(audit_id, str)
-                        or not 0 < len(audit_id) <= 100
-                        or draft_id in seen_drafts
-                        or audit_id in seen_audits
-                        or audit_id not in audits
-                        or audits[audit_id][3] != draft_id
-                    ):
-                        raise ValueError("Invalid claim evidence")
-                    seen_drafts.add(draft_id)
-                    seen_audits.add(audit_id)
-                    claims.add((draft_id, audit_id))
-            return audits, claims
+                    raise ValueError("Invalid claim evidence")
+                seen_drafts.add(draft_id)
+                seen_audits.add(audit_id)
+                claims.add((draft_id, audit_id))
+        return audits, claims
 
     def list_backups(self) -> list[BackupManifest]:
         return self._repository.list_backups()

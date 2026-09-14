@@ -19,6 +19,11 @@ from job_apply_pro.security.encryption import SensitiveDataCipher
 CONTROL_DIRECTORY = "restore-control"
 GUARD_NAME = "active.guard"
 MAX_RECORD_BYTES = 4 * 1024 * 1024
+MAX_RETAINED_RECOVERY_BYTES = 8 * 1024 * 1024 * 1024
+MAX_NEW_RECOVERY_BYTES = 5 * 1024 * 1024 * 1024
+MAX_RETAINED_RECOVERY_OPERATIONS = 128
+MAX_RECOVERY_FILES_PER_OPERATION = 2 * (4096 + 1) + 10
+MAX_RECOVERY_OBJECT_BYTES = 512 * 1024 * 1024 + 4096
 RECOVERY_MESSAGE = (
     "Offline restore recovery is required. Keep backups, staging files and the original key. "
     "Normal startup and updates are blocked until authenticated completion can be verified."
@@ -91,6 +96,49 @@ def write_exclusive(path: Path, data: bytes) -> None:
         stream.flush()
         os.fsync(stream.fileno())
     sync_directory(path.parent)
+
+
+def atomic_write_exclusive(path: Path, data: bytes) -> None:
+    """Publish complete bytes under the cooperative exclusive workspace lease.
+
+    Failed or interrupted pending siblings are retained as recovery evidence.
+    This does not add handle-pinned protection against non-cooperating path races.
+    """
+    root = _restore_owner.get()
+    if root is None:
+        raise RestoreAdmissionError("An exclusive restore workspace lease is required")
+    _require_restore_lease(root)
+    try:
+        final = checked_path(path, root=root)
+        if not stat.S_ISDIR(final.parent.lstat().st_mode):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        try:
+            final.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise RestoreAdmissionError("A published restore object already exists")
+        pending = checked_path(final.with_name(f".{final.name}.{uuid4()}.pending"), root=root)
+        with pending.open("xb") as stream:
+            if stream.write(data) != len(data):
+                raise RestoreAdmissionError("Restore object could not be written completely")
+            stream.flush()
+            os.fsync(stream.fileno())
+        _require_restore_lease(root)
+        checked_path(pending, root=root)
+        checked_path(final, root=root)
+        try:
+            final.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise RestoreAdmissionError("A published restore object already exists")
+        # The lease excludes cooperative writers between the final existence
+        # check and rename. Windows rename also refuses an existing destination.
+        pending.rename(final)
+        sync_directory(final.parent)
+    except OSError:
+        raise RestoreAdmissionError("Restore object could not be published safely") from None
 
 
 class RestoreGateRepository:
@@ -167,6 +215,227 @@ class RestoreGateRepository:
         write_exclusive(self.guard, operation_id.encode("ascii"))
         return operation_id
 
+    def allocate_operation(self) -> str:
+        _require_restore_lease(self.root)
+        self.assert_clear()
+        operations, retained = self._recovery_usage()
+        if (
+            operations >= MAX_RETAINED_RECOVERY_OPERATIONS
+            or retained > MAX_RETAINED_RECOVERY_BYTES - MAX_NEW_RECOVERY_BYTES
+        ):
+            raise RestoreAdmissionError(
+                "Retained restore evidence reached its bounded quota; preserve it for "
+                "review before starting another restore"
+            )
+        operation_id = str(uuid4())
+        directory = self.operation_path(operation_id)
+        try:
+            directory.parent.mkdir(parents=True, exist_ok=True)
+            sync_directory(directory.parent.parent)
+            checked_path(directory, root=self.root)
+            directory.mkdir(exist_ok=False)
+            sync_directory(directory.parent)
+        except OSError:
+            raise RestoreAdmissionError("Restore operation could not be allocated safely") from None
+        return operation_id
+
+    @staticmethod
+    def _pending_name(name: str, allowed: re.Pattern[str]) -> bool:
+        match = re.fullmatch(r"\.(.+)\.([0-9a-f-]{36})\.pending", name)
+        if match is None or allowed.fullmatch(match.group(1)) is None:
+            return False
+        try:
+            return str(UUID(match.group(2))) == match.group(2)
+        except ValueError:
+            return False
+
+    def _operation_inventory(self, operation: Path) -> tuple[list[Path], list[Path], int]:
+        record = re.compile(
+            r"(?:intent|receipt)\.enc|database-preimage\.enc|"
+            r"(?:intent|decision|receipt)\.v2\.enc"
+        )
+        image = re.compile(r"[a-f0-9]{64}\.(?:before|after)\.enc")
+        files: list[Path] = []
+        directories: list[Path] = []
+        total = 0
+        entries = 0
+
+        def accept_file(path: Path, pattern: re.Pattern[str], maximum: int) -> None:
+            nonlocal entries, total
+            checked_path(path, root=self.root)
+            info = path.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or getattr(info, "st_file_attributes", 0) & 0x400
+                or (
+                    pattern.fullmatch(path.name) is None
+                    and not self._pending_name(path.name, pattern)
+                )
+                or info.st_size > maximum
+            ):
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            entries += 1
+            if entries > MAX_RECOVERY_FILES_PER_OPERATION:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            total += info.st_size
+            files.append(path)
+
+        for entry in operation.iterdir():
+            checked_path(entry, root=self.root)
+            info = entry.lstat()
+            if entry.name == "objects" and stat.S_ISDIR(info.st_mode):
+                if getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise RestoreAdmissionError(RECOVERY_MESSAGE)
+                directories.append(entry)
+                for child in entry.iterdir():
+                    accept_file(child, image, MAX_RECOVERY_OBJECT_BYTES)
+            elif stat.S_ISREG(info.st_mode):
+                maximum = (
+                    MAX_RECOVERY_OBJECT_BYTES
+                    if entry.name == "database-preimage.enc"
+                    else MAX_RECORD_BYTES
+                )
+                accept_file(entry, record, maximum)
+            else:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        return files, directories, total
+
+    def _recovery_usage(self) -> tuple[int, int]:
+        operations_root = checked_path(self.control / "operations", root=self.root)
+        try:
+            info = operations_root.lstat()
+        except FileNotFoundError:
+            return 0, 0
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        count = 0
+        total = 0
+        for operation in operations_root.iterdir():
+            checked_path(operation, root=self.root)
+            info = operation.lstat()
+            try:
+                canonical = str(UUID(operation.name)) == operation.name
+            except ValueError:
+                canonical = False
+            if (
+                not canonical
+                or not stat.S_ISDIR(info.st_mode)
+                or getattr(info, "st_file_attributes", 0) & 0x400
+            ):
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            count += 1
+            if count > MAX_RETAINED_RECOVERY_OPERATIONS:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            _, _, operation_total = self._operation_inventory(operation)
+            total += operation_total
+            if total > MAX_RETAINED_RECOVERY_BYTES:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        return count, total
+
+    def _require_v2_record_capacity(self, operation_id: str, size: int) -> None:
+        """Bound every publication attempt, including retained pending siblings."""
+        if size < 0 or size > MAX_RECORD_BYTES:
+            raise RestoreAdmissionError("Restore metadata exceeds the supported bound")
+        _, retained = self._recovery_usage()
+        files, _, operation_total = self._operation_inventory(self.operation_path(operation_id))
+        if (
+            len(files) >= MAX_RECOVERY_FILES_PER_OPERATION
+            or operation_total > MAX_NEW_RECOVERY_BYTES - size
+            or retained > MAX_RETAINED_RECOVERY_BYTES - size
+        ):
+            raise RestoreAdmissionError(
+                "Retained restore evidence reached its bounded quota; preserve it for "
+                "review before publishing more recovery evidence"
+            )
+
+    def discard_unactivated(self, operation_id: str) -> None:
+        """Remove only this call's strictly inventoried, never-active v2 preparation."""
+        _require_restore_lease(self.root)
+        self.assert_clear()
+        operation = self.operation_path(operation_id)
+        files, directories, _ = self._operation_inventory(operation)
+        names = {path.name for path in files}
+        if any(
+            name in {"decision.v2.enc", "receipt.v2.enc", "intent.enc", "receipt.enc"}
+            or name == "database-preimage.enc"
+            or name.startswith((".decision.v2.enc.", ".receipt.v2.enc."))
+            for name in names
+        ):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        for path in files:
+            checked_path(path, root=self.root)
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            path.unlink()
+        for directory in reversed(directories):
+            checked_path(directory, root=self.root)
+            directory.rmdir()
+        operation.rmdir()
+        sync_directory(operation.parent)
+
+    def activate_prepared(self, operation_id: str) -> None:
+        _require_restore_lease(self.root)
+        self.assert_clear()
+        if not self.has_v2_record(operation_id, "intent"):
+            raise RestoreAdmissionError("A prepared v2 restore intent is required")
+        # Presence publishes a fail-closed gate, never proof of authenticated
+        # completion. The service authenticates the intent before target writes.
+        atomic_write_exclusive(self.guard, operation_id.encode("ascii"))
+
+    def _v2_record_path(self, operation_id: str, kind: str) -> Path:
+        if not isinstance(kind, str) or kind not in {"intent", "decision", "receipt"}:
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        try:
+            return checked_path(
+                self.operation_path(operation_id) / f"{kind}.v2.enc", root=self.root
+            )
+        except (ValueError, TypeError, AttributeError):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE) from None
+
+    def has_v2_record(self, operation_id: str, kind: str) -> bool:
+        path = self._v2_record_path(operation_id, kind)
+        try:
+            path.lstat()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            raise RestoreAdmissionError(RECOVERY_MESSAGE) from None
+
+    def read_v2_record(
+        self, operation_id: str, kind: str, cipher: SensitiveDataCipher
+    ) -> dict[str, object]:
+        path = self._v2_record_path(operation_id, kind)
+        try:
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise RestoreAdmissionError(RECOVERY_MESSAGE)
+            with path.open("rb") as stream:
+                encoded = stream.read(MAX_RECORD_BYTES + 1)
+            if len(encoded) > MAX_RECORD_BYTES:
+                raise ValueError
+            return cipher.decrypt_json(
+                encoded.decode("ascii"), context=f"restore:v2:{operation_id}:{kind}"
+            )
+        except (OSError, ValueError, UnicodeError):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE) from None
+
+    def write_v2_record(
+        self, operation_id: str, kind: str, value: dict[str, object], cipher: SensitiveDataCipher
+    ) -> None:
+        _require_restore_lease(self.root)
+        path = self._v2_record_path(operation_id, kind)
+        encoded = cipher.encrypt_json(value, context=f"restore:v2:{operation_id}:{kind}").encode(
+            "ascii"
+        )
+        if len(encoded) > MAX_RECORD_BYTES:
+            raise RestoreAdmissionError("Restore metadata exceeds the supported bound")
+        self._require_v2_record_capacity(operation_id, len(encoded))
+        atomic_write_exclusive(path, encoded)
+        del encoded
+
     def finish_verified(self, operation_id: str) -> None:
         # Called only after authenticated receipt and all targets have been rechecked.
         if self.active_id() != operation_id:
@@ -182,6 +451,13 @@ _restore_owner: ContextVar[Path | None] = ContextVar("restore_owner", default=No
 
 def owns_restore(root: Path) -> bool:
     return _restore_owner.get() == root
+
+
+def _require_restore_lease(root: Path) -> None:
+    with _mutex:
+        lease = _leases.get(root)
+        if not owns_restore(root) or lease is None or lease[1] != "restore":
+            raise RestoreAdmissionError("An exclusive restore workspace lease is required")
 
 
 @contextmanager

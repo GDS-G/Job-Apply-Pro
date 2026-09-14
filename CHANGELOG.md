@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.61.0-alpha.1] - Unreleased
+
+### Durable Restore Rollback
+
+- Seal authenticated before/after images for every document target and the bookkeeping database before publishing the v2 restore guard.
+- Preserve the compiled schema-0027 recorded-history graph across application, portal/browser, OAuth, communication/calendar, AI/model/media and readiness data; authenticate staged bytes before SQLite inspection and recheck exact snapshot, final serialized bytes and live targets.
+- Build restore bookkeeping in a default-deny, authorizer-confined in-memory database with exact physical schemas, install the database last, and require exact terminal receipts before finalization.
+- Add authenticated inspection plus explicit fingerprint-bound rollback that resumes conservatively and removes only known operation-introduced files.
+- Preserve legacy v1 completion/manual recovery while rejecting automatic rollback, forward apply resume, unknown target bytes and rollback after a cleared guard.
+- Add strict database-free recovery CLI commands, package-evidence verification and adversarial publication, crash, concurrency, alias and corruption regressions.
+- Qualify the exact backend-dist and installer payload plus real-process supervisor/recovery protocols; keep signing, protected integration and physical installed Windows recovery as separate release gates.
+
 ## [0.60.0-alpha.1] - Unreleased
 
 ### Reviewed Job Readiness

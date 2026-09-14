@@ -35,12 +35,14 @@ from job_apply_pro.storage.models import (
     WorkflowEventRow,
 )
 from job_apply_pro.storage.operations_repository import OperationsRepository
+from restore_test_schema import stamp_current_schema
 
 
 def _file_session(path: Path) -> tuple[Session, str]:
     database_url = f"sqlite:///{path.as_posix()}"
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
+    stamp_current_schema(engine)
     return Session(engine), database_url
 
 

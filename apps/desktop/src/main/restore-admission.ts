@@ -2,7 +2,7 @@ import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 
 export const RESTORE_ADMISSION_MESSAGE =
-  "Offline restore recovery is required or its safety status cannot be verified. Normal startup, new restores, and updates are blocked. Preserve the workspace, backups, staging files, restore-control folder, and original encryption key. Do not delete the restore guard or create a replacement key. The backend restore-status command can inspect admission without opening the database or loading a key. Authenticated restore-finalize requires the original key, a committed receipt, and matching restored files; an incomplete restore cannot be finalized this way. No automatic rollback is available.";
+  "Offline restore recovery is required or its safety status cannot be verified. Normal startup, new restores, and updates are blocked. Preserve the workspace, backups, staging files, restore-control folder, and original encryption key. Do not delete the restore guard or create a replacement key. The packaged app uses an isolated native recovery session to authenticate supported v2 evidence and offers exact rollback or terminal-state finalization with Cancel as the default. Unknown or legacy evidence remains blocked for qualified manual recovery; no automatic mutation occurs.";
 
 export class RestoreAdmissionError extends Error {
   constructor() {

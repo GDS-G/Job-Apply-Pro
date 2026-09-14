@@ -37,6 +37,7 @@ from job_apply_pro.storage.restore_gate_repository import (
     safe_relative,
     workspace_access,
 )
+from restore_test_schema import stamp_current_schema
 
 SOURCE = Path(__file__).parents[1] / "src"
 PROJECT = Path(__file__).parents[2]
@@ -112,6 +113,7 @@ def workspace(tmp_path: Path) -> Workspace:
     database_url = f"sqlite:///{(tmp_path / 'app.db').as_posix()}"
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
+    stamp_current_schema(engine)
     documents = tmp_path / "documents"
     documents.mkdir()
     (documents / "resume.enc").write_bytes(b"reviewed-document")
@@ -141,31 +143,31 @@ def crash(workspace: Workspace, boundary: str) -> None:
 import os
 from job_apply_pro.desktop_entry import restore
 from job_apply_pro.services.restore_recovery import RestoreRecoveryService
+from job_apply_pro.services.restore_rollback import RestoreRollback
 from job_apply_pro.storage.restore_gate_repository import RestoreGateRepository
 from job_apply_pro.storage.operations_repository import OperationsRepository
 boundary = {boundary!r}
 if boundary == 'guard':
-    original = RestoreGateRepository.begin
+    original = RestoreGateRepository.activate_prepared
     def fail(self, *args, **kwargs):
         original(self, *args, **kwargs)
         os._exit(77)
-    RestoreGateRepository.begin = fail
+    RestoreGateRepository.activate_prepared = fail
 elif boundary == 'first-file':
-    original = RestoreRecoveryService._replace
+    original = RestoreRollback._install
     def fail(self, *args, **kwargs):
         original(self, *args, **kwargs)
         os._exit(77)
-    RestoreRecoveryService._replace = fail
-elif boundary in ('before-commit', 'after-commit'):
-    original = OperationsRepository.save_restore_result
+    RestoreRollback._install = fail
+elif boundary in ('before-private-bookkeeping', 'after-private-bookkeeping'):
+    original = RestoreRollback._private_database
     def fail(self, *args, **kwargs):
-        if boundary == 'after-commit':
+        if boundary == 'after-private-bookkeeping':
             original(self, *args, **kwargs)
-            self.close_for_offline_restore()
         os._exit(77)
-    OperationsRepository.save_restore_result = fail
+    RestoreRollback._private_database = fail
 elif boundary == 'receipt':
-    RestoreRecoveryService.finalize = lambda *args: os._exit(77)
+    RestoreRollback.finalize = lambda *args: os._exit(77)
 elif boundary == 'clear':
     original = RestoreGateRepository.finish_verified
     def fail(self, *args, **kwargs):
@@ -178,7 +180,7 @@ restore({workspace.plan.id!r}, {workspace.plan.fingerprint!r})
     assert result.returncode == 77, result.stderr
 
 
-@pytest.mark.parametrize("boundary", ["guard", "first-file", "before-commit", "after-commit"])
+@pytest.mark.parametrize("boundary", ["guard", "first-file"])
 def test_crash_before_receipt_blocks_relaunch_without_database_reads(
     workspace: Workspace, boundary: str
 ) -> None:
@@ -205,24 +207,44 @@ def test_crash_before_receipt_blocks_relaunch_without_database_reads(
         assert workspace.gate.blocked()
 
 
+@pytest.mark.parametrize("boundary", ["before-private-bookkeeping", "after-private-bookkeeping"])
+def test_private_bookkeeping_crash_precedes_guard_and_original_writes(
+    workspace: Workspace, boundary: str
+) -> None:
+    original_database = workspace.database.read_bytes()
+    crash(workspace, boundary)
+    assert not workspace.gate.blocked()
+    assert workspace.database.read_bytes() == original_database
+    assert (workspace.root / "documents" / "resume.enc").read_bytes() == b"current-document"
+    assert cli(workspace.root, "restore-status", key=None).returncode == 0
+
+
 def test_committed_receipt_can_finalize_after_crash_and_preserves_unrelated_files(
     workspace: Workspace,
 ) -> None:
     crash(workspace, "receipt")
     operation_id = workspace.gate.active_id()
     operation = workspace.gate.operation_path(operation_id)
-    assert b"resume" not in (operation / "intent.enc").read_bytes()
-    assert b"resume" not in (operation / "receipt.enc").read_bytes()
-    preimage = (operation / "database-preimage.enc").read_text("ascii")
+    assert b"resume" not in (operation / "intent.v2.enc").read_bytes()
+    assert b"resume" not in (operation / "receipt.v2.enc").read_bytes()
+    from job_apply_pro.services.restore_rollback import PreparedRestore
+
+    prepared = PreparedRestore.model_validate(
+        workspace.gate.read_v2_record(operation_id, "intent", workspace.cipher)
+    )
+    database_image = prepared.targets[-1].before
+    assert database_image is not None
+    preimage_path = operation / "objects" / database_image.name
+    preimage = preimage_path.read_text("ascii")
     assert workspace.cipher.decrypt_bytes(
-        preimage, context=f"restore:v1:{operation_id}:database-preimage"
+        preimage, context=f"restore:v2:{operation_id}:object:{database_image.name}"
     ).startswith(b"SQLite format 3")
     result = cli(workspace.root, "restore-finalize", "--operation-id", operation_id)
     assert result.returncode == 0, result.stderr
     assert not workspace.gate.blocked()
     assert (workspace.root / "documents" / "resume.enc").read_bytes() == b"reviewed-document"
     assert (workspace.root / "documents" / "unrelated.enc").read_bytes() == b"unrelated-document"
-    assert (operation / "database-preimage.enc").exists()
+    assert preimage_path.exists()
     assert cli(workspace.root, "restore-status", key=None).returncode == 0
 
 
@@ -248,9 +270,9 @@ def test_recovery_uncertainty_never_clears_guard(workspace: Workspace, failure: 
     elif failure == "changed-target":
         (workspace.root / "documents" / "resume.enc").write_bytes(b"changed-again")
     elif failure == "corrupt-receipt":
-        (workspace.gate.operation_path(operation_id) / "receipt.enc").write_text("broken")
+        (workspace.gate.operation_path(operation_id) / "receipt.v2.enc").write_text("broken")
     elif failure == "missing-receipt":
-        (workspace.gate.operation_path(operation_id) / "receipt.enc").unlink()
+        (workspace.gate.operation_path(operation_id) / "receipt.v2.enc").unlink()
     else:
         workspace.database.with_name("app.db-journal").write_bytes(b"unknown-journal")
     before = workspace.database.read_bytes()
@@ -334,7 +356,7 @@ def test_restore_rechecks_all_reviewed_inputs_before_guard_or_writes(
     assert (workspace.root / "documents" / "resume.enc").read_bytes() == b"current-document"
 
 
-def test_changed_staged_bytes_after_prepare_leave_durable_guard(workspace: Workspace) -> None:
+def test_changed_staged_bytes_after_prepare_refuse_before_guard(workspace: Workspace) -> None:
     intent = workspace.prepare()
     source = Path(workspace.plan.staged_path) / "database" / "job_apply_pro.db"
     source.write_bytes(b"changed-after-prepare")
@@ -343,8 +365,8 @@ def test_changed_staged_bytes_after_prepare_leave_durable_guard(workspace: Works
         workspace_access(workspace.root, restore=True),
         pytest.raises(RestoreAdmissionError, match="changed"),
     ):
-        RestoreRecoveryService(workspace.root, workspace.cipher).apply(intent, lambda _plan: None)
-    assert workspace.gate.blocked()
+        RestoreRecoveryService(workspace.root, workspace.cipher).apply(intent)
+    assert not workspace.gate.blocked()
     assert workspace.database.read_bytes() == before
 
 
@@ -467,7 +489,7 @@ def test_unknown_sidecars_are_preserved_before_any_target_write(
         workspace_access(workspace.root, restore=True),
         pytest.raises(RestoreAdmissionError, match="sidecars"),
     ):
-        RestoreRecoveryService(workspace.root, workspace.cipher).apply(intent, lambda _plan: None)
+        RestoreRecoveryService(workspace.root, workspace.cipher).apply(intent)
     assert not workspace.gate.blocked()
     assert workspace.database.read_bytes() == before
     assert sidecar.read_bytes() == b"unknown-existing-sidecar"
@@ -505,7 +527,7 @@ def test_staged_journal_appearing_after_preparation_is_preserved_before_mail_ins
         workspace_access(workspace.root, restore=True),
         pytest.raises(RestoreAdmissionError, match="sidecars"),
     ):
-        RestoreRecoveryService(workspace.root, workspace.cipher).apply(intent, lambda _plan: None)
+        RestoreRecoveryService(workspace.root, workspace.cipher).apply(intent)
     assert sidecar.read_bytes() == b"unknown-staged-journal"
     assert workspace.database.read_bytes() == before
     assert not workspace.gate.blocked()

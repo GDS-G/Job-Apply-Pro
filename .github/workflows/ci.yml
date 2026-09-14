@@ -85,6 +85,11 @@ jobs:
           $env:JAP_LIFECYCLE_TEST_BACKEND = (Resolve-Path -LiteralPath 'release/win-unpacked/resources/backend/job-apply-pro-backend.exe').Path
           pnpm --filter @job-apply-pro/desktop test src/main/backend-supervisor.packaged.test.ts
 
+      - name: Exercise delivered native restore recovery
+        run: |
+          $env:JAP_RECOVERY_TEST_BACKEND = (Resolve-Path -LiteralPath 'release/win-unpacked/resources/backend/job-apply-pro-backend.exe').Path
+          pnpm --filter @job-apply-pro/desktop test src/main/restore-recovery-controller.packaged.test.ts
+
       - name: Upload package smoke artifact
         uses: actions/upload-artifact@v7
         with:

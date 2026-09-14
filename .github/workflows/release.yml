@@ -60,6 +60,10 @@ jobs:
         run: |
           $env:JAP_LIFECYCLE_TEST_BACKEND = (Resolve-Path -LiteralPath 'release/win-unpacked/resources/backend/job-apply-pro-backend.exe').Path
           pnpm --filter @job-apply-pro/desktop test src/main/backend-supervisor.packaged.test.ts
+      - name: Exercise delivered native restore recovery
+        run: |
+          $env:JAP_RECOVERY_TEST_BACKEND = (Resolve-Path -LiteralPath 'release/win-unpacked/resources/backend/job-apply-pro-backend.exe').Path
+          pnpm --filter @job-apply-pro/desktop test src/main/restore-recovery-controller.packaged.test.ts
       - name: Generate SPDX SBOM from packaged application
         uses: anchore/sbom-action@v0
         with:

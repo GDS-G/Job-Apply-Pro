@@ -361,7 +361,7 @@ def test_packaging_spec_shares_archive_and_collects_both_executables() -> None:
         for call in executable_calls
     ]
     assert [(item["name"], item["console"]) for item in options] == [
-        ("job-apply-pro-backend", False),
+        ("job-apply-pro-backend", True),
         ("job-apply-pro-browser-worker", True),
     ]
     assert all(item["exclude_binaries"] is True for item in options)
