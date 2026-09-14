@@ -22,9 +22,11 @@ The forward-history compiler adds `calendar_mutation_claims` as the forty-fourth
 
 ### Calendar Attempt Admission validation status
 
-Runtime/package checkpoint `96fa9d3acc5400830c14b93d105e716f3576d737` (tree `bd20e0fdcd53d44161b3db0572c925cb9c749f56`) passes **1,774 backend tests** at **86.85% coverage** (15,478 statements, 2,035 missed) and **479 default desktop tests** with two delivered-runtime opt-ins skipped. Ruff format checks **226 files**, Ruff lint is clean, and strict mypy checks **196 source/test/helper files** without findings. Workspace Prettier, oxlint, TypeScript, production Electron build and both dependency audits pass. The backend collection contains 1,774 tests; the two type-narrowing assertion files pass a final focused 82-case rerun.
+Scan-clean runtime/package checkpoint `2510ef7968902209132f6f117d5dde3c3dd57dbf` (tree `de033453c2a521b46efb89c0182bc450ed271725`) passes **1,774 backend tests** at **86.85% coverage** (15,478 statements, 2,035 missed) and **479 default desktop tests** with two delivered-runtime opt-ins skipped. Ruff format checks **226 files**, Ruff lint is clean, and strict mypy checks **196 source/test/helper files** without findings. Workspace Prettier, oxlint, TypeScript, production Electron build and both dependency audits pass. The backend collection contains 1,774 tests; the two type-narrowing assertion files pass a final focused 82-case rerun.
 
 The frozen backend-dist and the exact backend copied into `win-unpacked` each pass the complete isolated package smoke: worker JSON-lines and API browser lifecycle, migration/startup, image decoding/rejection, media-cleanup API, PDF/DOCX review manifests, encrypted offline mail round-trip and refusal, conservative job-readiness admission, encrypted backup, offline restore and authenticated v2 evidence verification. The delivered supervisor and recovery-controller opt-ins each pass separately against the exact packaged executable. An initial wrapper invocation omitted `-PythonPath`, fell back to a system Python lacking the verifier's test-only `cryptography` dependency, and stopped after earlier smoke phases passed; the unchanged package passed the complete rerun with the validated project Python supplied explicitly. This harness correction is not counted as a package failure or hidden as successful first-pass evidence.
+
+The first PR history stored a high-entropy synthetic UUID under the field name `idempotency_key`; gitleaks correctly blocked that historical addition as a generic-key pattern even after a later fix. The branch was rebuilt from protected main with the same corrected final tree and an obviously synthetic low-entropy RFC 4122 fixture value. No scanner rule, path or finding was suppressed. The package was rebuilt and all package/protocol gates rerun from the scan-clean checkpoint above, superseding the earlier local artifact hashes.
 
 Validation used Windows NT `10.0.22631`, Node `24.19.0`, pnpm `11.21.0`, Python `3.12.14`, PyInstaller `6.21.0`, Electron `43.3.0` and electron-builder `26.15.3`. Protected CI/security, physical installed Windows behavior and authorized live Google/Microsoft acceptance remain pending. No live provider, signed installer, delivery, calendar UPDATE, unattended scheduling or physical Windows claim is made.
 
@@ -32,13 +34,13 @@ Validation used Windows NT `10.0.22631`, Node `24.19.0`, pnpm `11.21.0`, Python 
 
 | Artifact                                   |     Bytes | SHA-256                                                            | Authenticode   |
 | ------------------------------------------ | --------: | ------------------------------------------------------------------ | -------------- |
-| `Job-Apply-Pro-0.62.0-alpha.1-x64.exe`     | 188998190 | `33B1E47A2CA0799348DCA94E9A257A1D0DEB5CA4FBBF5876C86B9E1B508E6DC0` | NotSigned      |
+| `Job-Apply-Pro-0.62.0-alpha.1-x64.exe`     | 188997624 | `DFE6B3840EDF80B00B6CC2EB92D7E8851068F3AF94F1D1B28C140022CE47EF38` | NotSigned      |
 | `win-unpacked/Job Apply Pro.exe`           | 225500672 | `7E8C1C6B2B5A3ADEED2569FE1D7EF772185F44CA7E8252587722BEFB63166B19` | NotSigned      |
 | `win-unpacked/resources/app.asar`          |  33462547 | `2281C29D9496A7E36EDB10C8A9F8D7C3CF4A255CF872E88E5724B22CCF60F7D1` | Not applicable |
-| Bundled `job-apply-pro-backend.exe`        |  18786035 | `CB365BAF93795125C4B9E42AE9CA11B362C049C241793ED7DD21C91A80CF15D6` | NotSigned      |
-| Bundled `job-apply-pro-browser-worker.exe` |  18786035 | `CB365BAF93795125C4B9E42AE9CA11B362C049C241793ED7DD21C91A80CF15D6` | NotSigned      |
+| Bundled `job-apply-pro-backend.exe`        |  18786035 | `D520C1FEA9D4D4BD626C587A2588F16AAEBA39ECE3E01F8E83426C6D37A7C99B` | NotSigned      |
+| Bundled `job-apply-pro-browser-worker.exe` |  18786035 | `D520C1FEA9D4D4BD626C587A2588F16AAEBA39ECE3E01F8E83426C6D37A7C99B` | NotSigned      |
 
-The delivered backend and worker hashes match their backend-dist originals. The installer blockmap is 179,817 bytes with SHA-256 `4C16717CA31AB27E03880B210CA95F5FE118EDEC42E3D7281060B44D506A9664`; `latest.yml` is 378 bytes with SHA-256 `FA24853BA205BD8D5D578694FB4ECB2831DD21464C36363CE65BDEE373CE6A21`. The publication metadata gate rejects the candidate at the first unsigned payload (`win-unpacked/Job Apply Pro.exe (NotSigned)`) before emitting checksums or dependency inventories. This is expected fail-closed evidence, not release publication.
+The delivered backend and worker hashes match their backend-dist originals. The installer blockmap is 179,836 bytes with SHA-256 `0C0B4FBA92E4527C7068B535BA6DAC9E845346129D3AB58A5EEF70200BB62266`; `latest.yml` is 378 bytes with SHA-256 `8891DD33920477F29B4340C58F95AD0FDC233532D5F8B938CA2188476FD464FC`. The publication metadata gate rejects the candidate at the first unsigned payload (`win-unpacked/Job Apply Pro.exe (NotSigned)`) before emitting checksums or dependency inventories. This is expected fail-closed evidence, not release publication.
 
 ### Durable Restore Rollback source candidate
 
