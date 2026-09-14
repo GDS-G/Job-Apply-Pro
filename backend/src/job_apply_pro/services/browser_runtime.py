@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from shutil import rmtree
-from typing import Protocol
+from typing import Never, Protocol
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 from job_apply_pro.domain.browser import (
     BrowserAction,
+    BrowserActionDisposition,
     BrowserActionKind,
     BrowserActionResult,
     BrowserObservation,
@@ -20,8 +21,14 @@ from job_apply_pro.domain.browser import (
     ConfirmationState,
 )
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
+from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
 from job_apply_pro.domain.workflow import utc_now
 from job_apply_pro.security.encryption import SensitiveDataCipher
+from job_apply_pro.services.external_effects import (
+    ExternalEffectConsumedError,
+    ExternalEffectService,
+)
+from job_apply_pro.storage.external_effect_repository import ExternalEffectConflictError
 from job_apply_pro.storage.repository_contracts import (
     BrowserRuntimeRepositoryProtocol,
     CheckpointRepositoryProtocol,
@@ -38,6 +45,10 @@ class BrowserPolicyError(BrowserRuntimeError):
 
 
 class BrowserSessionStateError(BrowserRuntimeError):
+    pass
+
+
+class BrowserActionUncertainError(BrowserSessionStateError):
     pass
 
 
@@ -79,6 +90,7 @@ class BrowserRuntimeService:
         checkpoints: CheckpointRepositoryProtocol,
         cipher: SensitiveDataCipher,
         worker: BrowserWorkerProtocol,
+        external_effects: ExternalEffectService,
         *,
         browser_data_dir: Path,
         browser_artifact_dir: Path,
@@ -90,6 +102,7 @@ class BrowserRuntimeService:
         self._checkpoints = checkpoints
         self._cipher = cipher
         self._worker = worker
+        self._external_effects = external_effects
         self._browser_data_dir = browser_data_dir.resolve()
         self._browser_artifact_dir = browser_artifact_dir.resolve()
         self._default_headless = default_headless
@@ -190,29 +203,179 @@ class BrowserRuntimeService:
 
     def execute_action(self, session_id: str, action: BrowserAction) -> BrowserActionResult:
         record = self._active_record(session_id)
+        self._ensure_no_unresolved_effect(session_id)
         self._validate_action(record, action)
-        result = self._worker.call(
-            "execute",
-            {"session_id": session_id, "action": action.model_dump(mode="json")},
-            timeout_seconds=max(75, action.timeout_ms / 1_000 + 10),
+        sequence = self._repository.next_action_sequence(session_id)
+        action_request = action.model_dump(mode="json")
+        effect_key = f"browser:{session_id}:{sequence}"
+        # The ledger owns an independent transaction. End the repository's read
+        # transaction so SQLite can durably commit admission before worker I/O.
+        self._repository.release_transaction()
+        try:
+            admission = self._external_effects.admit(
+                effect_key=effect_key,
+                kind=ExternalEffectKind.BROWSER_ACTION,
+                subject_type="browser_session",
+                subject_id=session_id,
+                actor="browser-runtime",
+                request=action_request,
+            )
+            operation = self._external_effects.require_fresh(admission).operation
+            attempt = self._external_effects.prepare_attempt(
+                operation.id,
+                provider="playwright",
+                target_code=action.kind.value,
+                request=action_request,
+                native_key=effect_key,
+            )
+            self._external_effects.begin_dispatch(operation.id, attempt.id)
+        except (ExternalEffectConflictError, ExternalEffectConsumedError) as error:
+            if self._external_effects.has_unresolved_subject("browser_session", session_id):
+                self._repository.set_state(session_id, BrowserSessionState.USER_TAKEOVER)
+            raise BrowserSessionStateError(
+                "Browser action admission is already consumed or requires reconciliation"
+            ) from error
+
+        try:
+            result = self._worker.call(
+                "execute",
+                {"session_id": session_id, "action": action_request},
+                timeout_seconds=max(75, action.timeout_ms / 1_000 + 10),
+            )
+        except Exception as error:
+            self._raise_uncertain_action(
+                record,
+                action,
+                sequence=sequence,
+                operation_id=operation.id,
+                attempt_id=attempt.id,
+                observation=record.observation,
+                error_code="WORKER_RESPONSE_UNAVAILABLE",
+                cause=error,
+            )
+
+        try:
+            disposition = BrowserActionDisposition(str(result.get("disposition")))
+            observation = BrowserObservation.model_validate(result.get("observation"))
+            self._validate_live_observation(record, observation)
+        except BrowserPolicyError as error:
+            self._raise_uncertain_action(
+                record,
+                action,
+                sequence=sequence,
+                operation_id=operation.id,
+                attempt_id=attempt.id,
+                observation=record.observation,
+                error_code="ORIGIN_POLICY_VIOLATION",
+                cause=error,
+            )
+        except Exception as error:
+            self._raise_uncertain_action(
+                record,
+                action,
+                sequence=sequence,
+                operation_id=operation.id,
+                attempt_id=attempt.id,
+                observation=record.observation,
+                error_code="WORKER_PROTOCOL_INVALID",
+                cause=error,
+            )
+
+        worker_error = result.get("error_code")
+        error_code = worker_error if isinstance(worker_error, str) else None
+        valid = result.get("attempts") == 1 and (
+            (
+                disposition is BrowserActionDisposition.CONFIRMED
+                and result.get("verified") is True
+                and error_code is None
+            )
+            or (
+                disposition is BrowserActionDisposition.NOT_APPLIED
+                and result.get("verified") is False
+                and error_code == "PRECONDITION_FAILED"
+            )
+            or (
+                disposition is BrowserActionDisposition.UNCERTAIN
+                and result.get("verified") is False
+                and error_code
+                in {
+                    "ACTION_EXECUTION_UNCERTAIN",
+                    "POSTCONDITION_UNVERIFIED",
+                    "PRECONDITION_PROOF_UNAVAILABLE",
+                }
+            )
         )
-        observation = BrowserObservation.model_validate(result.get("observation"))
-        self._validate_live_observation(record, observation)
-        attempts_value = result.get("attempts")
+        if not valid:
+            self._raise_uncertain_action(
+                record,
+                action,
+                sequence=sequence,
+                operation_id=operation.id,
+                attempt_id=attempt.id,
+                observation=observation,
+                error_code="WORKER_PROTOCOL_INVALID",
+            )
+        if disposition is BrowserActionDisposition.UNCERTAIN:
+            self._raise_uncertain_action(
+                record,
+                action,
+                sequence=sequence,
+                operation_id=operation.id,
+                attempt_id=attempt.id,
+                observation=observation,
+                error_code=error_code or "ACTION_EXECUTION_UNCERTAIN",
+            )
+
         action_result = BrowserActionResult(
-            id=str(uuid4()),
+            id=attempt.id,
             session_id=session_id,
-            sequence=self._repository.next_action_sequence(session_id),
+            sequence=sequence,
             action=action,
-            verified=bool(result.get("verified")),
-            attempts=attempts_value if isinstance(attempts_value, int) else 1,
+            verified=disposition is BrowserActionDisposition.CONFIRMED,
+            attempts=1,
             observation=observation,
-            error=str(result["error"]) if result.get("error") else None,
+            error=error_code,
             created_at=datetime.now(UTC),
         )
-        self._repository.add_action(action_result)
+        try:
+            self._repository.add_action(action_result)
+        except Exception as error:
+            self._raise_uncertain_action(
+                record,
+                action,
+                sequence=sequence,
+                operation_id=operation.id,
+                attempt_id=attempt.id,
+                observation=observation,
+                error_code="LOCAL_EVIDENCE_PERSIST_FAILED",
+                cause=error,
+                persist_action=False,
+            )
         updated = self._record(session_id)
-        self._save_checkpoint(updated, observation, pending_action=None)
+        try:
+            self._save_checkpoint(updated, observation, pending_action=None)
+        except Exception:
+            # The durable action row is authoritative, but pause subsequent
+            # automation when the secondary recovery checkpoint could not advance.
+            self._repository.set_state(session_id, BrowserSessionState.USER_TAKEOVER)
+        if disposition is BrowserActionDisposition.CONFIRMED:
+            self._external_effects.finish(
+                operation.id,
+                attempt.id,
+                status=ExternalEffectStatus.CONFIRMED,
+                result_reference=f"browser-action:{attempt.id}",
+                result={
+                    "verified": True,
+                    "page_fingerprint": observation.page_fingerprint,
+                },
+            )
+        else:
+            self._external_effects.finish(
+                operation.id,
+                attempt.id,
+                status=ExternalEffectStatus.FAILED,
+                error_code="PRECONDITION_FAILED",
+            )
         return action_result
 
     def takeover(self, session_id: str) -> BrowserSessionSnapshot:
@@ -225,6 +388,7 @@ class BrowserRuntimeService:
         record = self._record(session_id)
         if record.state is not BrowserSessionState.USER_TAKEOVER:
             raise BrowserSessionStateError("Browser session is not in user takeover")
+        self._ensure_no_unresolved_effect(session_id)
         result = self._worker.call("observe", {"session_id": session_id})
         observation = BrowserObservation.model_validate(result)
         self._validate_live_observation(record, observation)
@@ -236,6 +400,7 @@ class BrowserRuntimeService:
 
     def restart(self, session_id: str) -> BrowserSessionSnapshot:
         self._active_record(session_id, allow_takeover=True)
+        self._ensure_no_unresolved_effect(session_id)
         result = self._worker.call("restart_session", {"session_id": session_id})
         observation = BrowserObservation.model_validate(result)
         self._validate_live_observation(self._record(session_id), observation)
@@ -312,6 +477,60 @@ class BrowserRuntimeService:
                 f"Browser session {session_id} is {record.state}, not active"
             )
         return record
+
+    def _ensure_no_unresolved_effect(self, session_id: str) -> None:
+        if self._external_effects.has_unresolved_subject("browser_session", session_id):
+            self._repository.set_state(session_id, BrowserSessionState.USER_TAKEOVER)
+            raise BrowserSessionStateError(
+                "Browser session has an unresolved external action; reconcile it before resuming"
+            )
+
+    def _raise_uncertain_action(
+        self,
+        record: BrowserSessionRecord,
+        action: BrowserAction,
+        *,
+        sequence: int,
+        operation_id: str,
+        attempt_id: str,
+        observation: BrowserObservation | None,
+        error_code: str,
+        cause: Exception | None = None,
+        persist_action: bool = True,
+    ) -> Never:
+        trusted_observation = observation or record.observation
+        if trusted_observation is None:
+            error_code = "LOCAL_EVIDENCE_UNAVAILABLE"
+        elif persist_action:
+            uncertain_result = BrowserActionResult(
+                id=attempt_id,
+                session_id=record.id,
+                sequence=sequence,
+                action=action,
+                verified=False,
+                attempts=1,
+                observation=trusted_observation,
+                error=error_code,
+                created_at=datetime.now(UTC),
+            )
+            try:
+                self._repository.add_action(uncertain_result)
+                updated = self._record(record.id)
+                self._save_checkpoint(updated, trusted_observation, pending_action=action)
+            except Exception:
+                error_code = "LOCAL_EVIDENCE_PERSIST_FAILED"
+        try:
+            self._repository.set_state(record.id, BrowserSessionState.USER_TAKEOVER)
+        finally:
+            self._external_effects.finish(
+                operation_id,
+                attempt_id,
+                status=ExternalEffectStatus.UNCERTAIN,
+                error_code=error_code,
+            )
+        raise BrowserActionUncertainError(
+            "Browser action outcome is uncertain; automatic retry is blocked pending reconciliation"
+        ) from cause
 
     def _validate_action(self, record: BrowserSessionRecord, action: BrowserAction) -> None:
         if action.confirmation is ConfirmationState.REQUIRED:

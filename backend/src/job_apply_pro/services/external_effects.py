@@ -140,6 +140,9 @@ class ExternalEffectService:
     def has_unresolved_subject(self, subject_type: str, subject_id: str) -> bool:
         return self._repository.has_unresolved_subject(subject_type, subject_id)
 
+    def unresolved_subject_ids(self, *, kind: ExternalEffectKind, subject_type: str) -> list[str]:
+        return self._repository.unresolved_subject_ids(kind=kind, subject_type=subject_type)
+
     def get(self, operation_id: str) -> ExternalEffectRecord | None:
         return self._repository.get(operation_id)
 

@@ -10,7 +10,7 @@ from typing import cast
 
 import pytest
 from pydantic import AnyHttpUrl
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.browser.client import BrowserWorkerClient
 from job_apply_pro.domain.browser import (
@@ -29,9 +29,15 @@ from job_apply_pro.domain.candidate import CandidateProfileCreate, ContactDetail
 from job_apply_pro.domain.workbench import MockWorkflowCreate
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
-from job_apply_pro.services.browser_runtime import BrowserPolicyError, BrowserRuntimeService
+from job_apply_pro.services.browser_runtime import (
+    BrowserActionUncertainError,
+    BrowserPolicyError,
+    BrowserRuntimeService,
+)
 from job_apply_pro.services.core import CoreService
+from job_apply_pro.services.external_effects import ExternalEffectService
 from job_apply_pro.services.workbench import WorkbenchService
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
 from job_apply_pro.storage.repositories import (
     ApplicationRepository,
     BrowserRuntimeRepository,
@@ -340,12 +346,17 @@ def _create_workflow(session: Session) -> str:
 def _service(
     session: Session, tmp_path: Path, worker: BrowserWorkerClient
 ) -> BrowserRuntimeService:
+    cipher = SensitiveDataCipher(StaticKeyProvider(b"r" * 32))
     return BrowserRuntimeService(
         BrowserRuntimeRepository(session),
         WorkbenchRepository(session),
         CheckpointRepository(session),
-        SensitiveDataCipher(StaticKeyProvider(b"r" * 32)),
+        cipher,
         worker,
+        ExternalEffectService(
+            ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+            cipher,
+        ),
         browser_data_dir=tmp_path / "browser",
         browser_artifact_dir=tmp_path / "artifacts",
         default_headless=True,
@@ -1032,7 +1043,7 @@ def test_runtime_moves_to_takeover_when_a_page_escapes_the_origin_allowlist(
                 )
             )
 
-            with pytest.raises(BrowserPolicyError, match="escaped"):
+            with pytest.raises(BrowserActionUncertainError, match="automatic retry is blocked"):
                 service.execute_action(
                     started.id,
                     _click_to("Leave allowed origin", "/complete"),

@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import pytest
 from pydantic import AnyHttpUrl
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.browser.client import BrowserWorkerClient
 from job_apply_pro.domain.candidate import CandidateProfileCreate, ContactDetails
@@ -25,8 +25,10 @@ from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.browser_runtime import BrowserRuntimeService
 from job_apply_pro.services.core import CoreService
+from job_apply_pro.services.external_effects import ExternalEffectService
 from job_apply_pro.services.knowledge import CandidateKnowledgeService
 from job_apply_pro.services.portals import PortalApprovalError, ReferencePortalService
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.models import (
     FitScoreRow,
@@ -222,6 +224,10 @@ def _service(
         checkpoints,
         cipher,
         worker,
+        ExternalEffectService(
+            ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+            cipher,
+        ),
         browser_data_dir=tmp_path / "browser",
         browser_artifact_dir=tmp_path / "artifacts",
         default_headless=True,

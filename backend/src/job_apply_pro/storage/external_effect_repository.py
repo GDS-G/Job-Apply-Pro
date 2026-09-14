@@ -403,6 +403,21 @@ class ExternalEffectRepository:
                 is not None
             )
 
+    def unresolved_subject_ids(self, *, kind: ExternalEffectKind, subject_type: str) -> list[str]:
+        with self._session_factory() as session:
+            return list(
+                session.scalars(
+                    select(ExternalEffectOperationRow.subject_id)
+                    .where(
+                        ExternalEffectOperationRow.kind == kind.value,
+                        ExternalEffectOperationRow.subject_type == subject_type,
+                        ExternalEffectOperationRow.status.in_(_UNRESOLVED),
+                    )
+                    .distinct()
+                    .order_by(ExternalEffectOperationRow.subject_id)
+                ).all()
+            )
+
     def get(self, operation_id: str) -> ExternalEffectRecord | None:
         with self._session_factory() as session:
             operation = session.get(ExternalEffectOperationRow, operation_id)

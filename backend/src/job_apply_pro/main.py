@@ -13,7 +13,10 @@ from fastapi.responses import JSONResponse
 from job_apply_pro import __version__
 from job_apply_pro.api.router import api_router
 from job_apply_pro.api.routes.ai import get_media_cleanup_service
-from job_apply_pro.api.routes.browser import shutdown_browser_worker
+from job_apply_pro.api.routes.browser import (
+    recover_browser_external_effects,
+    shutdown_browser_worker,
+)
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
 from job_apply_pro.restore_admission import assert_runtime_admission, runtime_access
@@ -55,6 +58,7 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
         with runtime_access(settings):
+            recover_browser_external_effects(get_cipher())
             stop = asyncio.Event()
             cleanup_task = asyncio.create_task(
                 run_media_cleanup_worker(lambda: get_media_cleanup_service(get_cipher()), stop)

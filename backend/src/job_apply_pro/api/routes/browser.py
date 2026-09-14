@@ -14,14 +14,18 @@ from job_apply_pro.domain.browser import (
     BrowserActionResult,
     BrowserSessionCreate,
     BrowserSessionSnapshot,
+    BrowserSessionState,
 )
+from job_apply_pro.domain.external_effects import ExternalEffectKind
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.browser_runtime import (
     BrowserPolicyError,
     BrowserRuntimeService,
     BrowserSessionStateError,
 )
-from job_apply_pro.storage.database import get_session
+from job_apply_pro.services.external_effects import ExternalEffectService
+from job_apply_pro.storage.database import SessionFactory, get_session
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
 from job_apply_pro.storage.repositories import (
     BrowserRuntimeRepository,
     CheckpointRepository,
@@ -40,6 +44,32 @@ def shutdown_browser_worker() -> None:
     _worker.close()
 
 
+def _external_effect_service(cipher: SensitiveDataCipher) -> ExternalEffectService:
+    return ExternalEffectService(ExternalEffectRepository(SessionFactory), cipher)
+
+
+def recover_browser_external_effects(cipher: SensitiveDataCipher) -> int:
+    """Fence browser sessions whose prior process lost an effect response."""
+
+    effects = _external_effect_service(cipher)
+    recovered = effects.recover_interrupted()
+    unresolved = effects.unresolved_subject_ids(
+        kind=ExternalEffectKind.BROWSER_ACTION,
+        subject_type="browser_session",
+    )
+    with SessionFactory() as session:
+        repository = BrowserRuntimeRepository(session)
+        for session_id in unresolved:
+            record = repository.get_record(session_id)
+            if record is not None and record.state in {
+                BrowserSessionState.STARTING,
+                BrowserSessionState.ACTIVE,
+                BrowserSessionState.USER_TAKEOVER,
+            }:
+                repository.set_state(session_id, BrowserSessionState.USER_TAKEOVER)
+    return recovered
+
+
 def get_browser_service(
     session: SessionDependency, cipher: CipherDependency
 ) -> BrowserRuntimeService:
@@ -50,6 +80,7 @@ def get_browser_service(
         CheckpointRepository(session),
         cipher,
         _worker,
+        _external_effect_service(cipher),
         browser_data_dir=settings.browser_data_dir,
         browser_artifact_dir=settings.browser_artifact_dir,
         default_headless=settings.browser_headless,

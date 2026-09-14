@@ -119,6 +119,8 @@ class BrowserRuntimeRepositoryProtocol(Protocol):
 
     def next_action_sequence(self, session_id: str) -> int: ...
 
+    def release_transaction(self) -> None: ...
+
 
 class CandidateKnowledgeRepositoryProtocol(Protocol):
     def add_import_bundle(

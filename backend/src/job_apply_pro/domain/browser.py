@@ -3,6 +3,7 @@ import json
 import re
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
@@ -44,6 +45,14 @@ class BrowserActionKind(StrEnum):
     UPLOAD = "UPLOAD"
     WAIT_FOR = "WAIT_FOR"
     SCREENSHOT = "SCREENSHOT"
+
+
+class BrowserActionDisposition(StrEnum):
+    """Worker proof about whether one admitted browser mutation took effect."""
+
+    NOT_APPLIED = "NOT_APPLIED"
+    CONFIRMED = "CONFIRMED"
+    UNCERTAIN = "UNCERTAIN"
 
 
 class BrowserControlKind(StrEnum):
@@ -114,9 +123,9 @@ class BrowserVerification(BaseModel):
 class BrowserRetryPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    max_attempts: int = Field(default=1, ge=1, le=3)
-    backoff_ms: int = Field(default=0, ge=0, le=5_000)
-    allow_after_worker_restart: bool = False
+    max_attempts: Literal[1] = 1
+    backoff_ms: Literal[0] = 0
+    allow_after_worker_restart: Literal[False] = False
 
 
 class BrowserAction(BaseModel):

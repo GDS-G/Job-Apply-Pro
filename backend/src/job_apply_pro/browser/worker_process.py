@@ -14,6 +14,7 @@ from playwright.sync_api import BrowserContext, Locator, Page, Playwright, sync_
 
 from job_apply_pro.domain.browser import (
     BrowserAction,
+    BrowserActionDisposition,
     BrowserActionKind,
     BrowserObservation,
     BrowserObservedControl,
@@ -120,38 +121,45 @@ class BrowserWorker:
     def execute(self, session_id: str, action_data: dict[str, Any]) -> dict[str, object]:
         session = self._require(session_id)
         action = BrowserAction.model_validate(action_data)
-        attempts = 0
-        error: Exception | None = None
-        for attempts in range(1, action.retry.max_attempts + 1):
+        for precondition in action.preconditions:
             try:
-                for precondition in action.preconditions:
-                    if not self._verify(session, precondition):
-                        raise RuntimeError(f"Precondition {precondition.kind} failed")
-                self._perform(session, action)
-                self._assert_allowed(session, session.active_page.url)
-                verified = self._verify(session, action.verification)
-                if not verified:
-                    raise RuntimeError(f"Verification {action.verification.kind} failed")
-                observation = self._observe(session)
+                satisfied = self._verify(session, precondition)
+            except Exception:
+                # A lost/failed proof cannot authorize another mutation attempt.
+                return self._uncertain_result(session, "PRECONDITION_PROOF_UNAVAILABLE")
+            if not satisfied:
                 return {
-                    "verified": True,
-                    "attempts": attempts,
-                    "observation": observation.model_dump(mode="json"),
-                    "error": None,
+                    "disposition": BrowserActionDisposition.NOT_APPLIED.value,
+                    "verified": False,
+                    "attempts": 1,
+                    "observation": self._observe(session).model_dump(mode="json"),
+                    "error_code": "PRECONDITION_FAILED",
                 }
-            except Exception as caught:  # worker boundary normalizes Playwright errors
-                error = caught
-                if attempts < action.retry.max_attempts:
-                    if action.retry.allow_after_worker_restart:
-                        session = self._restart_session(session)
-                    if action.retry.backoff_ms:
-                        time.sleep(action.retry.backoff_ms / 1000)
-        observation = self._observe(session)
+
+        try:
+            # From this line onward, any failure or missing response is ambiguous.
+            self._perform(session, action)
+            self._assert_allowed(session, session.active_page.url)
+            if not self._verify(session, action.verification):
+                return self._uncertain_result(session, "POSTCONDITION_UNVERIFIED")
+            observation = self._observe(session)
+            return {
+                "disposition": BrowserActionDisposition.CONFIRMED.value,
+                "verified": True,
+                "attempts": 1,
+                "observation": observation.model_dump(mode="json"),
+                "error_code": None,
+            }
+        except Exception:  # worker boundary emits only static privacy-safe codes
+            return self._uncertain_result(session, "ACTION_EXECUTION_UNCERTAIN")
+
+    def _uncertain_result(self, session: WorkerSession, error_code: str) -> dict[str, object]:
         return {
+            "disposition": BrowserActionDisposition.UNCERTAIN.value,
             "verified": False,
-            "attempts": attempts,
-            "observation": observation.model_dump(mode="json"),
-            "error": str(error)[:1_000] if error else "Browser action failed",
+            "attempts": 1,
+            "observation": self._observe(session).model_dump(mode="json"),
+            "error_code": error_code,
         }
 
     def restart_session(self, session_id: str) -> dict[str, object]:

@@ -8,7 +8,7 @@ from threading import Thread
 
 import pytest
 from pydantic import AnyHttpUrl
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.browser.client import BrowserWorkerClient
 from job_apply_pro.challenges.answer_mapping import ChallengeAnswerMapper
@@ -38,8 +38,10 @@ from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.browser_runtime import BrowserRuntimeService
 from job_apply_pro.services.challenges import ChallengeService, ChallengeServiceError
 from job_apply_pro.services.core import CoreService
+from job_apply_pro.services.external_effects import ExternalEffectService
 from job_apply_pro.services.workbench import WorkbenchService
 from job_apply_pro.storage.challenge_repository import ChallengeRepository
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
 from job_apply_pro.storage.repositories import (
     ApplicationRepository,
@@ -175,6 +177,10 @@ def _services(
         CheckpointRepository(session),
         cipher,
         worker,
+        ExternalEffectService(
+            ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+            cipher,
+        ),
         browser_data_dir=tmp_path / "browser",
         browser_artifact_dir=tmp_path / "artifacts",
         default_headless=True,

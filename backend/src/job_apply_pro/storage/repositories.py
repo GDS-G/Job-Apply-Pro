@@ -517,6 +517,13 @@ class BrowserRuntimeRepository:
         latest = self._session.scalar(statement)
         return 1 if latest is None else latest + 1
 
+    def release_transaction(self) -> None:
+        """End the read transaction before an independent effect-ledger commit."""
+
+        if self._session.new or self._session.dirty or self._session.deleted:
+            raise RuntimeError("Browser repository has pending writes at effect boundary")
+        self._session.commit()
+
     def _action_count(self, session_id: str) -> int:
         statement = select(func.count(BrowserActionRow.id)).where(
             BrowserActionRow.session_id == session_id

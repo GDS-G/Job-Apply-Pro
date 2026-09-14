@@ -1,0 +1,288 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+from sqlalchemy.orm import Session, sessionmaker
+
+from job_apply_pro.api.routes import browser as browser_routes
+from job_apply_pro.browser.client import BrowserWorkerUnavailableError
+from job_apply_pro.domain.browser import (
+    BrowserAction,
+    BrowserActionKind,
+    BrowserEngine,
+    BrowserObservation,
+    BrowserRetryPolicy,
+    BrowserSessionRecord,
+    BrowserSessionState,
+    BrowserVerification,
+)
+from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
+from job_apply_pro.domain.workbench import WorkflowRunSnapshot
+from job_apply_pro.domain.workflow import TransitionCommand, WorkflowState
+from job_apply_pro.security.encryption import SensitiveDataCipher
+from job_apply_pro.security.keys import StaticKeyProvider
+from job_apply_pro.services.browser_runtime import (
+    BrowserActionUncertainError,
+    BrowserRuntimeService,
+    BrowserSessionStateError,
+)
+from job_apply_pro.services.external_effects import ExternalEffectService
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
+from job_apply_pro.storage.repositories import BrowserRuntimeRepository, CheckpointRepository
+
+
+def _observation() -> BrowserObservation:
+    return BrowserObservation(
+        sequence=1,
+        url="http://127.0.0.1/form",
+        title="Fixture",
+        origin="http://127.0.0.1",
+        page_type="FORM",
+        page_fingerprint="fixture-page-v1",
+        tabs=[],
+        accessibility_snapshot="",
+        visible_text="Fixture",
+        controls=[],
+        validation_errors=[],
+        modals=[],
+        console_errors=[],
+        network_failures=[],
+        upload_status=[],
+        download_status=[],
+        screenshot_path="fixture.png",
+        observed_at=datetime.now(UTC),
+    )
+
+
+class _Workbench:
+    def __init__(self) -> None:
+        self.snapshot = WorkflowRunSnapshot(
+            workflow_id="workflow-ledger",
+            application_id="application-ledger",
+            profile_id="profile-ledger",
+            candidate_display_name="Fixture User",
+            employer="Fixture",
+            title="Engineer",
+            state=WorkflowState.APPLICATION_OPENED,
+            progress=40,
+            updated_at=datetime.now(UTC),
+            events=[],
+        )
+
+    def get_snapshot(self, workflow_id: str) -> WorkflowRunSnapshot | None:
+        return self.snapshot if workflow_id == self.snapshot.workflow_id else None
+
+    def list_snapshots(self) -> list[WorkflowRunSnapshot]:
+        return [self.snapshot]
+
+    def apply_transition(self, workflow_id: str, command: TransitionCommand) -> WorkflowRunSnapshot:
+        del workflow_id, command
+        raise NotImplementedError
+
+
+class _Worker:
+    def __init__(self, result: dict[str, object] | Exception) -> None:
+        self.result = result
+        self.calls = 0
+
+    @property
+    def running(self) -> bool:
+        return True
+
+    def call(
+        self,
+        method: str,
+        params: dict[str, object],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, object]:
+        del params, timeout_seconds
+        assert method == "execute"
+        self.calls += 1
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def _service(
+    session: Session,
+    tmp_path: Path,
+    outcome: dict[str, object] | Exception,
+) -> tuple[BrowserRuntimeService, ExternalEffectService, _Worker]:
+    now = datetime.now(UTC)
+    observation = _observation()
+    BrowserRuntimeRepository(session).add(
+        BrowserSessionRecord(
+            id="00000000-0000-4000-8000-000000000101",
+            workflow_id="workflow-ledger",
+            engine=BrowserEngine.CHROMIUM,
+            profile_name="ledger-fixture",
+            state=BrowserSessionState.ACTIVE,
+            current_url=observation.url,
+            allowed_origins=[observation.origin],
+            observation=observation,
+            action_count=0,
+            created_at=now,
+            updated_at=now,
+            user_data_dir=str(tmp_path / "browser"),
+            artifact_dir=str(tmp_path / "artifacts"),
+            headless=True,
+        )
+    )
+    cipher = SensitiveDataCipher(StaticKeyProvider(b"e" * 32))
+    effects = ExternalEffectService(
+        ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+        cipher,
+    )
+    worker = _Worker(outcome)
+    return (
+        BrowserRuntimeService(
+            BrowserRuntimeRepository(session),
+            _Workbench(),
+            CheckpointRepository(session),
+            cipher,
+            worker,
+            effects,
+            browser_data_dir=tmp_path / "browser",
+            browser_artifact_dir=tmp_path / "artifacts",
+            default_headless=True,
+            automation_enabled=False,
+        ),
+        effects,
+        worker,
+    )
+
+
+def _action() -> BrowserAction:
+    return BrowserAction(
+        kind=BrowserActionKind.SCREENSHOT,
+        intended_result="Capture the reviewed fixture",
+        verification=BrowserVerification(),
+    )
+
+
+def test_confirmed_worker_result_uses_attempt_as_action_identity(
+    session: Session, tmp_path: Path
+) -> None:
+    observation = _observation()
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        {
+            "disposition": "CONFIRMED",
+            "verified": True,
+            "attempts": 1,
+            "observation": observation.model_dump(mode="json"),
+            "error_code": None,
+        },
+    )
+
+    result = service.execute_action("00000000-0000-4000-8000-000000000101", _action())
+
+    record = effects.get(effects.list_public()[0].id)
+    assert record is not None
+    assert worker.calls == 1
+    assert result.id == record.attempts[0].id
+    assert record.operation.status is ExternalEffectStatus.CONFIRMED
+    assert record.operation.result_reference == f"browser-action:{result.id}"
+    assert service.list_actions(result.session_id)[0].id == result.id
+
+
+def test_known_precondition_failure_is_terminal_without_takeover(
+    session: Session, tmp_path: Path
+) -> None:
+    observation = _observation()
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        {
+            "disposition": "NOT_APPLIED",
+            "verified": False,
+            "attempts": 1,
+            "observation": observation.model_dump(mode="json"),
+            "error_code": "PRECONDITION_FAILED",
+        },
+    )
+
+    result = service.execute_action("00000000-0000-4000-8000-000000000101", _action())
+
+    assert worker.calls == 1
+    assert not result.verified
+    assert result.error == "PRECONDITION_FAILED"
+    assert effects.list_public()[0].status is ExternalEffectStatus.FAILED
+    assert service.get_session(result.session_id).state is BrowserSessionState.ACTIVE
+
+
+def test_lost_worker_response_is_uncertain_and_blocks_resume(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("raw worker detail must not persist"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+
+    with pytest.raises(BrowserActionUncertainError, match="automatic retry is blocked"):
+        service.execute_action(session_id, _action())
+
+    assert worker.calls == 1
+    assert effects.list_public()[0].status is ExternalEffectStatus.UNCERTAIN
+    assert service.get_session(session_id).state is BrowserSessionState.USER_TAKEOVER
+    assert service.list_actions(session_id)[0].error == "WORKER_RESPONSE_UNAVAILABLE"
+    assert "raw worker detail" not in service.list_actions(session_id)[0].model_dump_json()
+    assert effects.unresolved_subject_ids(
+        kind=ExternalEffectKind.BROWSER_ACTION,
+        subject_type="browser_session",
+    ) == [session_id]
+    with pytest.raises(BrowserSessionStateError, match="unresolved external action"):
+        service.resume(session_id)
+    with pytest.raises(BrowserSessionStateError, match="not active"):
+        service.execute_action(session_id, _action())
+    assert worker.calls == 1
+
+
+def test_startup_recovery_marks_interrupted_browser_session_for_takeover(
+    session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, effects, _worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("unused"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    request = _action().model_dump(mode="json")
+    admission = effects.admit(
+        effect_key="browser:startup-recovery:1",
+        kind=ExternalEffectKind.BROWSER_ACTION,
+        subject_type="browser_session",
+        subject_id=session_id,
+        actor="browser-runtime",
+        request=request,
+    )
+    attempt = effects.prepare_attempt(
+        admission.operation.id,
+        provider="playwright",
+        target_code="SCREENSHOT",
+        request=request,
+    )
+    effects.begin_dispatch(admission.operation.id, attempt.id)
+    factory = sessionmaker(bind=session.get_bind(), expire_on_commit=False)
+    monkeypatch.setattr(browser_routes, "SessionFactory", factory)
+
+    recovered = browser_routes.recover_browser_external_effects(
+        SensitiveDataCipher(StaticKeyProvider(b"e" * 32))
+    )
+
+    assert recovered == 1
+    assert service.get_session(session_id).state is BrowserSessionState.USER_TAKEOVER
+    record = effects.get(admission.operation.id)
+    assert record is not None
+    assert record.operation.status is ExternalEffectStatus.UNCERTAIN
+    assert record.operation.error_code == "PROCESS_INTERRUPTED"
+
+
+def test_browser_retry_contract_rejects_more_than_one_attempt() -> None:
+    with pytest.raises(ValidationError):
+        BrowserRetryPolicy(max_attempts=2)
