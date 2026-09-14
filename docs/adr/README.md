@@ -2,6 +2,8 @@
 
 ADRs capture durable decisions that affect architecture, security, contracts, persistence, or delivery. Accepted records are immutable; supersede them with a new ADR rather than rewriting history.
 
+- [ADR-0072: Calendar attempt admission](0072-calendar-attempt-admission.md)
+
 - [ADR-0071: Durable restore rollback](0071-durable-restore-rollback.md)
 
 - [ADR-0070: Reviewed job readiness](0070-reviewed-job-readiness.md)
