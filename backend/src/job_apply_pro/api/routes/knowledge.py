@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from sqlalchemy.orm import Session
 
 from job_apply_pro.ai.configuration import build_ai_registry
-from job_apply_pro.api.routes.ai import get_media_cleanup_service
+from job_apply_pro.api.routes.ai import get_external_effect_service, get_media_cleanup_service
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
 from job_apply_pro.documents.extractors import DocumentExtractionError, DocumentIngestionOptions
@@ -104,6 +104,7 @@ def get_knowledge_service(
             ),
             AIGatewayRepository(session),
             cipher,
+            get_external_effect_service(cipher),
         ),
     )
 

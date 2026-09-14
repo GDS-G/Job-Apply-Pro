@@ -31,6 +31,22 @@ class AIProviderUnavailableError(AIProviderError):
     pass
 
 
+class AIProviderNotAppliedError(AIProviderError):
+    """Local pre-dispatch validation proves no provider request was sent."""
+
+
+class AIProviderRejectedError(AIProviderError):
+    """The provider returned an explicit HTTP rejection."""
+
+
+class AIProviderResponseError(AIProviderError):
+    """A complete provider response was received but could not be used."""
+
+
+class AIProviderUncertainError(AIProviderUnavailableError):
+    """Dispatch began but a trustworthy provider response was not received."""
+
+
 class AIProviderMediaRetentionError(AIProviderError):
     """Remote media retention is unresolved; do not retry or use another route."""
 
@@ -76,7 +92,7 @@ class OpenAICompatibleProvider:
                 elif part.kind == "image_url":
                     user_content.append({"type": "image_url", "image_url": {"url": part.value}})
                 else:
-                    raise AIProviderError(
+                    raise AIProviderNotAppliedError(
                         "OpenAI-compatible media bytes require a provider-specific upload adapter"
                     )
         payload: dict[str, object] = {
@@ -124,7 +140,9 @@ class OpenAICompatibleProvider:
                 output_tokens=int(cast(int, usage.get("completion_tokens", 0))),
             )
         except (KeyError, IndexError, TypeError, ValueError) as error:
-            raise AIProviderError("Provider returned an invalid completion envelope") from error
+            raise AIProviderResponseError(
+                "Provider returned an invalid completion envelope"
+            ) from error
 
     def embed(self, model: str, texts: list[str], timeout_seconds: float) -> list[list[float]]:
         response = self._post(
@@ -139,9 +157,11 @@ class OpenAICompatibleProvider:
                 [float(value) for value in cast(list[float], row["embedding"])] for row in rows
             ]
         except (KeyError, TypeError, ValueError) as error:
-            raise AIProviderError("Provider returned an invalid embedding envelope") from error
+            raise AIProviderResponseError(
+                "Provider returned an invalid embedding envelope"
+            ) from error
         if len(vectors) != len(texts) or any(not vector for vector in vectors):
-            raise AIProviderError("Provider returned incomplete embeddings")
+            raise AIProviderResponseError("Provider returned incomplete embeddings")
         return vectors
 
     def _post(self, path: str, payload: dict[str, object], timeout: float) -> dict[str, object]:
@@ -157,13 +177,22 @@ class OpenAICompatibleProvider:
             ) as client:
                 response = client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
-                result = response.json()
-        except (httpx.HTTPError, ValueError) as error:
-            raise AIProviderUnavailableError(
-                f"Provider {self.definition.id} request failed"
+        except httpx.HTTPStatusError as error:
+            raise AIProviderRejectedError(
+                f"Provider {self.definition.id} rejected the request"
+            ) from error
+        except httpx.RequestError as error:
+            raise AIProviderUncertainError(
+                f"Provider {self.definition.id} response is uncertain"
+            ) from error
+        try:
+            result = response.json()
+        except (ValueError, RecursionError) as error:
+            raise AIProviderResponseError(
+                f"Provider {self.definition.id} returned invalid JSON"
             ) from error
         if not isinstance(result, dict):
-            raise AIProviderError("Provider returned a non-object response")
+            raise AIProviderResponseError("Provider returned a non-object response")
         return result
 
     @staticmethod
@@ -243,10 +272,14 @@ class GeminiProvider:
                 if part.kind == "text":
                     input_blocks.append({"type": "text", "text": part.value})
                 elif part.kind == "image_url":
-                    raise AIProviderError("Gemini does not fetch user-supplied media URLs")
+                    raise AIProviderNotAppliedError(
+                        "Gemini does not fetch user-supplied media URLs"
+                    )
                 else:
                     if not request.media_upload_consent:
-                        raise AIProviderError("Gemini media upload requires explicit consent")
+                        raise AIProviderNotAppliedError(
+                            "Gemini media upload requires explicit consent"
+                        )
                     if journal is None:
                         if self._journal_factory is None:
                             raise AIProviderMediaRetentionError(
@@ -296,7 +329,7 @@ class GeminiProvider:
             self._remaining_work(budget.deadline)
             status = cast(str, response["status"])
             if status not in {"completed", "requires_action"}:
-                raise AIProviderError("Gemini interaction did not complete")
+                raise AIProviderResponseError("Gemini interaction did not complete")
             steps = response["steps"]
             if not isinstance(steps, list):
                 raise TypeError("interaction steps are invalid")
@@ -330,7 +363,7 @@ class GeminiProvider:
                         )
                     )
             if not content_parts and not tool_calls:
-                raise AIProviderError("Gemini returned no usable output")
+                raise AIProviderResponseError("Gemini returned no usable output")
             usage = response.get("usage", {})
             if not isinstance(usage, dict):
                 raise TypeError("interaction usage is invalid")
@@ -351,7 +384,9 @@ class GeminiProvider:
         except AIProviderError:
             raise
         except (KeyError, TypeError, ValueError) as error:
-            raise AIProviderError("Gemini returned an invalid interaction envelope") from error
+            raise AIProviderResponseError(
+                "Gemini returned an invalid interaction envelope"
+            ) from error
         finally:
             if journal is not None:
                 active_error = sys.exception()
@@ -381,7 +416,7 @@ class GeminiProvider:
         journal: MediaJournal,
     ) -> str:
         if not data or len(data) > self._MAX_MEDIA_BYTES:
-            raise AIProviderError("Gemini media exceeds the 5 MiB upload limit")
+            raise AIProviderNotAppliedError("Gemini media exceeds the 5 MiB upload limit")
         journal.renew()
         self._remaining_work(budget.deadline)
         record_id = journal.begin()
@@ -627,14 +662,16 @@ class GeminiProvider:
                 for embedding in embeddings
             ]
         except (KeyError, TypeError, ValueError) as error:
-            raise AIProviderError("Gemini returned an invalid embedding envelope") from error
+            raise AIProviderResponseError(
+                "Gemini returned an invalid embedding envelope"
+            ) from error
         if (
             len(vectors) != len(texts)
             or any(not vector for vector in vectors)
             or len({len(vector) for vector in vectors}) > 1
             or any(not math.isfinite(value) for vector in vectors for value in vector)
         ):
-            raise AIProviderError("Gemini returned incomplete embeddings")
+            raise AIProviderResponseError("Gemini returned incomplete embeddings")
         return vectors
 
     def _post(
@@ -669,24 +706,32 @@ class GeminiProvider:
                 ) as response,
             ):
                 body = self._read_response_body(response, deadline=deadline)
-            try:
-                result = json.loads(body)
-            except RecursionError as error:
-                raise AIProviderError("Gemini response exceeded the JSON nesting limit") from error
-        except AIProviderError:
+        except (AIProviderError, AIProviderMediaRetentionError):
             raise
-        except (httpx.HTTPError, ValueError) as error:
-            raise AIProviderUnavailableError(
-                f"Provider {self.definition.id} request failed"
+        except httpx.HTTPStatusError as error:
+            raise AIProviderRejectedError(
+                f"Provider {self.definition.id} rejected the request"
             ) from error
+        except (httpx.RequestError, ValueError) as error:
+            raise AIProviderUncertainError(
+                f"Provider {self.definition.id} response is uncertain"
+            ) from error
+        try:
+            result = json.loads(body)
+        except RecursionError as error:
+            raise AIProviderResponseError(
+                "Gemini response exceeded the JSON nesting limit"
+            ) from error
+        except ValueError as error:
+            raise AIProviderResponseError("Gemini returned an invalid JSON response") from error
         if not isinstance(result, dict):
-            raise AIProviderError("Gemini returned a non-object response")
+            raise AIProviderResponseError("Gemini returned a non-object response")
         return result
 
     def _remaining_work(self, deadline: float) -> float:
         remaining = deadline - self._clock()
         if remaining <= 0:
-            raise AIProviderError("Gemini invocation exceeded the work time limit")
+            raise AIProviderUncertainError("Gemini invocation exceeded the work time limit")
         return remaining
 
     def _read_response_body(self, response: httpx.Response, *, deadline: float) -> bytes:
@@ -696,7 +741,7 @@ class GeminiProvider:
         for chunk in response.iter_bytes():
             self._remaining_work(deadline)
             if len(body) + len(chunk) > self._MAX_RESPONSE_BYTES:
-                raise AIProviderError("Gemini response exceeded the size limit")
+                raise AIProviderUncertainError("Gemini response exceeded the size limit")
             body.extend(chunk)
         self._remaining_work(deadline)
         return bytes(body)
@@ -727,5 +772,5 @@ class GeminiProvider:
     def _model_name(cls, model: str) -> str:
         name = model.removeprefix("models/")
         if not cls._MODEL_PATTERN.fullmatch(name):
-            raise AIProviderError("Gemini model name is invalid")
+            raise AIProviderNotAppliedError("Gemini model name is invalid")
         return name

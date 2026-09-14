@@ -1,4 +1,4 @@
-"""Explicit schema-0028 forward-restore policy; never reflect an untrusted database.
+"""Explicit schema-0029 forward-restore policy; never reflect an untrusted database.
 
 Source control review is required to admit a new table, column or schema revision.
 The broad dependency set deliberately trades restore availability for preservation.
@@ -11,6 +11,7 @@ from job_apply_pro.domain.ai import AITaskType, DataClassification
 from job_apply_pro.domain.browser import BrowserActionKind, BrowserEngine, BrowserSessionState
 from job_apply_pro.domain.challenges import ChallengeKind, ChallengeStatus
 from job_apply_pro.domain.communications import IntegrationProvider
+from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
 from job_apply_pro.domain.portals import (
     PortalKind,
     SupervisedPortalDisposition,
@@ -514,6 +515,50 @@ TABLES: dict[str, Table] = {
             ("document_version_id", "document_versions", "id"),
         ),
     ),
+    "external_effect_attempts": Table(
+        (
+            Column("id", "text", False, 36),
+            Column("operation_id", "text", False, 36),
+            Column("sequence", "integer", False),
+            Column("provider", "text", False, 200),
+            Column("target_code", "text", False, 200),
+            Column("request_fingerprint", "text", False, 64),
+            Column("native_key_fingerprint", "text", True, 64),
+            Column("status", "text", False, 20),
+            Column("result_reference", "text", True, 200),
+            Column("result_fingerprint", "text", True, 64),
+            Column("error_code", "text", True, 80),
+            Column("input_tokens", "integer", True),
+            Column("output_tokens", "integer", True),
+            Column("cost_micros", "integer", True),
+            Column("created_at", "datetime", False),
+            Column("updated_at", "datetime", False),
+            Column("completed_at", "datetime", True),
+        ),
+        ("id",),
+        (("operation_id", "external_effect_operations", "id"),),
+    ),
+    "external_effect_operations": Table(
+        (
+            Column("id", "text", False, 36),
+            Column("claim_fingerprint", "text", False, 64),
+            Column("kind", "text", False, 40),
+            Column("subject_type", "text", False, 40),
+            Column("subject_id", "text", False, 200),
+            Column("actor", "text", False, 200),
+            Column("request_fingerprint", "text", False, 64),
+            Column("policy_version", "text", False, 200),
+            Column("status", "text", False, 20),
+            Column("result_reference", "text", True, 200),
+            Column("result_fingerprint", "text", True, 64),
+            Column("error_code", "text", True, 80),
+            Column("created_at", "datetime", False),
+            Column("updated_at", "datetime", False),
+            Column("completed_at", "datetime", True),
+        ),
+        ("id",),
+        (),
+    ),
     "fit_scores": Table(
         (
             Column("id", "text", False, 36),
@@ -842,6 +887,8 @@ ROOTS = frozenset(
         "challenge_events",
         "model_invocations",
         "ai_media_cleanup",
+        "external_effect_operations",
+        "external_effect_attempts",
     }
 )
 
@@ -859,13 +906,15 @@ EXACT_SETS = frozenset(
         "provider_sync_states",
         "provider_calendar_events",
         "ai_cache",
+        "external_effect_operations",
+        "external_effect_attempts",
     }
 )
 
 # These mutable snapshots also trigger admission when there is no mutation audit.
 ROOTS = ROOTS | EXACT_SETS
 
-MODERN_REVISION = "20260913_0028"
+MODERN_REVISION = "20260913_0029"
 OPERATIONAL_TABLES = frozenset(
     {"alembic_version", "backup_manifests", "backup_schedules", "restore_plans", "error_records"}
 )
@@ -886,6 +935,9 @@ ENUM_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("model_invocations", "task_type"): frozenset(AITaskType),
     ("model_invocations", "classification"): frozenset(DataClassification),
     ("ai_cache", "classification"): frozenset(DataClassification),
+    ("external_effect_operations", "kind"): frozenset(ExternalEffectKind),
+    ("external_effect_operations", "status"): frozenset(ExternalEffectStatus),
+    ("external_effect_attempts", "status"): frozenset(ExternalEffectStatus),
     ("calendar_mutation_plans", "kind"): frozenset(
         {"CREATE_CALENDAR_EVENT", "UPDATE_CALENDAR_EVENT"}
     ),
@@ -923,9 +975,30 @@ ENUM_FIELDS.update(
 # Only these complete near-modern shapes are admitted without recorded history.
 # Older, unversioned or unknown schemas need an independently reviewed recovery path.
 LEGACY_EMPTY_REVISIONS = {
-    "20260913_0025": frozenset({"job_readiness_reviews", "calendar_mutation_claims"}),
-    "20260913_0026": frozenset({"job_readiness_reviews", "calendar_mutation_claims"}),
-    "20260913_0027": frozenset({"calendar_mutation_claims"}),
+    "20260913_0025": frozenset(
+        {
+            "job_readiness_reviews",
+            "calendar_mutation_claims",
+            "external_effect_operations",
+            "external_effect_attempts",
+        }
+    ),
+    "20260913_0026": frozenset(
+        {
+            "job_readiness_reviews",
+            "calendar_mutation_claims",
+            "external_effect_operations",
+            "external_effect_attempts",
+        }
+    ),
+    "20260913_0027": frozenset(
+        {
+            "calendar_mutation_claims",
+            "external_effect_operations",
+            "external_effect_attempts",
+        }
+    ),
+    "20260913_0028": frozenset({"external_effect_operations", "external_effect_attempts"}),
 }
 
 # SQL uniqueness is checked explicitly even when a corrupted database lost its constraints.
@@ -960,6 +1033,8 @@ UNIQUES: dict[str, tuple[tuple[str, ...], ...]] = {
     "mail_send_claims": (("audit_id",),),
     "calendar_mutation_claims": (("audit_id",),),
     "communication_follow_ups": (("dedupe_key",),),
+    "external_effect_operations": (("claim_fingerprint",),),
+    "external_effect_attempts": (("operation_id", "sequence"),),
 }
 
 # SQLite declarations are part of restore compatibility. ``None`` is the
@@ -1148,6 +1223,20 @@ INDEXES: dict[str, tuple[Index, ...]] = {
     "evidence_sources": (
         Index("ix_evidence_sources_document_version_id", ("document_version_id",)),
         Index("ix_evidence_sources_profile_id", ("profile_id",)),
+    ),
+    "external_effect_attempts": (
+        Index("ix_external_effect_attempt_recovery", ("status", "updated_at")),
+        Index("ix_external_effect_attempts_operation_id", ("operation_id",)),
+        Index("ix_external_effect_attempts_status", ("status",)),
+    ),
+    "external_effect_operations": (
+        Index("ix_external_effect_operation_recovery", ("status", "updated_at")),
+        Index(
+            "ix_external_effect_operation_subject",
+            ("subject_type", "subject_id", "created_at"),
+        ),
+        Index("ix_external_effect_operations_kind", ("kind",)),
+        Index("ix_external_effect_operations_status", ("status",)),
     ),
     "fit_scores": (
         Index("ix_fit_scores_job_id", ("job_id",)),

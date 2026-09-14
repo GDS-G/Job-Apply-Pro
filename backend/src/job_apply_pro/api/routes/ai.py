@@ -32,9 +32,11 @@ from job_apply_pro.services.ai import (
     AIGatewayUnavailableError,
     AIGatewayValidationError,
 )
+from job_apply_pro.services.external_effects import ExternalEffectService
 from job_apply_pro.services.media_cleanup import MediaCleanupService
 from job_apply_pro.storage.ai_repository import AIGatewayRepository
 from job_apply_pro.storage.database import SessionFactory, get_session
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
 from job_apply_pro.storage.media_cleanup_repository import (
     MediaCleanupConflict,
     MediaCleanupRepository,
@@ -45,6 +47,10 @@ SessionDependency = Annotated[Session, Depends(get_session)]
 CipherDependency = Annotated[SensitiveDataCipher, Depends(get_cipher)]
 
 
+def get_external_effect_service(cipher: SensitiveDataCipher) -> ExternalEffectService:
+    return ExternalEffectService(ExternalEffectRepository(SessionFactory), cipher)
+
+
 def get_ai_gateway(session: SessionDependency, cipher: CipherDependency) -> AIGatewayService:
     return AIGatewayService(
         build_ai_registry(
@@ -53,6 +59,7 @@ def get_ai_gateway(session: SessionDependency, cipher: CipherDependency) -> AIGa
         ),
         AIGatewayRepository(session),
         cipher,
+        get_external_effect_service(cipher),
     )
 
 

@@ -6,11 +6,18 @@ import sqlite3
 import time
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from job_apply_pro.domain.browser import BrowserAction, BrowserObservation
 from job_apply_pro.domain.challenges import ChallengeSessionSnapshot
+from job_apply_pro.domain.external_effects import (
+    TERMINAL_EXTERNAL_EFFECT_STATUSES,
+    ExternalEffectAttempt,
+    ExternalEffectKind,
+    ExternalEffectOperation,
+    ExternalEffectStatus,
+)
 from job_apply_pro.storage.restore_history_policy import (
     COMPATIBLE_EXTRA_INDEXES,
     ENUM_FIELDS,
@@ -540,10 +547,87 @@ def require_relational_closure(snapshot: HistorySnapshot) -> None:
         if claim is None or claim["audit_id"] != oldest["id"]:
             raise RestoreHistoryError(UNAVAILABLE)
     for row in snapshot.tables["model_invocations"].values():
-        if row["status"] not in {"SUCCEEDED", "FAILED", "CACHED"}:
+        if row["status"] not in {"SUCCEEDED", "FAILED", "CACHED", "UNCERTAIN"}:
             raise RestoreHistoryError(UNAVAILABLE)
+    _external_effect_ledger(snapshot)
     _ownership_closure(snapshot)
     _browser_challenge_payloads(snapshot)
+
+
+def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
+    """Validate replay ownership and terminal evidence without trusting ORM rows."""
+
+    def payload(row: Row) -> dict[str, object]:
+        result: dict[str, object] = dict(row)
+        for field in ("created_at", "updated_at", "completed_at"):
+            value = row[field]
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise RestoreHistoryError(UNAVAILABLE)
+            parsed = datetime.fromisoformat(value)
+            result[field] = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+        return result
+
+    try:
+        operations = {
+            str(row["id"]): ExternalEffectOperation.model_validate(payload(row))
+            for row in snapshot.tables["external_effect_operations"].values()
+        }
+        attempts_by_operation: dict[str, list[ExternalEffectAttempt]] = {}
+        for row in snapshot.tables["external_effect_attempts"].values():
+            attempt = ExternalEffectAttempt.model_validate(payload(row))
+            attempts_by_operation.setdefault(attempt.operation_id, []).append(attempt)
+    except (TypeError, ValueError):
+        raise RestoreHistoryError(UNAVAILABLE) from None
+
+    for operation_id, operation in operations.items():
+        attempts = sorted(
+            attempts_by_operation.get(operation_id, []), key=lambda item: item.sequence
+        )
+        if [attempt.sequence for attempt in attempts] != list(range(1, len(attempts) + 1)):
+            raise RestoreHistoryError(UNAVAILABLE)
+        if any(
+            attempt.status not in TERMINAL_EXTERNAL_EFFECT_STATUSES for attempt in attempts[:-1]
+        ):
+            raise RestoreHistoryError(UNAVAILABLE)
+        last = attempts[-1] if attempts else None
+        if operation.status is ExternalEffectStatus.PREPARED:
+            if last is not None and last.status not in {
+                ExternalEffectStatus.PREPARED,
+                ExternalEffectStatus.CONFIRMED,
+                ExternalEffectStatus.FAILED,
+            }:
+                raise RestoreHistoryError(UNAVAILABLE)
+        elif operation.status is ExternalEffectStatus.DISPATCHING:
+            if last is None or last.status is not ExternalEffectStatus.DISPATCHING:
+                raise RestoreHistoryError(UNAVAILABLE)
+        else:
+            if last is None or last.status is not operation.status:
+                raise RestoreHistoryError(UNAVAILABLE)
+            if any(
+                getattr(operation, field) != getattr(last, field)
+                for field in ("result_reference", "result_fingerprint", "error_code")
+            ):
+                raise RestoreHistoryError(UNAVAILABLE)
+        if operation.kind is ExternalEffectKind.CALENDAR_UPDATE:
+            # Reserved in the enum, but no production route owns this ledger kind yet.
+            raise RestoreHistoryError(UNAVAILABLE)
+        for attempt in attempts:
+            if attempt.status is not ExternalEffectStatus.CONFIRMED:
+                continue
+            reference = attempt.result_reference
+            if operation.kind is ExternalEffectKind.BROWSER_ACTION:
+                if (
+                    reference != f"browser-action:{attempt.id}"
+                    or (attempt.id,) not in snapshot.tables["browser_actions"]
+                ):
+                    raise RestoreHistoryError(UNAVAILABLE)
+            elif reference == f"model-invocation:{attempt.id}":
+                if (attempt.id,) not in snapshot.tables["model_invocations"]:
+                    raise RestoreHistoryError(UNAVAILABLE)
+            elif reference != f"provider-response:{attempt.id}":
+                raise RestoreHistoryError(UNAVAILABLE)
 
 
 def _browser_challenge_payloads(snapshot: HistorySnapshot) -> None:

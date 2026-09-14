@@ -10,8 +10,8 @@ from image_helpers import synthetic_image_bytes
 from job_apply_pro.ai.providers import (
     AIProviderError,
     AIProviderMediaRetentionError,
+    AIProviderRejectedError,
     AIProviderRuntime,
-    AIProviderUnavailableError,
     GeminiProvider,
 )
 from job_apply_pro.domain.ai import AIInputPart, AIProviderRequest
@@ -362,7 +362,7 @@ def test_malformed_interaction_envelope_is_sanitized_and_media_is_deleted(
 def test_interaction_failure_stays_retryable_only_after_confirmed_cleanup() -> None:
     harness = _Harness()
     harness.interaction = httpx.Response(503)
-    with pytest.raises(AIProviderUnavailableError):
+    with pytest.raises(AIProviderRejectedError):
         harness.provider.complete(_request())
     assert harness.events[-1] == "delete:files/synthetic-image"
 

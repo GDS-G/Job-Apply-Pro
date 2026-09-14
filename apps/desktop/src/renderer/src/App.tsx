@@ -1567,7 +1567,7 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Calendar Attempt Admission v0.62.0-alpha.1</strong>
+              <strong>Durable External-Effect Ledger v0.63.0-alpha.1</strong>
               <p>
                 Account-bound, create-only calendar plans now require exact
                 native review and one durable provider attempt, with invitations

@@ -152,6 +152,12 @@ class AIToolCall(BaseModel):
 class AIGatewayRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    effect_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]*$",
+    )
     task_type: AITaskType
     prompt_id: str = Field(min_length=1, max_length=100)
     input_data: dict[str, object]
@@ -250,6 +256,12 @@ class AIProviderResponse(BaseModel):
 class AIEmbeddingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    effect_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]*$",
+    )
     texts: list[str] = Field(min_length=1, max_length=128)
     profile_id: str | None = None
     classification: DataClassification = DataClassification.ROUTINE
@@ -295,6 +307,12 @@ class AgentRole(StrEnum):
 class AgentRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    effect_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]*$",
+    )
     role: AgentRole
     input_data: dict[str, object]
     profile_id: str | None = None

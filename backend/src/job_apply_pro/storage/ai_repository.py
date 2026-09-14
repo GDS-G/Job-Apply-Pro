@@ -64,6 +64,13 @@ class AIGatewayRepository:
         self._session.commit()
         return record
 
+    def release_transaction(self) -> None:
+        """End cache reads before the independent effect-ledger transaction."""
+
+        if self._session.new or self._session.dirty or self._session.deleted:
+            raise RuntimeError("AI repository has pending writes at effect boundary")
+        self._session.commit()
+
     @staticmethod
     def _cache_record(row: AICacheRow) -> AICacheRecord:
         return AICacheRecord(

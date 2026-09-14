@@ -1178,6 +1178,7 @@ class CandidateKnowledgeService:
                 try:
                     response = self._ai_gateway.invoke(
                         AIGatewayRequest(
+                            effect_key=command.effect_key,
                             task_type=AITaskType.ANSWER,
                             prompt_id="agent.answer",
                             input_data={

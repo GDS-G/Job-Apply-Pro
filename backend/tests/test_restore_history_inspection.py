@@ -8,6 +8,7 @@ from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from alembic import command
@@ -138,7 +139,7 @@ def _remove_constraints(path: Path, table: str) -> None:
 
 @pytest.mark.parametrize("table", sorted(TABLES))
 def test_explicit_descriptor_matches_model_columns_keys_references_and_uniques(table: str) -> None:
-    assert len(TABLES) == 44
+    assert len(TABLES) == 46
     spec = TABLES[table]
     model = Base.metadata.tables[table]
     assert {column.name for column in spec.columns} == set(model.columns.keys())
@@ -405,7 +406,10 @@ def test_inspection_deadline_is_enforced_without_sleeping(
     _inspect_refused(history.database)
 
 
-@pytest.fixture(scope="module", params=["20260913_0025", "20260913_0026", "20260913_0027"])
+@pytest.fixture(
+    scope="module",
+    params=["20260913_0025", "20260913_0026", "20260913_0027", "20260913_0028"],
+)
 def legacy_template(
     request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
 ) -> Path:
@@ -449,6 +453,104 @@ def test_real_modern_migration_physical_schema_is_admitted(tmp_path: Path) -> No
     assert not snapshot.has_history
 
 
+def _seed_prepared_external_effect(
+    history: _HistoryRestore, *, sequence: int = 1
+) -> tuple[str, str]:
+    operation_id = str(uuid4())
+    attempt_id = str(uuid4())
+    _insert(
+        history.database,
+        "external_effect_operations",
+        {
+            "id": operation_id,
+            "claim_fingerprint": "a" * 64,
+            "kind": "AI_COMPLETION",
+            "subject_type": "ai_request",
+            "subject_id": "b" * 64,
+            "actor": "ai-gateway",
+            "request_fingerprint": "c" * 64,
+            "policy_version": "external-effects-v1",
+            "status": "PREPARED",
+            "result_reference": None,
+            "result_fingerprint": None,
+            "error_code": None,
+            "created_at": _NOW.isoformat(),
+            "updated_at": _NOW.isoformat(),
+            "completed_at": None,
+        },
+    )
+    _insert(
+        history.database,
+        "external_effect_attempts",
+        {
+            "id": attempt_id,
+            "operation_id": operation_id,
+            "sequence": sequence,
+            "provider": "local",
+            "target_code": "local.answer",
+            "request_fingerprint": "d" * 64,
+            "native_key_fingerprint": None,
+            "status": "PREPARED",
+            "result_reference": None,
+            "result_fingerprint": None,
+            "error_code": None,
+            "input_tokens": None,
+            "output_tokens": None,
+            "cost_micros": None,
+            "created_at": _NOW.isoformat(),
+            "updated_at": _NOW.isoformat(),
+            "completed_at": None,
+        },
+    )
+    return operation_id, attempt_id
+
+
+def test_prepared_external_effect_history_is_semantically_admitted(
+    history: _HistoryRestore,
+) -> None:
+    _seed_prepared_external_effect(history)
+    _service(history)
+
+
+@pytest.mark.parametrize(
+    ("statement", "parameters"),
+    [
+        (
+            "UPDATE external_effect_operations SET status='DISPATCHING' WHERE id=?",
+            "operation",
+        ),
+        (
+            "UPDATE external_effect_attempts SET sequence=2 WHERE id=?",
+            "attempt",
+        ),
+    ],
+)
+def test_inconsistent_external_effect_state_is_refused(
+    history: _HistoryRestore, statement: str, parameters: str
+) -> None:
+    operation_id, attempt_id = _seed_prepared_external_effect(history)
+    _sql(history.database, statement, (operation_id if parameters == "operation" else attempt_id,))
+    _service_refused(history)
+
+
+def test_confirmed_external_effect_requires_its_local_evidence(
+    history: _HistoryRestore,
+) -> None:
+    operation_id, attempt_id = _seed_prepared_external_effect(history)
+    reference = f"model-invocation:{attempt_id}"
+    for table, identity in (
+        ("external_effect_operations", operation_id),
+        ("external_effect_attempts", attempt_id),
+    ):
+        _sql(
+            history.database,
+            f'UPDATE "{table}" SET status="CONFIRMED", result_reference=?, '
+            "result_fingerprint=?, completed_at=? WHERE id=?",
+            (reference, "e" * 64, _NOW.isoformat(), identity),
+        )
+    _service_refused(history)
+
+
 def test_real_legacy_migration_with_empty_history_and_authority_is_admitted(
     legacy_history: _HistoryRestore,
 ) -> None:
@@ -458,6 +560,7 @@ def test_real_legacy_migration_with_empty_history_and_authority_is_admitted(
         "20260913_0025",
         "20260913_0026",
         "20260913_0027",
+        "20260913_0028",
     }
     assert snapshot.revision != MODERN_REVISION
     assert not snapshot.has_history

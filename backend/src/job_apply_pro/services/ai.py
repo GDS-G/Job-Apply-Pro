@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from datetime import UTC, datetime, timedelta
-from typing import TypeVar, cast
+from typing import NoReturn, TypeVar, cast
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, ValidationError
@@ -17,7 +17,14 @@ from job_apply_pro.ai.prompts import (
     redact_external_data,
     render_prompt,
 )
-from job_apply_pro.ai.providers import AIProviderError, AIProviderMediaRetentionError
+from job_apply_pro.ai.providers import (
+    AIProviderError,
+    AIProviderMediaRetentionError,
+    AIProviderNotAppliedError,
+    AIProviderRejectedError,
+    AIProviderResponseError,
+    AIProviderUncertainError,
+)
 from job_apply_pro.ai.registry import AIRegistry
 from job_apply_pro.domain.ai import (
     AgentRunRequest,
@@ -43,7 +50,13 @@ from job_apply_pro.domain.ai import (
     EvaluationReport,
     PromptTemplate,
 )
+from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
 from job_apply_pro.security.encryption import SensitiveDataCipher
+from job_apply_pro.services.external_effects import (
+    ExternalEffectConsumedError,
+    ExternalEffectService,
+)
+from job_apply_pro.storage.external_effect_repository import ExternalEffectConflictError
 from job_apply_pro.storage.repository_contracts import AIGatewayRepositoryProtocol
 
 
@@ -63,6 +76,10 @@ class AIGatewayUnavailableError(AIGatewayError):
     pass
 
 
+class AIGatewayUncertainError(AIGatewayUnavailableError):
+    """A provider response was lost or incomplete; no automatic retry is safe."""
+
+
 class AIGatewayMediaRetentionError(AIGatewayUnavailableError):
     """A remote media outcome is unresolved; never retry this invocation automatically."""
 
@@ -80,11 +97,13 @@ class AIGatewayService:
         registry: AIRegistry,
         repository: AIGatewayRepositoryProtocol,
         cipher: SensitiveDataCipher,
+        external_effects: ExternalEffectService,
         prompts: dict[str, PromptTemplate] | None = None,
     ) -> None:
         self._registry = registry
         self._repository = repository
         self._cipher = cipher
+        self._external_effects = external_effects
         self._prompts = prompts or default_prompt_registry()
 
     def providers(self) -> list[object]:
@@ -120,10 +139,41 @@ class AIGatewayService:
         last_error: Exception | None = None
         last_provider = routes[-1][0].definition.id
         last_model = routes[-1][1].id
+        last_cache_key = self._cache_key(request, prompt, last_model)
+        operation_id: str | None = None
+        last_attempt_id: str | None = None
+        last_effect_status: ExternalEffectStatus | None = None
+        stop_routing = False
+        effect_request = {
+            "task_type": request.task_type.value,
+            "prompt_version": prompt.version,
+            "schema_version": prompt.schema_version,
+            "profile_id": request.profile_id,
+            "source_version": request.source_version,
+            "classification": request.classification.value,
+            "input_hash": input_hash,
+            "route": route_ids,
+            "cache_mode": request.cache_mode,
+            "output_schema_hash": self._hash(request.output_schema),
+            "tools": [
+                {
+                    "name": tool.name,
+                    "schema_hash": self._hash(tool.input_schema),
+                }
+                for tool in request.tools
+            ],
+            "external_consent": request.external_consent,
+            "media_upload_consent": request.media_upload_consent,
+            "max_cost_micros": request.max_cost_micros,
+            "timeout_seconds": request.timeout_seconds,
+        }
+        effect_subject = self._external_effects.request_fingerprint(effect_request)
+        effect_key = request.effect_key or f"ai-completion:{effect_subject}"
 
-        for provider, model in routes:
+        for route_index, (provider, model) in enumerate(routes):
             last_provider, last_model = provider.definition.id, model.id
             cache_key = self._cache_key(request, prompt, model.id)
+            last_cache_key = cache_key
             prepared_input = self._authorize_input(
                 request.input_data,
                 request.classification,
@@ -159,24 +209,64 @@ class AIGatewayService:
             timeout = min(request.timeout_seconds or policy.timeout_seconds, policy.timeout_seconds)
             for attempt in range(policy.retries_per_model + 1):
                 attempts += 1
-                try:
-                    repair = (
-                        "\nPrevious output failed schema validation. Return only corrected JSON."
-                        if attempt
-                        else ""
-                    )
-                    raw = provider.complete(
-                        AIProviderRequest(
-                            model=model.model,
-                            system_instruction=system + repair,
-                            user_content=user,
-                            input_parts=prepared_parts,
-                            tools=request.tools,
-                            output_schema=request.output_schema,
-                            media_upload_consent=request.media_upload_consent,
-                            timeout_seconds=timeout,
+                repair = (
+                    "\nPrevious output failed schema validation. Return only corrected JSON."
+                    if attempt
+                    else ""
+                )
+                provider_request = AIProviderRequest(
+                    model=model.model,
+                    system_instruction=system + repair,
+                    user_content=user,
+                    input_parts=prepared_parts,
+                    tools=request.tools,
+                    output_schema=request.output_schema,
+                    media_upload_consent=request.media_upload_consent,
+                    timeout_seconds=timeout,
+                )
+                if operation_id is None:
+                    self._repository.release_transaction()
+                    try:
+                        admission = self._external_effects.admit(
+                            effect_key=effect_key,
+                            kind=ExternalEffectKind.AI_COMPLETION,
+                            subject_type="ai_request",
+                            subject_id=effect_subject,
+                            actor="ai-gateway",
+                            request=effect_request,
                         )
+                        operation_id = self._external_effects.require_fresh(admission).operation.id
+                    except (
+                        ExternalEffectConflictError,
+                        ExternalEffectConsumedError,
+                    ) as error:
+                        raise AIGatewayUnavailableError(
+                            "AI request admission is already consumed or requires reconciliation"
+                        ) from error
+                attempt_request = {
+                    "provider_id": provider.definition.id,
+                    "model_id": model.id,
+                    "model": model.model,
+                    "cache_key": cache_key,
+                    "repair_attempt": attempt,
+                    "timeout_seconds": timeout,
+                }
+                try:
+                    effect_attempt = self._external_effects.prepare_attempt(
+                        operation_id,
+                        provider=provider.definition.id,
+                        target_code=model.id,
+                        request=attempt_request,
                     )
+                    last_attempt_id = effect_attempt.id
+                    self._external_effects.begin_dispatch(operation_id, effect_attempt.id)
+                except ExternalEffectConflictError as error:
+                    raise AIGatewayUnavailableError(
+                        "AI request attempt ownership changed; automatic retry is blocked"
+                    ) from error
+                more_attempts = attempt < policy.retries_per_model or route_index < len(routes) - 1
+                try:
+                    raw = provider.complete(provider_request)
                     content = self._validated_content(raw.content, request.output_schema)
                     tool_calls = self._validated_tool_calls(raw.tool_calls, request)
                     cost = self._cost(model, raw.input_tokens, raw.output_tokens)
@@ -190,7 +280,7 @@ class AIGatewayService:
                             f"Model response cost {cost} exceeds the {budget}-micro budget"
                         )
                     response = AIGatewayResponse(
-                        invocation_id=str(uuid4()),
+                        invocation_id=effect_attempt.id,
                         task_type=request.task_type,
                         provider_id=provider.definition.id,
                         model_id=model.id,
@@ -208,30 +298,100 @@ class AIGatewayService:
                         classification=request.classification,
                         created_at=datetime.now(UTC),
                     )
-                    self._record(
-                        response,
-                        request,
-                        input_hash,
-                        cache_key,
-                        route_ids,
-                        started_at,
-                        started_clock,
-                        status="SUCCEEDED",
+                    try:
+                        self._record(
+                            response,
+                            request,
+                            input_hash,
+                            cache_key,
+                            route_ids,
+                            started_at,
+                            started_clock,
+                            status="SUCCEEDED",
+                        )
+                    except Exception as error:
+                        self._raise_local_evidence_failure(
+                            operation_id, effect_attempt.id, cause=error
+                        )
+                    try:
+                        if request.cache_mode != "BYPASS" and policy.cache_ttl_seconds:
+                            self._write_cache(
+                                response, request, cache_key, policy.cache_ttl_seconds
+                            )
+                    except Exception:
+                        # Cache population is optional after the invocation row is durable.
+                        pass
+                    self._external_effects.finish(
+                        operation_id,
+                        effect_attempt.id,
+                        status=ExternalEffectStatus.CONFIRMED,
+                        result_reference=f"model-invocation:{effect_attempt.id}",
+                        result={
+                            "status": "SUCCEEDED",
+                            "input_tokens": raw.input_tokens,
+                            "output_tokens": raw.output_tokens,
+                        },
+                        input_tokens=raw.input_tokens,
+                        output_tokens=raw.output_tokens,
+                        cost_micros=cost,
                     )
-                    if request.cache_mode != "BYPASS" and policy.cache_ttl_seconds:
-                        self._write_cache(response, request, cache_key, policy.cache_ttl_seconds)
                     return response
+                except AIGatewayUncertainError:
+                    raise
                 except AIProviderMediaRetentionError as error:
                     last_error = error
+                    last_effect_status = ExternalEffectStatus.UNCERTAIN
+                    stop_routing = True
                     break
-                except (AIProviderError, AIGatewayValidationError, AIGatewayPolicyError) as error:
+                except AIProviderUncertainError as error:
                     last_error = error
+                    last_effect_status = ExternalEffectStatus.UNCERTAIN
+                    stop_routing = True
+                    break
+                except (AIProviderResponseError, AIGatewayValidationError) as error:
+                    last_error = error
+                    last_effect_status = ExternalEffectStatus.CONFIRMED
+                    if more_attempts:
+                        self._external_effects.finish(
+                            operation_id,
+                            effect_attempt.id,
+                            status=ExternalEffectStatus.CONFIRMED,
+                            result_reference=f"provider-response:{effect_attempt.id}",
+                            result={"status": "INVALID_RESPONSE"},
+                            continue_operation=True,
+                        )
+                        continue
+                    break
+                except AIGatewayPolicyError as error:
+                    last_error = error
+                    last_effect_status = ExternalEffectStatus.CONFIRMED
+                    stop_routing = True
+                    break
+                except AIProviderError as error:
+                    last_error = error
+                    last_effect_status = ExternalEffectStatus.FAILED
+                    if more_attempts:
+                        self._external_effects.finish(
+                            operation_id,
+                            effect_attempt.id,
+                            status=ExternalEffectStatus.FAILED,
+                            error_code=self._provider_error_code(error),
+                            continue_operation=True,
+                        )
+                        continue
+                    break
+                except Exception as error:
+                    last_error = error
+                    last_effect_status = ExternalEffectStatus.UNCERTAIN
+                    stop_routing = True
+                    break
 
-            if isinstance(last_error, AIProviderMediaRetentionError):
+            if stop_routing:
                 break
 
+        error_code = self._provider_error_code(last_error)
         failed = AIGatewayResponse(
-            invocation_id=str(uuid4()),
+            invocation_id=last_attempt_id or str(uuid4()),
             task_type=request.task_type,
             provider_id=last_provider,
             model_id=last_model,
@@ -245,17 +405,45 @@ class AIGatewayService:
             classification=request.classification,
             created_at=datetime.now(UTC),
         )
-        self._record(
-            failed,
-            request,
-            input_hash,
-            self._cache_key(request, prompt, last_model),
-            route_ids,
-            started_at,
-            started_clock,
-            status="FAILED",
-            error_code=type(last_error).__name__ if last_error else "NO_ROUTE",
-        )
+        try:
+            self._record(
+                failed,
+                request,
+                input_hash,
+                last_cache_key,
+                route_ids,
+                started_at,
+                started_clock,
+                status=(
+                    "UNCERTAIN"
+                    if last_effect_status is ExternalEffectStatus.UNCERTAIN
+                    else "FAILED"
+                ),
+                error_code=error_code,
+            )
+        except Exception as error:
+            if operation_id is not None and last_attempt_id is not None:
+                self._raise_local_evidence_failure(operation_id, last_attempt_id, cause=error)
+            raise AIGatewayUnavailableError(
+                "AI invocation evidence could not be persisted"
+            ) from error
+        if operation_id is not None and last_attempt_id is not None:
+            terminal_status = last_effect_status or ExternalEffectStatus.UNCERTAIN
+            if terminal_status is ExternalEffectStatus.CONFIRMED:
+                self._external_effects.finish(
+                    operation_id,
+                    last_attempt_id,
+                    status=terminal_status,
+                    result_reference=f"model-invocation:{last_attempt_id}",
+                    result={"status": "FAILED", "error_code": error_code},
+                )
+            else:
+                self._external_effects.finish(
+                    operation_id,
+                    last_attempt_id,
+                    status=terminal_status,
+                    error_code=error_code,
+                )
         if isinstance(last_error, AIGatewayPolicyError):
             raise last_error
         if isinstance(last_error, AIProviderMediaRetentionError):
@@ -263,10 +451,41 @@ class AIGatewayService:
                 "AI media retention is unresolved; automatic retries and fallback stopped. "
                 "Review provider file retention before another request."
             ) from last_error
+        if isinstance(last_error, AIProviderUncertainError) or not isinstance(
+            last_error,
+            (AIProviderError, AIGatewayValidationError, AIGatewayPolicyError),
+        ):
+            raise AIGatewayUncertainError(
+                "AI provider response is uncertain; automatic retries and fallback stopped"
+            ) from last_error
         raise AIGatewayUnavailableError("Every configured AI route failed safely") from last_error
 
     def embed(self, request: AIEmbeddingRequest) -> AIEmbeddingResponse:
-        for provider, model in self._registry.embedding_routes():
+        routes = self._registry.embedding_routes()
+        route_ids = [model.id for _, model in routes]
+        started_at = datetime.now(UTC)
+        started_clock = time.monotonic()
+        input_hash = self._hash({"texts": request.texts})
+        effect_request = {
+            "task_type": AITaskType.EMBEDDING.value,
+            "profile_id": request.profile_id,
+            "classification": request.classification.value,
+            "input_hash": input_hash,
+            "route": route_ids,
+            "external_consent": request.external_consent,
+        }
+        effect_subject = self._external_effects.request_fingerprint(effect_request)
+        effect_key = request.effect_key or f"ai-embedding:{effect_subject}"
+        operation_id: str | None = None
+        last_attempt_id: str | None = None
+        last_provider = routes[-1][0].definition.id
+        last_model = routes[-1][1].id
+        last_error: Exception | None = None
+        last_effect_status: ExternalEffectStatus | None = None
+        attempts = 0
+
+        for route_index, (provider, model) in enumerate(routes):
+            last_provider, last_model = provider.definition.id, model.id
             try:
                 texts = self._authorize_input(
                     request.texts,
@@ -274,15 +493,163 @@ class AIGatewayService:
                     request.external_consent,
                     provider.definition.external,
                 )
+            except AIGatewayPolicyError as error:
+                last_error = error
+                continue
+            if operation_id is None:
+                self._repository.release_transaction()
+                try:
+                    admission = self._external_effects.admit(
+                        effect_key=effect_key,
+                        kind=ExternalEffectKind.AI_EMBEDDING,
+                        subject_type="ai_request",
+                        subject_id=effect_subject,
+                        actor="ai-gateway",
+                        request=effect_request,
+                    )
+                    operation_id = self._external_effects.require_fresh(admission).operation.id
+                except (
+                    ExternalEffectConflictError,
+                    ExternalEffectConsumedError,
+                ) as error:
+                    raise AIGatewayUnavailableError(
+                        "AI embedding admission is already consumed or requires reconciliation"
+                    ) from error
+            attempt_request = {
+                "provider_id": provider.definition.id,
+                "model_id": model.id,
+                "model": model.model,
+                "input_hash": input_hash,
+                "timeout_seconds": 30,
+            }
+            try:
+                effect_attempt = self._external_effects.prepare_attempt(
+                    operation_id,
+                    provider=provider.definition.id,
+                    target_code=model.id,
+                    request=attempt_request,
+                )
+                last_attempt_id = effect_attempt.id
+                attempts += 1
+                self._external_effects.begin_dispatch(operation_id, effect_attempt.id)
+            except ExternalEffectConflictError as error:
+                raise AIGatewayUnavailableError(
+                    "AI embedding attempt ownership changed; automatic retry is blocked"
+                ) from error
+            try:
                 vectors = provider.embed(model.model, list(texts), 30)
-                return AIEmbeddingResponse(
+                response = AIEmbeddingResponse(
                     provider_id=provider.definition.id,
                     model_id=model.id,
                     vectors=vectors,
                     usage=AIUsage(),
                 )
-            except (AIProviderError, AIGatewayPolicyError):
-                continue
+                try:
+                    self._record_embedding(
+                        invocation_id=effect_attempt.id,
+                        request=request,
+                        response=response,
+                        input_hash=input_hash,
+                        route=route_ids,
+                        attempts=attempts,
+                        started_at=started_at,
+                        started_clock=started_clock,
+                        status="SUCCEEDED",
+                    )
+                except Exception as error:
+                    self._raise_local_evidence_failure(operation_id, effect_attempt.id, cause=error)
+                self._external_effects.finish(
+                    operation_id,
+                    effect_attempt.id,
+                    status=ExternalEffectStatus.CONFIRMED,
+                    result_reference=f"model-invocation:{effect_attempt.id}",
+                    result={
+                        "status": "SUCCEEDED",
+                        "vector_count": len(vectors),
+                    },
+                )
+                return response
+            except AIGatewayUncertainError:
+                raise
+            except AIProviderUncertainError as error:
+                last_error = error
+                last_effect_status = ExternalEffectStatus.UNCERTAIN
+                break
+            except AIProviderResponseError as error:
+                last_error = error
+                last_effect_status = ExternalEffectStatus.CONFIRMED
+            except AIProviderError as error:
+                last_error = error
+                last_effect_status = ExternalEffectStatus.FAILED
+            except Exception as error:
+                last_error = error
+                last_effect_status = ExternalEffectStatus.UNCERTAIN
+                break
+
+            if route_index < len(routes) - 1:
+                if last_effect_status is ExternalEffectStatus.CONFIRMED:
+                    self._external_effects.finish(
+                        operation_id,
+                        effect_attempt.id,
+                        status=ExternalEffectStatus.CONFIRMED,
+                        result_reference=f"provider-response:{effect_attempt.id}",
+                        result={"status": "INVALID_RESPONSE"},
+                        continue_operation=True,
+                    )
+                else:
+                    self._external_effects.finish(
+                        operation_id,
+                        effect_attempt.id,
+                        status=ExternalEffectStatus.FAILED,
+                        error_code=self._provider_error_code(last_error),
+                        continue_operation=True,
+                    )
+
+        error_code = self._provider_error_code(last_error)
+        if operation_id is not None and last_attempt_id is not None:
+            terminal_status = last_effect_status or ExternalEffectStatus.UNCERTAIN
+            try:
+                self._record_embedding(
+                    invocation_id=last_attempt_id,
+                    request=request,
+                    response=None,
+                    input_hash=input_hash,
+                    route=route_ids,
+                    attempts=attempts,
+                    started_at=started_at,
+                    started_clock=started_clock,
+                    status=(
+                        "UNCERTAIN"
+                        if terminal_status is ExternalEffectStatus.UNCERTAIN
+                        else "FAILED"
+                    ),
+                    provider_id=last_provider,
+                    model_id=last_model,
+                    error_code=error_code,
+                )
+            except Exception as error:
+                self._raise_local_evidence_failure(operation_id, last_attempt_id, cause=error)
+            if terminal_status is ExternalEffectStatus.CONFIRMED:
+                self._external_effects.finish(
+                    operation_id,
+                    last_attempt_id,
+                    status=terminal_status,
+                    result_reference=f"model-invocation:{last_attempt_id}",
+                    result={"status": "FAILED", "error_code": error_code},
+                )
+            else:
+                self._external_effects.finish(
+                    operation_id,
+                    last_attempt_id,
+                    status=terminal_status,
+                    error_code=error_code,
+                )
+        if isinstance(last_error, AIProviderUncertainError) or not isinstance(
+            last_error, (AIProviderError, AIGatewayPolicyError)
+        ):
+            raise AIGatewayUncertainError(
+                "AI embedding response is uncertain; automatic fallback stopped"
+            ) from last_error
         raise AIGatewayUnavailableError("Every configured embedding route failed safely")
 
     def rerank(self, request: AIRerankRequest) -> list[AIRerankResult]:
@@ -495,6 +862,93 @@ class AIGatewayService:
             )
         )
 
+    @staticmethod
+    def _provider_error_code(error: Exception | None) -> str:
+        if error is None:
+            return "NO_ROUTE"
+        if isinstance(error, AIProviderMediaRetentionError):
+            return "MEDIA_RETENTION_UNRESOLVED"
+        if isinstance(error, AIProviderUncertainError):
+            return "PROVIDER_RESPONSE_UNCERTAIN"
+        if isinstance(error, AIProviderRejectedError):
+            return "PROVIDER_REJECTED"
+        if isinstance(error, AIProviderNotAppliedError):
+            return "PROVIDER_NOT_APPLIED"
+        if isinstance(error, (AIProviderResponseError, AIGatewayValidationError)):
+            return "PROVIDER_RESPONSE_INVALID"
+        if isinstance(error, AIGatewayPolicyError):
+            return "POLICY_REJECTED"
+        if isinstance(error, AIProviderError):
+            return "PROVIDER_FAILED"
+        return "PROVIDER_OUTCOME_UNCERTAIN"
+
+    def _raise_local_evidence_failure(
+        self,
+        operation_id: str,
+        attempt_id: str,
+        *,
+        cause: Exception,
+    ) -> NoReturn:
+        """Fence a dispatched provider call when its local audit row is not durable."""
+
+        try:
+            self._external_effects.finish(
+                operation_id,
+                attempt_id,
+                status=ExternalEffectStatus.UNCERTAIN,
+                error_code="LOCAL_EVIDENCE_PERSIST_FAILED",
+            )
+        except Exception as ledger_error:
+            raise AIGatewayUncertainError(
+                "AI provider outcome requires reconciliation because local evidence and "
+                "effect-ledger finalization failed"
+            ) from ledger_error
+        raise AIGatewayUncertainError(
+            "AI provider outcome requires reconciliation because local evidence could not be "
+            "persisted"
+        ) from cause
+
+    def _record_embedding(
+        self,
+        *,
+        invocation_id: str,
+        request: AIEmbeddingRequest,
+        response: AIEmbeddingResponse | None,
+        input_hash: str,
+        route: list[str],
+        attempts: int,
+        started_at: datetime,
+        started_clock: float,
+        status: str,
+        provider_id: str | None = None,
+        model_id: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        self._repository.add_invocation(
+            AIInvocationRecord(
+                id=invocation_id,
+                profile_id=request.profile_id,
+                task_type=AITaskType.EMBEDDING,
+                provider_id=response.provider_id if response is not None else provider_id or "none",
+                model_id=response.model_id if response is not None else model_id or "none",
+                prompt_version="embedding-v1",
+                schema_version="vectors-v1",
+                input_hash=input_hash,
+                cache_key=input_hash,
+                classification=request.classification,
+                status=status,
+                attempts=attempts,
+                route=route,
+                input_tokens=0,
+                output_tokens=0,
+                cost_micros=0,
+                latency_ms=max(0, round((time.monotonic() - started_clock) * 1_000)),
+                error_code=error_code,
+                created_at=started_at,
+                completed_at=datetime.now(UTC),
+            )
+        )
+
     def _record(
         self,
         response: AIGatewayResponse,
@@ -538,10 +992,17 @@ class AgentService:
     def __init__(self, gateway: AIGatewayService) -> None:
         self._gateway = gateway
 
-    def run(self, request: AgentRunRequest, *, bypass_cache: bool = False) -> AgentRunResult:
+    def run(
+        self,
+        request: AgentRunRequest,
+        *,
+        bypass_cache: bool = False,
+        effect_key: str | None = None,
+    ) -> AgentRunResult:
         task = AGENT_TASKS[request.role]
         response = self._gateway.invoke(
             AIGatewayRequest(
+                effect_key=effect_key or request.effect_key,
                 task_type=task,
                 prompt_id=f"agent.{request.role.value.casefold()}",
                 input_data=request.input_data,
@@ -568,11 +1029,13 @@ class AIEvaluationHarness:
             failures: list[str] = []
             invocation_ids: list[str] = []
             outputs: list[dict[str, object]] = []
-            for _ in range(case.repeat_count):
+            case_key = hashlib.sha256(case.id.encode()).hexdigest()
+            for repeat_index in range(case.repeat_count):
                 try:
                     result = self._agents.run(
                         case.agent_request,
                         bypass_cache=case.repeat_count > 1,
+                        effect_key=f"evaluation:{case_key}:{repeat_index}",
                     )
                 except AIGatewayError as error:
                     failures.append(type(error).__name__)

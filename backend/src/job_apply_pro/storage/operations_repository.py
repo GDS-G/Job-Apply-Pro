@@ -180,7 +180,7 @@ class OperationsRepository:
             providers[row.provider] = providers.get(row.provider, 0) + 1
         return ModelCostMetrics(
             invocations=len(rows),
-            successful=sum(row.status == "COMPLETED" for row in rows),
+            successful=sum(row.status in {"SUCCEEDED", "CACHED"} for row in rows),
             failed=sum(row.status == "FAILED" for row in rows),
             input_tokens=sum(row.input_tokens for row in rows),
             output_tokens=sum(row.output_tokens for row in rows),

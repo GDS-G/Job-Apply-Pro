@@ -138,7 +138,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Calendar Attempt Admission v0.62.0-alpha.1"),
+      screen.getByText("Durable External-Effect Ledger v0.63.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/production application submission remains disabled/i),

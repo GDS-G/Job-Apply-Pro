@@ -76,6 +76,8 @@ _HISTORY_TABLES = (
     "communication_configurations",
     "model_invocations",
     "ai_media_cleanup",
+    "external_effect_operations",
+    "external_effect_attempts",
 )
 
 
@@ -267,7 +269,7 @@ def history(tmp_path: Path) -> _HistoryRestore:
         engine.dispose()
     with closing(sqlite3.connect(result.database)) as connection, connection:
         connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-        connection.execute("INSERT INTO alembic_version VALUES ('20260913_0028')")
+        connection.execute("INSERT INTO alembic_version VALUES ('20260913_0029')")
     result.documents.mkdir()
     (result.documents / "synthetic-unreferenced.enc").write_text(
         result.cipher.encrypt_bytes(b"synthetic document", context="synthetic-test-document"),

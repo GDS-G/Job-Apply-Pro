@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from pydantic import SecretStr
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from image_helpers import synthetic_image_bytes
 from job_apply_pro.ai.configuration import build_ai_registry
@@ -20,8 +20,9 @@ from job_apply_pro.ai.prompts import AGENT_SCHEMAS
 from job_apply_pro.ai.providers import (
     AIProviderError,
     AIProviderMediaRetentionError,
+    AIProviderRejectedError,
     AIProviderRuntime,
-    AIProviderUnavailableError,
+    AIProviderUncertainError,
     GeminiProvider,
     OpenAICompatibleProvider,
 )
@@ -31,8 +32,10 @@ from job_apply_pro.domain.ai import (
     AgentRole,
     AgentRunRequest,
     AICapability,
+    AIEmbeddingRequest,
     AIGatewayRequest,
     AIInputPart,
+    AIInvocationRecord,
     AIModelDefinition,
     AIProviderDefinition,
     AIProviderRequest,
@@ -45,6 +48,7 @@ from job_apply_pro.domain.ai import (
     EvaluationCase,
     ProviderKind,
 )
+from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
 from job_apply_pro.main import app
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
@@ -55,9 +59,17 @@ from job_apply_pro.services.ai import (
     AIGatewayPolicyError,
     AIGatewayService,
     AIGatewayUnavailableError,
+    AIGatewayUncertainError,
 )
+from job_apply_pro.services.external_effects import ExternalEffectService
 from job_apply_pro.storage.ai_repository import AIGatewayRepository
-from job_apply_pro.storage.models import AICacheRow, ModelInvocationRow
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
+from job_apply_pro.storage.models import (
+    AICacheRow,
+    ExternalEffectAttemptRow,
+    ExternalEffectOperationRow,
+    ModelInvocationRow,
+)
 from media_cleanup_helpers import new_test_journal
 
 
@@ -142,15 +154,20 @@ def _service(
     models: list[AIModelDefinition],
     policies: list[AIRoutingPolicy],
 ) -> AIGatewayService:
+    cipher = SensitiveDataCipher(StaticKeyProvider(b"a" * 32))
     return AIGatewayService(
         AIRegistry(providers, models, policies),
         AIGatewayRepository(session),
-        SensitiveDataCipher(StaticKeyProvider(b"a" * 32)),
+        cipher,
+        ExternalEffectService(
+            ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+            cipher,
+        ),
     )
 
 
 def test_structured_output_falls_back_and_records_encrypted_cache(session: Session) -> None:
-    primary = FakeProvider("primary", [AIProviderError("offline")])
+    primary = FakeProvider("primary", [AIProviderRejectedError("offline")])
     fallback = FakeProvider(
         "fallback",
         [
@@ -183,6 +200,16 @@ def test_structured_output_falls_back_and_records_encrypted_cache(session: Sessi
     invocation = session.scalar(select(ModelInvocationRow))
     assert invocation is not None
     assert invocation.input_hash and invocation.route_json == ["primary.answer", "fallback.answer"]
+    effect = session.scalar(select(ExternalEffectOperationRow))
+    effect_attempts = session.scalars(
+        select(ExternalEffectAttemptRow).order_by(ExternalEffectAttemptRow.sequence)
+    ).all()
+    assert effect is not None and effect.status == ExternalEffectStatus.CONFIRMED.value
+    assert [attempt.status for attempt in effect_attempts] == [
+        ExternalEffectStatus.FAILED.value,
+        ExternalEffectStatus.CONFIRMED.value,
+    ]
+    assert response.invocation_id == effect_attempts[-1].id
 
 
 def test_cache_reuse_avoids_second_provider_call(session: Session) -> None:
@@ -200,6 +227,8 @@ def test_cache_reuse_avoids_second_provider_call(session: Session) -> None:
     assert second.invocation_id != first.invocation_id
     assert len(provider.requests) == 1
     assert len(session.scalars(select(ModelInvocationRow)).all()) == 2
+    assert len(session.scalars(select(ExternalEffectOperationRow)).all()) == 1
+    assert len(session.scalars(select(ExternalEffectAttemptRow)).all()) == 1
 
 
 def test_media_retention_failure_stops_retries_fallback_and_cache(session: Session) -> None:
@@ -224,10 +253,169 @@ def test_media_retention_failure_stops_retries_fallback_and_cache(session: Sessi
     assert session.scalar(select(AICacheRow)) is None
     invocation = session.scalar(select(ModelInvocationRow))
     assert invocation is not None
-    assert invocation.status == "FAILED" and invocation.attempts == 1
+    assert invocation.status == "UNCERTAIN" and invocation.attempts == 1
     assert invocation.provider == "primary"
-    assert invocation.error_code == "AIProviderMediaRetentionError"
+    assert invocation.error_code == "MEDIA_RETENTION_UNRESOLVED"
     assert len(invocation.input_hash) == 64 and len(invocation.cache_key) == 64
+    effect = session.scalar(select(ExternalEffectOperationRow))
+    assert effect is not None and effect.status == ExternalEffectStatus.UNCERTAIN.value
+    assert effect.error_code == "MEDIA_RETENTION_UNRESOLVED"
+
+
+def test_uncertain_provider_response_stops_fallback_and_sanitizes_ledger(
+    session: Session,
+) -> None:
+    primary = FakeProvider("primary", [AIProviderUncertainError("private transport information")])
+    fallback = FakeProvider("fallback", [])
+    models = _models("primary", "fallback")
+    service = _service(
+        session,
+        [primary, fallback],
+        models,
+        [_policy(*(model.id for model in models), retries=2)],
+    )
+
+    request = _request(effect_key="fixture:uncertain-completion")
+    with pytest.raises(AIGatewayUncertainError, match="automatic retries and fallback stopped"):
+        service.invoke(request)
+
+    with pytest.raises(AIGatewayUnavailableError, match="admission is already consumed"):
+        service.invoke(request)
+
+    assert len(primary.requests) == 1
+    assert not fallback.requests
+    invocation = session.scalar(select(ModelInvocationRow))
+    effect = session.scalar(select(ExternalEffectOperationRow))
+    assert invocation is not None and invocation.status == "UNCERTAIN"
+    assert invocation.error_code == "PROVIDER_RESPONSE_UNCERTAIN"
+    assert effect is not None and effect.status == ExternalEffectStatus.UNCERTAIN.value
+    assert "private transport information" not in str(invocation.error_code)
+
+
+def test_embedding_provider_call_is_durably_journaled(session: Session) -> None:
+    provider = FakeProvider("local", [])
+    model = AIModelDefinition(
+        id="local.embedding",
+        provider_id="local",
+        model="embedding-fixture",
+        capabilities={AICapability.EMBEDDING},
+        context_window=8_192,
+    )
+    policy = AIRoutingPolicy(
+        task_type=AITaskType.EMBEDDING,
+        model_order=[model.id],
+        required_capabilities={AICapability.EMBEDDING},
+        allow_external=False,
+        retries_per_model=0,
+    )
+    service = _service(session, [provider], [model], [policy])
+
+    response = service.embed(
+        AIEmbeddingRequest(
+            effect_key="fixture:embedding:1",
+            texts=["one", "two"],
+            profile_id="profile-1",
+        )
+    )
+
+    invocation = session.scalar(select(ModelInvocationRow))
+    effect = session.scalar(select(ExternalEffectOperationRow))
+    attempt = session.scalar(select(ExternalEffectAttemptRow))
+    assert len(response.vectors) == 2
+    assert invocation is not None and invocation.task_type == AITaskType.EMBEDDING.value
+    assert effect is not None and effect.kind == ExternalEffectKind.AI_EMBEDDING.value
+    assert effect.status == ExternalEffectStatus.CONFIRMED.value
+    assert attempt is not None and invocation.id == attempt.id
+
+
+def test_completion_persistence_failure_is_fenced_without_fallback(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary = FakeProvider(
+        "primary",
+        [json.dumps({"answer": "Returned", "evidence_claim_ids": [], "needs_user": False})],
+    )
+    fallback = FakeProvider("fallback", [])
+    models = _models("primary", "fallback")
+    service = _service(
+        session,
+        [primary, fallback],
+        models,
+        [_policy(*(model.id for model in models), retries=2)],
+    )
+
+    def fail_add_invocation(
+        _repository: AIGatewayRepository, _invocation: AIInvocationRecord
+    ) -> AIInvocationRecord:
+        raise RuntimeError("private database detail")
+
+    monkeypatch.setattr(AIGatewayRepository, "add_invocation", fail_add_invocation)
+
+    with pytest.raises(AIGatewayUncertainError, match="local evidence could not be persisted"):
+        service.invoke(_request(effect_key="fixture:persistence-failure:completion"))
+
+    effect = session.scalar(select(ExternalEffectOperationRow))
+    attempt = session.scalar(select(ExternalEffectAttemptRow))
+    assert len(primary.requests) == 1
+    assert not fallback.requests
+    assert session.scalar(select(ModelInvocationRow)) is None
+    assert effect is not None and effect.status == ExternalEffectStatus.UNCERTAIN.value
+    assert effect.error_code == "LOCAL_EVIDENCE_PERSIST_FAILED"
+    assert attempt is not None and attempt.status == ExternalEffectStatus.UNCERTAIN.value
+
+
+def test_embedding_persistence_failure_is_fenced_without_fallback(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary = FakeProvider("primary", [])
+    fallback = FakeProvider("fallback", [])
+    models = [
+        AIModelDefinition(
+            id=f"{provider_id}.embedding",
+            provider_id=provider_id,
+            model="embedding-fixture",
+            capabilities={AICapability.EMBEDDING},
+            context_window=8_192,
+        )
+        for provider_id in ("primary", "fallback")
+    ]
+    service = _service(
+        session,
+        [primary, fallback],
+        models,
+        [
+            AIRoutingPolicy(
+                task_type=AITaskType.EMBEDDING,
+                model_order=[model.id for model in models],
+                required_capabilities={AICapability.EMBEDDING},
+                allow_external=False,
+                retries_per_model=0,
+            )
+        ],
+    )
+
+    def fail_add_invocation(
+        _repository: AIGatewayRepository, _invocation: AIInvocationRecord
+    ) -> AIInvocationRecord:
+        raise RuntimeError("private database detail")
+
+    monkeypatch.setattr(AIGatewayRepository, "add_invocation", fail_add_invocation)
+
+    with pytest.raises(AIGatewayUncertainError, match="local evidence could not be persisted"):
+        service.embed(
+            AIEmbeddingRequest(
+                effect_key="fixture:persistence-failure:embedding",
+                texts=["one"],
+                profile_id="profile-1",
+            )
+        )
+
+    effect = session.scalar(select(ExternalEffectOperationRow))
+    attempt = session.scalar(select(ExternalEffectAttemptRow))
+    assert session.scalar(select(ModelInvocationRow)) is None
+    assert effect is not None and effect.status == ExternalEffectStatus.UNCERTAIN.value
+    assert effect.error_code == "LOCAL_EVIDENCE_PERSIST_FAILED"
+    assert attempt is not None and attempt.status == ExternalEffectStatus.UNCERTAIN.value
 
 
 def test_cached_media_still_requires_current_upload_consent(session: Session) -> None:
@@ -898,7 +1086,7 @@ def test_gemini_adapter_deletes_media_when_interaction_fails() -> None:
         transport=httpx.MockTransport(handler),
         journal_factory=new_test_journal,
     )
-    with pytest.raises(AIProviderUnavailableError, match="request failed"):
+    with pytest.raises(AIProviderRejectedError, match="rejected"):
         provider.complete(
             AIProviderRequest(
                 model="gemini-fixture",

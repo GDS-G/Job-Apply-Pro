@@ -1,6 +1,6 @@
 export const buildInfo = {
   name: "Calendar Attempt Admission",
-  version: "0.62.0-alpha.1",
+  version: "0.63.0-alpha.1",
   channel: "alpha",
 } as const;
 
