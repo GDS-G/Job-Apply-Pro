@@ -12,6 +12,7 @@ All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 - Add authenticated inspection plus explicit fingerprint-bound rollback that resumes conservatively and removes only known operation-introduced files.
 - Preserve legacy v1 completion/manual recovery while rejecting automatic rollback, forward apply resume, unknown target bytes and rollback after a cleared guard.
 - Add strict database-free recovery CLI commands, package-evidence verification and adversarial publication, crash, concurrency, alias and corruption regressions.
+- Qualify the exact backend-dist and installer payload plus real-process supervisor/recovery protocols; keep signing, protected integration and physical installed Windows recovery as separate release gates.
 
 ## [0.60.0-alpha.1] - Unreleased
 
