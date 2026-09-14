@@ -1,5 +1,5 @@
 export const buildInfo = {
-  name: "Calendar Attempt Admission",
+  name: "Durable External-Effect Ledger",
   version: "0.63.0-alpha.1",
   channel: "alpha",
 } as const;

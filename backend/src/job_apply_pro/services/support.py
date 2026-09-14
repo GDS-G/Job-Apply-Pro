@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Calendar Attempt Admission"
+    BUILD_NAME = "Durable External-Effect Ledger"
 
     def __init__(
         self,

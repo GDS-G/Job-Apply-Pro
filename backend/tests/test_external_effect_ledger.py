@@ -74,9 +74,9 @@ def test_confirmed_effect_is_committed_before_and_after_dispatch(tmp_path: Path)
     assert dispatching.operation.status is ExternalEffectStatus.DISPATCHING
     assert dispatching.attempts[0].status is ExternalEffectStatus.DISPATCHING
     with factory() as session:
-        assert session.get(ExternalEffectOperationRow, admission.operation.id).status == (
-            ExternalEffectStatus.DISPATCHING.value
-        )
+        operation = session.get(ExternalEffectOperationRow, admission.operation.id)
+        assert operation is not None
+        assert operation.status == ExternalEffectStatus.DISPATCHING.value
 
     finished = service.finish(
         admission.operation.id,
