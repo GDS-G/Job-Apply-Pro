@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Durable Restore Rollback",
-  version: "0.61.0-alpha.1",
+  name: "Calendar Attempt Admission",
+  version: "0.62.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -967,6 +967,41 @@ export interface CalendarEventSnapshot {
   attendees: string[];
   conferencing_url?: string | null;
   location?: string | null;
+}
+
+// Reviewed CREATE fields. V0.62 fails closed on invitations and conference creation.
+export type CalendarCreateFields = Omit<
+  CalendarEventSnapshot,
+  "provider_event_id"
+> & {
+  attendee_notification_policy: "NONE";
+  reminder_policy: "NONE";
+  visibility_policy: "PRIVATE";
+  availability_policy: "BUSY";
+};
+
+export interface CalendarMutationCreate {
+  provider: "GOOGLE_CALENDAR" | "OUTLOOK_CALENDAR";
+  workflow_id?: string | null;
+  event: CalendarCreateFields;
+}
+
+export interface CalendarMutationPlan {
+  id: string;
+  provider: "GOOGLE_CALENDAR" | "OUTLOOK_CALENDAR";
+  workflow_id: string | null;
+  event: CalendarCreateFields | CalendarEventSnapshot;
+  prior_event: CalendarEventSnapshot | null;
+  kind: "CREATE_CALENDAR_EVENT" | "UPDATE_CALENDAR_EVENT";
+  policy_version: "calendar-attempt-v1" | null;
+  wire_contract_version: "calendar-create-wire-v1" | null;
+  account_key: string | null;
+  account_label: string | null;
+  calendar_target: "PRIMARY" | null;
+  id_assignment: "PROVIDER_NATIVE_DEDUPLICATED" | null;
+  provider_dedupe_policy: "NATIVE_ATTEMPT_KEY_V1" | null;
+  fingerprint: string;
+  created_at: string;
 }
 
 export interface SyncedCalendarEvent {
@@ -2011,6 +2046,17 @@ export interface DesktopBridge {
       provider: IntegrationProvider,
     ): Promise<ProviderCalendarSyncResult>;
     listSyncedCalendarEvents(): Promise<SyncedCalendarEvent[]>;
+    createCalendarPlan(
+      input: CalendarMutationCreate,
+    ): Promise<CalendarMutationPlan>;
+    reviewAndCreateCalendarEvent(
+      id: string,
+      fingerprint: string,
+    ): Promise<
+      | CommunicationMutationAudit
+      | null
+      | { outcome: "NOT_DISPATCHED"; reason: "REVIEW_UNAVAILABLE" }
+    >;
     listCommunicationRecords(): Promise<CommunicationRecord[]>;
     listCommunicationDrafts(): Promise<OutboundDraft[]>;
     createCommunicationDraft(

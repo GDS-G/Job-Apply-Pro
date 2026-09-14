@@ -2,6 +2,21 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.62.0-alpha.1] - Unreleased
+
+### Calendar Attempt Admission
+
+- Bind immutable CREATE-only calendar plans to the exact provider account, OAuth connection epoch, primary-calendar target, policy version and provider wire contract reviewed by the user.
+- Freeze each create to private visibility, busy availability and no reminders/invitations; reject updates, attendees, conference creation, recurrence, caller-selected provider IDs, stale bindings and unsupported event fields before a claim or provider call.
+- Atomically reserve one permanent attempt per plan before token resolution or transport; exact-key retries replay the claim while different keys and recovered `PLANNED` outcomes never redispatch.
+- Derive provider-native Google event IDs and Microsoft Graph transaction IDs from the claimed attempt, while treating them as duplicate defenses rather than permission to retry ambiguity.
+- Record only typed definitely-not-applied outcomes as `FAILED`; retain transport, timeout, malformed-response, unexpected and lost-terminal-write outcomes as consumed `UNCERTAIN` or `PLANNED` attempts for reconciliation.
+- Add cancel-default native review that refetches the exact plan and displays provider, account, calendar target, event values, time zone and fixed private/busy/no-reminders/no-invitations policy before execute.
+- Keep credential handles in Electron main while exposing only sanitized integration health to the renderer.
+- Add migration `20260913_0028` and preserve exact claim → audit → plan relationships through the compiled forward-restore history policy.
+- Qualify 1,774 backend tests, 479 default desktop tests, both frozen-backend package copies and the delivered supervisor/recovery protocols; retain protected, physical and live-provider validation as separate gates.
+- Keep calendar UPDATE, unattended writes, provider delivery claims, live acceptance, signing and physical Windows validation outside this source milestone.
+
 ## [0.61.0-alpha.1] - Unreleased
 
 ### Durable Restore Rollback

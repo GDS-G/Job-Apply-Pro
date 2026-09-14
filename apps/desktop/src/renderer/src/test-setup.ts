@@ -178,6 +178,10 @@ const bridge: DesktopBridge = {
       synced_at: new Date(0).toISOString(),
     }),
     listSyncedCalendarEvents: async () => [],
+    createCalendarPlan: async () => {
+      throw new Error("Not implemented in this test.");
+    },
+    reviewAndCreateCalendarEvent: async () => null,
     listCommunicationRecords: async () => [],
     listCommunicationDrafts: async () => [],
     listCommunicationAudits: async () => [],

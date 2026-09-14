@@ -1,9 +1,11 @@
 """Bounded corruption, schema and authority-only forward-restore inspection tests."""
 
 import hashlib
+import json
 import shutil
 import sqlite3
 from contextlib import closing
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,7 +18,13 @@ from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
 
 from job_apply_pro.config import get_settings
 from job_apply_pro.domain.ai import AICacheRecord, DataClassification
-from job_apply_pro.domain.communications import CalendarEventSnapshot
+from job_apply_pro.domain.communications import (
+    CalendarEventSnapshot,
+    CalendarMutationPlan,
+    IntegrationProvider,
+    MutationKind,
+)
+from job_apply_pro.integrations.communications import FixtureCalendarProvider
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services import restore_history as guard
@@ -37,7 +45,10 @@ from job_apply_pro.storage.restore_history_policy import (
 from test_forward_restore_history import (
     _NOW,
     _PROVIDER,
+    _calendar_plan,
+    _calendar_service,
     _close_media,
+    _confirmation,
     _HistoryRestore,
     _invocation,
     _media_intent,
@@ -127,7 +138,7 @@ def _remove_constraints(path: Path, table: str) -> None:
 
 @pytest.mark.parametrize("table", sorted(TABLES))
 def test_explicit_descriptor_matches_model_columns_keys_references_and_uniques(table: str) -> None:
-    assert len(TABLES) == 43
+    assert len(TABLES) == 44
     spec = TABLES[table]
     model = Base.metadata.tables[table]
     assert {column.name for column in spec.columns} == set(model.columns.keys())
@@ -180,7 +191,7 @@ def test_reviewed_migration_defaults_only_name_protected_columns() -> None:
     [
         "DROP TABLE alembic_version",
         "DELETE FROM alembic_version",
-        "INSERT INTO alembic_version VALUES ('20260913_0027')",
+        "INSERT INTO alembic_version VALUES ('20260913_0028')",
         "UPDATE alembic_version SET version_num='20260913_9999'",
         "UPDATE alembic_version SET version_num='20260814_0023'",
         "DROP TABLE oauth_credentials",
@@ -394,7 +405,7 @@ def test_inspection_deadline_is_enforced_without_sleeping(
     _inspect_refused(history.database)
 
 
-@pytest.fixture(scope="module", params=["20260913_0025", "20260913_0026"])
+@pytest.fixture(scope="module", params=["20260913_0025", "20260913_0026", "20260913_0027"])
 def legacy_template(
     request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
 ) -> Path:
@@ -443,10 +454,15 @@ def test_real_legacy_migration_with_empty_history_and_authority_is_admitted(
 ) -> None:
     before = legacy_history.database.read_bytes()
     snapshot = inspection.inspect_history(legacy_history.database)
-    assert snapshot.revision in {"20260913_0025", "20260913_0026"}
+    assert snapshot.revision in {
+        "20260913_0025",
+        "20260913_0026",
+        "20260913_0027",
+    }
     assert snapshot.revision != MODERN_REVISION
     assert not snapshot.has_history
     assert not snapshot.tables["job_readiness_reviews"]
+    assert not snapshot.tables["calendar_mutation_claims"]
     _service(legacy_history)
     assert legacy_history.database.read_bytes() == before
 
@@ -508,6 +524,220 @@ def test_real_legacy_migration_with_history_or_cache_authority_is_refused(
             "restore was not applied"
         ),
     )
+
+
+def _seed_calendar_attempt(history: _HistoryRestore) -> tuple[str, str, str]:
+    adapter = FixtureCalendarProvider(_PROVIDER)
+    with history.session() as session:
+        service = _calendar_service(session, history, adapter)
+        plan = _calendar_plan(service, _PROVIDER)
+        audit = service.execute_calendar_mutation(plan.id, _confirmation(plan))
+    return plan.id, audit.id, plan.fingerprint
+
+
+@pytest.mark.parametrize(
+    ("table", "identity_column"),
+    [
+        ("calendar_mutation_plans", "id"),
+        ("communication_mutation_audits", "id"),
+        ("calendar_mutation_claims", "plan_id"),
+    ],
+)
+def test_calendar_plan_audit_or_claim_loss_is_never_valid_history(
+    history: _HistoryRestore, table: str, identity_column: str
+) -> None:
+    plan_id, audit_id, _fingerprint = _seed_calendar_attempt(history)
+    identity = (
+        plan_id if identity_column != "id" or table != "communication_mutation_audits" else audit_id
+    )
+    _sql(history.database, f'DELETE FROM "{table}" WHERE "{identity_column}"=?', (identity,))
+    _service_refused(history)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("provider", "GMAIL"),
+        ("kind", "UPDATE_CALENDAR_EVENT"),
+        ("resource_id", "different-plan"),
+        ("fingerprint", "b" * 64),
+    ],
+)
+def test_calendar_claim_rejects_changed_audit_relationship(
+    history: _HistoryRestore, field: str, value: str
+) -> None:
+    _plan_id, audit_id, _fingerprint = _seed_calendar_attempt(history)
+    _sql(
+        history.database,
+        f'UPDATE communication_mutation_audits SET "{field}"=? WHERE id=?',
+        (value, audit_id),
+    )
+    _service_refused(history)
+
+
+def test_calendar_claim_cannot_be_fabricated_for_a_noncalendar_audit(
+    history: _HistoryRestore,
+) -> None:
+    adapter = FixtureCalendarProvider(_PROVIDER)
+    with history.session() as session:
+        plan = _calendar_plan(_calendar_service(session, history, adapter), _PROVIDER)
+    _sql(
+        history.database,
+        "INSERT INTO communication_mutation_audits "
+        "(id,kind,provider,resource_id,idempotency_key,fingerprint,status,confirmed_by,"
+        "occurred_at) "
+        "VALUES ('fabricated-audit','SEND_MESSAGE','GOOGLE_CALENDAR',?,'fabricated-key',?,"
+        "'PLANNED','synthetic-reviewer',?)",
+        (plan.id, plan.fingerprint, _NOW.isoformat()),
+    )
+    _sql(
+        history.database,
+        "INSERT INTO calendar_mutation_claims (plan_id,audit_id) VALUES (?, 'fabricated-audit')",
+        (plan.id,),
+    )
+    _service_refused(history)
+
+
+def test_calendar_claim_must_reference_deterministic_oldest_attempt(
+    history: _HistoryRestore,
+) -> None:
+    plan_id, _audit_id, fingerprint = _seed_calendar_attempt(history)
+    _sql(
+        history.database,
+        "INSERT INTO communication_mutation_audits "
+        "(id,kind,provider,resource_id,idempotency_key,fingerprint,status,confirmed_by,"
+        "occurred_at) "
+        "VALUES ('earlier-audit','CREATE_CALENDAR_EVENT','GOOGLE_CALENDAR',?,'earlier-key',?,"
+        "'PLANNED','synthetic-reviewer',?)",
+        (plan_id, fingerprint, (_NOW - timedelta(days=1)).isoformat()),
+    )
+    _service_refused(history)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("wire_contract_version", "unreviewed-wire-version"),
+        ("account_label", "Display Name <candidate@example.test>"),
+    ],
+)
+def test_calendar_encrypted_plan_semantics_remain_fail_closed_with_matching_fingerprint(
+    history: _HistoryRestore, field: str, value: str
+) -> None:
+    adapter = FixtureCalendarProvider(_PROVIDER)
+    with history.session() as session:
+        service = _calendar_service(session, history, adapter)
+        plan = _calendar_plan(service, _PROVIDER)
+        tampered = plan.model_copy(update={field: value})
+        fingerprint = service._calendar_plan_fingerprint(tampered)
+    with closing(sqlite3.connect(history.database)) as connection:
+        envelope = connection.execute(
+            "SELECT encrypted_payload FROM calendar_mutation_plans WHERE id=?", (plan.id,)
+        ).fetchone()[0]
+    payload = history.cipher.decrypt_json(envelope, context=f"calendar-plan:{plan.id}:payload")
+    payload[field] = value
+    _sql(
+        history.database,
+        "UPDATE calendar_mutation_plans SET encrypted_payload=?, fingerprint=? WHERE id=?",
+        (
+            history.cipher.encrypt_json(payload, context=f"calendar-plan:{plan.id}:payload"),
+            fingerprint,
+            plan.id,
+        ),
+    )
+    _service_refused(history)
+
+
+def test_calendar_plan_rejects_noncalendar_provider_with_matching_fingerprint(
+    history: _HistoryRestore,
+) -> None:
+    adapter = FixtureCalendarProvider(_PROVIDER)
+    with history.session() as session:
+        service = _calendar_service(session, history, adapter)
+        plan = _calendar_plan(service, _PROVIDER)
+        tampered = plan.model_copy(update={"provider": IntegrationProvider.GMAIL})
+        fingerprint = service._calendar_plan_fingerprint(tampered)
+    _sql(
+        history.database,
+        "UPDATE calendar_mutation_plans SET provider='GMAIL',fingerprint=? WHERE id=?",
+        (fingerprint, plan.id),
+    )
+    _service_refused(history)
+
+
+@pytest.mark.parametrize(
+    ("kind", "include_prior"),
+    [
+        (MutationKind.CREATE_CALENDAR_EVENT, True),
+        (MutationKind.UPDATE_CALENDAR_EVENT, False),
+    ],
+)
+def test_legacy_calendar_plan_kind_and_prior_shape_must_agree(
+    history: _HistoryRestore, kind: MutationKind, include_prior: bool
+) -> None:
+    event = CalendarEventSnapshot(
+        provider_event_id="legacy-provider-event",
+        title="Legacy calendar title",
+        start_at=_NOW,
+        end_at=_NOW + timedelta(hours=1),
+        time_zone="UTC",
+    )
+    prior = event if include_prior else None
+    plan_id = f"legacy-{kind.value.casefold()}"
+    fingerprint_payload = {
+        "id": plan_id,
+        "provider": _PROVIDER.value,
+        "workflow_id": None,
+        "event": event.model_dump(mode="json"),
+        "prior_event": prior.model_dump(mode="json") if prior else None,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    with history.session() as session:
+        CommunicationRepository(session, history.cipher).save_calendar_plan(
+            CalendarMutationPlan(
+                id=plan_id,
+                provider=_PROVIDER,
+                event=event,
+                prior_event=prior,
+                kind=kind,
+                fingerprint=fingerprint,
+                created_at=_NOW,
+            )
+        )
+    _service_refused(history)
+
+
+@pytest.mark.parametrize(
+    ("status", "provider_id", "error_code"),
+    [
+        ("ACCEPTED", "fixture-event-1", None),
+        ("PLANNED", "fixture-event-1", None),
+        ("PLANNED", None, "UnexpectedError"),
+        ("CONFIRMED", None, None),
+        ("CONFIRMED", "bad\nprovider-id", None),
+        ("CONFIRMED", "fixture-event-1", "UnexpectedError"),
+        ("FAILED", "fixture-event-1", "ProviderCalendarNotAppliedError"),
+        ("FAILED", None, None),
+        ("FAILED", None, "bad\nerror"),
+        ("UNCERTAIN", None, None),
+    ],
+)
+def test_calendar_attempt_status_fields_have_one_safe_shape(
+    history: _HistoryRestore,
+    status: str,
+    provider_id: str | None,
+    error_code: str | None,
+) -> None:
+    _plan_id, audit_id, _fingerprint = _seed_calendar_attempt(history)
+    _sql(
+        history.database,
+        "UPDATE communication_mutation_audits "
+        "SET status=?, provider_resource_id=?, error_code=? WHERE id=?",
+        (status, provider_id, error_code, audit_id),
+    )
+    _service_refused(history)
 
 
 @pytest.mark.parametrize("table", _CACHES)

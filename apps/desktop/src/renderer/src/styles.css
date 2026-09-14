@@ -1813,6 +1813,75 @@ h1 {
   margin-bottom: 14px;
 }
 
+.calendar-event-panel {
+  margin: 0 18px 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e7f0;
+  overflow-wrap: anywhere;
+}
+
+.calendar-event-panel .panel__header {
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+
+.calendar-event-panel__wide {
+  grid-column: 1 / -1;
+}
+
+.calendar-event-review {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 15px;
+  border: 1px solid #e2e7f0;
+  border-radius: 11px;
+  background: #fafbfc;
+}
+
+.calendar-event-review h4,
+.calendar-event-review p {
+  margin: 0;
+}
+
+.calendar-event-review dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 16px;
+  margin: 0;
+}
+
+.calendar-event-review dl > div {
+  min-width: 0;
+}
+
+.calendar-event-review dt {
+  color: #7f899d;
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.calendar-event-review dd {
+  margin: 4px 0 0;
+  color: #3d4659;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.calendar-event-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+@media (max-width: 760px) {
+  .calendar-event-review dl {
+    grid-template-columns: 1fr;
+  }
+}
+
 .greenhouse-discovery-results,
 .greenhouse-job-review {
   display: grid;

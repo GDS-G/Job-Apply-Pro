@@ -14,6 +14,7 @@ from job_apply_pro.domain.communications import (
     ApplicationCorrelation,
     AttachmentCandidate,
     AttachmentVerification,
+    CalendarCreateFields,
     CalendarEventSnapshot,
     CalendarMutationCreate,
     CalendarMutationPlan,
@@ -63,10 +64,13 @@ from job_apply_pro.integrations.communications import (
     DisabledCalendarProvider,
     DisabledMessageProvider,
     MessageProviderAdapter,
+    ProviderCalendarNotAppliedError,
+    ProviderCalendarUncertainError,
     ProviderMutationError,
     ProviderNotConfiguredError,
     ProviderSendUncertainError,
     reject_mail_attachments,
+    validate_calendar_create,
 )
 from job_apply_pro.integrations.configuration import ProviderConnectionConfig
 from job_apply_pro.services.mail_attachments import MailAttachmentResolver
@@ -87,6 +91,24 @@ _CATEGORY_SIGNALS = {
     MessageCategory.JOB_ALERT: ("job alert", "new jobs", "recommended jobs"),
     MessageCategory.NEWSLETTER: ("newsletter", "unsubscribe"),
 }
+
+
+def _valid_calendar_audit_outcome(audit: MutationAudit) -> bool:
+    if audit.status is MutationStatus.PLANNED:
+        return audit.provider_resource_id is None and audit.error_code is None
+    if audit.status is MutationStatus.CONFIRMED:
+        provider_id = audit.provider_resource_id
+        return (
+            provider_id is not None
+            and provider_id.isascii()
+            and all(32 < ord(character) < 127 for character in provider_id)
+            and audit.error_code is None
+        )
+    if audit.status in {MutationStatus.FAILED, MutationStatus.UNCERTAIN}:
+        return audit.provider_resource_id is None and bool(audit.error_code)
+    return False
+
+
 _ISO_TIME_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})\b")
 _TRACKING_STAGES = {
     MessageCategory.APPLICATION_CONFIRMATION: ApplicationCommunicationStage.SUBMITTED,
@@ -936,83 +958,217 @@ class CommunicationService:
             IntegrationProvider.OUTLOOK_CALENDAR,
         }:
             raise ValueError("Calendar plans require a calendar provider")
-        kind = (
-            MutationKind.UPDATE_CALENDAR_EVENT
-            if command.prior_event is not None
-            else MutationKind.CREATE_CALENDAR_EVENT
-        )
-        plan_id = str(uuid4())
-        fingerprint = self._fingerprint(
-            {
-                "id": plan_id,
-                "provider": command.provider.value,
-                "workflow_id": command.workflow_id,
-                "event": command.event.model_dump(mode="json"),
-                "prior_event": (
-                    command.prior_event.model_dump(mode="json")
-                    if command.prior_event is not None
-                    else None
-                ),
-            }
+        if command.prior_event is not None:
+            raise ValueError(
+                "Calendar updates require trusted source and conditional-update support"
+            )
+        if command.workflow_id is not None and not repository.workflow_exists(command.workflow_id):
+            raise ValueError("Calendar workflow does not reference an existing application")
+        kind = MutationKind.CREATE_CALENDAR_EVENT
+        account_key, account_label, binding = self._calendar_account(command.provider)
+        if kind is MutationKind.CREATE_CALENDAR_EVENT:
+            validate_calendar_create(command.event)
+        plan = CalendarMutationPlan(
+            id=str(uuid4()),
+            **command.model_dump(),
+            kind=kind,
+            policy_version="calendar-attempt-v1",
+            wire_contract_version="calendar-create-wire-v1",
+            account_key=account_key,
+            account_label=account_label,
+            provider_binding_fingerprint=binding,
+            calendar_target="PRIMARY",
+            id_assignment="PROVIDER_NATIVE_DEDUPLICATED",
+            provider_dedupe_policy="NATIVE_ATTEMPT_KEY_V1",
+            fingerprint="0" * 64,
+            created_at=datetime.now(UTC),
         )
         return repository.save_calendar_plan(
-            CalendarMutationPlan(
-                id=plan_id,
-                **command.model_dump(),
-                kind=kind,
-                fingerprint=fingerprint,
-                created_at=datetime.now(UTC),
-            )
+            plan.model_copy(update={"fingerprint": self._calendar_plan_fingerprint(plan)})
         )
+
+    def get_calendar_plan(self, plan_id: str) -> CalendarMutationPlan:
+        try:
+            plan = self._require_repository().get_calendar_plan(plan_id)
+        except (ValueError, UnicodeError) as error:
+            raise ValueError("The stored calendar plan could not be verified") from error
+        if plan is None:
+            raise LookupError("The selected calendar plan is unavailable")
+        return plan
+
+    def _calendar_account(self, provider: IntegrationProvider) -> tuple[str, str, str]:
+        identity = self._provider_account_identities.get(provider)
+        config = self._provider_configs.get(provider)
+        write_scope = {
+            IntegrationProvider.GOOGLE_CALENDAR: "https://www.googleapis.com/auth/calendar.events",
+            IntegrationProvider.OUTLOOK_CALENDAR: "Calendars.ReadWrite",
+        }.get(provider)
+        if (
+            write_scope is None
+            or not identity
+            or len(identity) > 500
+            or not identity.isascii()
+            or any(ord(char) <= 32 or ord(char) == 127 for char in identity)
+            or config is None
+            or not config.credential_reference
+            or not config.account_hint
+            or not config.write_enabled
+            or write_scope not in config.granted_scopes
+            or isinstance(self._calendar_adapters.get(provider), DisabledCalendarProvider)
+            or self._calendar_adapters[provider].provider is not provider
+        ):
+            raise ValueError(
+                "Verified calendar write authorization is unavailable; reconnect and review"
+            )
+        try:
+            label = validate_mailbox(config.account_hint)
+        except ValueError as error:
+            raise ValueError(
+                "Verified calendar account identity is unavailable; reconnect and review"
+            ) from error
+        return (
+            self._fingerprint({"provider": provider.value, "identity": identity}),
+            label,
+            self._provider_binding_fingerprint(provider),
+        )
+
+    def _calendar_plan_fingerprint(self, plan: CalendarMutationPlan) -> str:
+        return self._fingerprint(
+            {
+                "id": plan.id,
+                "provider": plan.provider.value,
+                "workflow_id": plan.workflow_id,
+                "kind": plan.kind.value,
+                "event": plan.event.model_dump(mode="json"),
+                "prior_event": (
+                    plan.prior_event.model_dump(mode="json") if plan.prior_event else None
+                ),
+                "policy_version": plan.policy_version,
+                "wire_contract_version": plan.wire_contract_version,
+                "account_key": plan.account_key,
+                "account_label": plan.account_label,
+                "provider_binding": plan.provider_binding_fingerprint,
+                "calendar_target": plan.calendar_target,
+                "id_assignment": plan.id_assignment,
+                "provider_dedupe_policy": plan.provider_dedupe_policy,
+            }
+        )
+
+    @staticmethod
+    def _calendar_replay(
+        audit: MutationAudit, plan: CalendarMutationPlan, command: MutationConfirmation
+    ) -> MutationAudit:
+        if (
+            not _valid_calendar_audit_outcome(audit)
+            or audit.kind is not plan.kind
+            or audit.provider is not plan.provider
+            or audit.resource_id != plan.id
+            or audit.fingerprint != plan.fingerprint
+            or audit.fingerprint != command.fingerprint
+            or audit.idempotency_key != command.idempotency_key
+            or audit.confirmed_by != command.confirmed_by
+        ):
+            raise ValueError(
+                "This calendar plan or idempotency key already has a different attempt"
+            )
+        return audit
 
     def execute_calendar_mutation(
         self, plan_id: str, command: MutationConfirmation
     ) -> MutationAudit:
         repository = self._require_repository()
         replay = repository.find_audit_by_idempotency(command.idempotency_key)
-        if replay is not None:
-            if (
-                replay.kind
-                not in {MutationKind.CREATE_CALENDAR_EVENT, MutationKind.UPDATE_CALENDAR_EVENT}
-                or replay.resource_id != plan_id
-                or replay.fingerprint != command.fingerprint
-            ):
-                raise ValueError("Idempotency key is already bound to a different mutation")
-            return replay
-        plan = repository.get_calendar_plan(plan_id)
-        if plan is None:
-            raise LookupError(f"Calendar plan {plan_id} was not found")
-        if command.fingerprint != plan.fingerprint:
+        if replay is not None and (
+            replay.kind
+            not in {
+                MutationKind.CREATE_CALENDAR_EVENT,
+                MutationKind.UPDATE_CALENDAR_EVENT,
+            }
+            or replay.resource_id != plan_id
+        ):
+            raise ValueError("Idempotency key is already bound to a different mutation")
+        plan = self.get_calendar_plan(plan_id)
+        prior = repository.find_calendar_audit(plan_id)
+        if prior is not None or replay is not None:
+            if prior is None or replay is None or prior.id != replay.id:
+                raise ValueError(
+                    "This calendar plan or idempotency key already has a different attempt"
+                )
+            return self._calendar_replay(prior, plan, command)
+        # A supplied prior snapshot is not trusted remote-version evidence.
+        # Even a valid old UPDATE plan may only be read, never dispatched.
+        if plan.kind is not MutationKind.CREATE_CALENDAR_EVENT or plan.prior_event is not None:
+            raise ValueError(
+                "Calendar updates require trusted source and conditional-update support"
+            )
+        if (
+            plan.policy_version != "calendar-attempt-v1"
+            or plan.wire_contract_version != "calendar-create-wire-v1"
+            or plan.calendar_target != "PRIMARY"
+            or plan.id_assignment != "PROVIDER_NATIVE_DEDUPLICATED"
+            or plan.provider_dedupe_policy != "NATIVE_ATTEMPT_KEY_V1"
+            or not isinstance(plan.event, CalendarCreateFields)
+            or plan.account_key is None
+            or plan.account_label is None
+            or plan.provider_binding_fingerprint is None
+        ):
+            raise ValueError(
+                "An unbound or legacy calendar plan requires a fresh account-bound plan"
+            )
+        if (
+            command.fingerprint != plan.fingerprint
+            or plan.fingerprint != self._calendar_plan_fingerprint(plan)
+        ):
             raise ValueError("Calendar plan changed after review; refresh and confirm again")
+        if (
+            plan.account_key,
+            plan.account_label,
+            plan.provider_binding_fingerprint,
+        ) != self._calendar_account(plan.provider):
+            raise ValueError(
+                "The reviewed calendar account or connection changed; create a new plan"
+            )
+        event = validate_calendar_create(plan.event)
         audit = self._new_audit(
             kind=plan.kind,
             provider=plan.provider,
             resource_id=plan.id,
             command=command,
         )
-        repository.add_audit(audit)
+        audit, claimed = repository.claim_calendar_mutation(audit)
+        if not claimed:
+            return self._calendar_replay(audit, plan, command)
         adapter = self._calendar_adapters[plan.provider]
         try:
-            provider_id = (
-                adapter.create_event(plan.event, idempotency_key=command.idempotency_key)
-                if plan.kind is MutationKind.CREATE_CALENDAR_EVENT
-                else adapter.update_event(plan.event, idempotency_key=command.idempotency_key)
+            provider_id = adapter.create_event(event, idempotency_key=command.idempotency_key)
+            if (
+                not isinstance(provider_id, str)
+                or not 1 <= len(provider_id) <= 500
+                or not provider_id.isascii()
+                or any(ord(char) <= 32 or ord(char) == 127 for char in provider_id)
+            ):
+                raise ProviderCalendarUncertainError()
+        except ProviderCalendarNotAppliedError:
+            outcome, error_code = MutationStatus.FAILED, "ProviderCalendarNotAppliedError"
+        except Exception:
+            # Once the adapter was invoked, an unexpected failure cannot prove
+            # that no request reached the provider. The reservation is retained.
+            outcome, error_code = MutationStatus.UNCERTAIN, "ProviderCalendarUncertainError"
+        else:
+            return repository.finish_calendar_mutation(
+                audit.model_copy(
+                    update={
+                        "status": MutationStatus.CONFIRMED,
+                        "provider_resource_id": provider_id,
+                        "occurred_at": datetime.now(UTC),
+                    }
+                )
             )
-        except (ProviderNotConfiguredError, ProviderMutationError) as error:
-            failed = audit.model_copy(
-                update={
-                    "status": MutationStatus.FAILED,
-                    "error_code": type(error).__name__,
-                    "occurred_at": datetime.now(UTC),
-                }
-            )
-            repository.add_audit(failed)
-            raise
-        return repository.add_audit(
+        return repository.finish_calendar_mutation(
             audit.model_copy(
                 update={
-                    "status": MutationStatus.CONFIRMED,
-                    "provider_resource_id": provider_id,
+                    "status": outcome,
+                    "error_code": error_code,
                     "occurred_at": datetime.now(UTC),
                 }
             )

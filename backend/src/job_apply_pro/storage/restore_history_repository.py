@@ -489,6 +489,56 @@ def require_relational_closure(snapshot: HistorySnapshot) -> None:
             or audit["resource_id"] != row["draft_id"]
         ):
             raise RestoreHistoryError(UNAVAILABLE)
+    calendar_by_plan: dict[Value, list[Row]] = {}
+    for audit in audits.values():
+        if audit["kind"] in {"CREATE_CALENDAR_EVENT", "UPDATE_CALENDAR_EVENT"}:
+            if audit["provider"] not in {"GOOGLE_CALENDAR", "OUTLOOK_CALENDAR"}:
+                raise RestoreHistoryError(UNAVAILABLE)
+            status = audit["status"]
+            provider_id = audit["provider_resource_id"]
+            error_code = audit["error_code"]
+            if status == "PLANNED":
+                valid_outcome = provider_id is None and error_code is None
+            elif status == "CONFIRMED":
+                valid_outcome = (
+                    isinstance(provider_id, str)
+                    and bool(provider_id)
+                    and provider_id.isascii()
+                    and all(32 < ord(character) < 127 for character in provider_id)
+                    and error_code is None
+                )
+            elif status in {"FAILED", "UNCERTAIN"}:
+                valid_outcome = (
+                    provider_id is None
+                    and isinstance(error_code, str)
+                    and bool(error_code)
+                    and error_code.isascii()
+                    and all(32 < ord(character) < 127 for character in error_code)
+                )
+            else:
+                valid_outcome = False
+            if not valid_outcome:
+                raise RestoreHistoryError(UNAVAILABLE)
+            calendar_by_plan.setdefault(audit["resource_id"], []).append(audit)
+    calendar_claims = snapshot.tables["calendar_mutation_claims"]
+    for row in calendar_claims.values():
+        audit = audits.get((row["audit_id"],))
+        plan = snapshot.tables["calendar_mutation_plans"].get((row["plan_id"],))
+        if (
+            audit is None
+            or plan is None
+            or audit["kind"] not in {"CREATE_CALENDAR_EVENT", "UPDATE_CALENDAR_EVENT"}
+            or audit["resource_id"] != row["plan_id"]
+            or audit["provider"] != plan["provider"]
+            or audit["kind"] != plan["kind"]
+            or audit["fingerprint"] != plan["fingerprint"]
+        ):
+            raise RestoreHistoryError(UNAVAILABLE)
+    for plan_id, attempts in calendar_by_plan.items():
+        claim = calendar_claims.get((plan_id,))
+        oldest = min(attempts, key=lambda row: (str(row["occurred_at"]), str(row["id"])))
+        if claim is None or claim["audit_id"] != oldest["id"]:
+            raise RestoreHistoryError(UNAVAILABLE)
     for row in snapshot.tables["model_invocations"].values():
         if row["status"] not in {"SUCCEEDED", "FAILED", "CACHED"}:
             raise RestoreHistoryError(UNAVAILABLE)

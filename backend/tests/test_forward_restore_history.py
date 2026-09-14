@@ -14,12 +14,12 @@ from uuid import uuid4
 
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.domain.ai import AIInvocationRecord, AITaskType, DataClassification
 from job_apply_pro.domain.communications import (
-    CalendarEventSnapshot,
+    CalendarCreateFields,
     CalendarMutationCreate,
     CalendarMutationPlan,
     IntegrationProvider,
@@ -39,7 +39,7 @@ from job_apply_pro.domain.operations import (
 )
 from job_apply_pro.integrations.communications import (
     FixtureCalendarProvider,
-    ProviderMutationError,
+    ProviderCalendarNotAppliedError,
 )
 from job_apply_pro.integrations.configuration import (
     CommunicationConfiguration,
@@ -70,6 +70,7 @@ _SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 _HISTORY_TABLES = (
     "calendar_mutation_plans",
     "communication_mutation_audits",
+    "calendar_mutation_claims",
     "oauth_authorization_sessions",
     "oauth_credentials",
     "communication_configurations",
@@ -266,7 +267,7 @@ def history(tmp_path: Path) -> _HistoryRestore:
         engine.dispose()
     with closing(sqlite3.connect(result.database)) as connection, connection:
         connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-        connection.execute("INSERT INTO alembic_version VALUES ('20260913_0027')")
+        connection.execute("INSERT INTO alembic_version VALUES ('20260913_0028')")
     result.documents.mkdir()
     (result.documents / "synthetic-unreferenced.enc").write_text(
         result.cipher.encrypt_bytes(b"synthetic document", context="synthetic-test-document"),
@@ -281,27 +282,38 @@ def _calendar_service(
     return CommunicationService(
         CommunicationRepository(session, history.cipher),
         calendar_adapters={adapter.provider: adapter},
+        provider_configs={
+            adapter.provider: ProviderConnectionConfig(
+                provider=adapter.provider,
+                credential_reference=_REFERENCE,
+                account_hint="candidate@example.test",
+                granted_scopes=[
+                    "https://www.googleapis.com/auth/calendar.events"
+                    if adapter.provider is IntegrationProvider.GOOGLE_CALENDAR
+                    else "Calendars.ReadWrite"
+                ],
+                write_enabled=True,
+            )
+        },
+        provider_account_identities={adapter.provider: "synthetic-provider-account"},
     )
 
 
 def _calendar_plan(
-    service: CommunicationService, provider: IntegrationProvider, *, update: bool = False
+    service: CommunicationService, provider: IntegrationProvider
 ) -> CalendarMutationPlan:
-    event = CalendarEventSnapshot(
-        provider_event_id="synthetic-calendar-provider-id",
+    event = CalendarCreateFields(
         title="synthetic-calendar-title",
         start_at=_NOW + timedelta(days=1),
         end_at=_NOW + timedelta(days=1, hours=1),
         time_zone="UTC",
-        attendees=["candidate@example.test"],
+        attendees=[],
+        attendee_notification_policy="NONE",
     )
     return service.plan_calendar_mutation(
         CalendarMutationCreate(
             provider=provider,
             event=event,
-            prior_event=event.model_copy(update={"title": "Synthetic previous title"})
-            if update
-            else None,
         )
     )
 
@@ -315,42 +327,52 @@ def _confirmation(plan: CalendarMutationPlan) -> MutationConfirmation:
 
 
 @pytest.mark.parametrize("provider", [_PROVIDER, IntegrationProvider.OUTLOOK_CALENDAR])
-@pytest.mark.parametrize("update", [False, True], ids=["create", "update"])
 @pytest.mark.parametrize(
-    "status", [MutationStatus.CONFIRMED, MutationStatus.FAILED, MutationStatus.PLANNED]
+    "status",
+    [
+        MutationStatus.CONFIRMED,
+        MutationStatus.FAILED,
+        MutationStatus.PLANNED,
+        MutationStatus.UNCERTAIN,
+    ],
 )
 def test_backup_before_calendar_call_preserves_attempt_and_replay(
     history: _HistoryRestore,
     monkeypatch: pytest.MonkeyPatch,
     provider: IntegrationProvider,
-    update: bool,
     status: MutationStatus,
 ) -> None:
     adapter = FixtureCalendarProvider(provider)
     calls = 0
 
-    def rejected_call(event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
+    def rejected_call(event: CalendarCreateFields, *, idempotency_key: str) -> str:
+        del event, idempotency_key
         nonlocal calls
         calls += 1
         if status is MutationStatus.FAILED:
-            raise ProviderMutationError("Synthetic provider failure")
+            raise ProviderCalendarNotAppliedError("Synthetic provider failure")
         raise RuntimeError("Synthetic interruption after transmission")
 
-    if status is not MutationStatus.CONFIRMED:
-        monkeypatch.setattr(adapter, "update_event" if update else "create_event", rejected_call)
+    if status in {MutationStatus.FAILED, MutationStatus.UNCERTAIN}:
+        monkeypatch.setattr(adapter, "create_event", rejected_call)
     with history.session() as session:
         service = _calendar_service(session, history, adapter)
-        plan = _calendar_plan(service, provider, update=update)
+        plan = _calendar_plan(service, provider)
     manifest = history.backup()
     with history.session() as session:
         service = _calendar_service(session, history, adapter)
-        if status is MutationStatus.CONFIRMED:
-            audit = service.execute_calendar_mutation(plan.id, _confirmation(plan))
+        if status is MutationStatus.PLANNED:
+            audit, claimed = service._require_repository().claim_calendar_mutation(
+                service._new_audit(
+                    kind=plan.kind,
+                    provider=plan.provider,
+                    resource_id=plan.id,
+                    command=_confirmation(plan),
+                )
+            )
+            assert claimed
         else:
-            expected = ProviderMutationError if status is MutationStatus.FAILED else RuntimeError
-            with pytest.raises(expected, match="Synthetic"):
-                service.execute_calendar_mutation(plan.id, _confirmation(plan))
-            audit = service.list_audits()[0]
+            audit = service.execute_calendar_mutation(plan.id, _confirmation(plan))
         assert audit.status is status
     history.assert_refused(manifest)
     with history.session() as session:
@@ -359,32 +381,42 @@ def test_backup_before_calendar_call_preserves_attempt_and_replay(
         )
         assert replay.id == audit.id
         assert replay.status is status
-    assert calls == (0 if status is MutationStatus.CONFIRMED else 1)
+    assert calls == (1 if status in {MutationStatus.FAILED, MutationStatus.UNCERTAIN} else 0)
     assert len(adapter.mutations) == (1 if status is MutationStatus.CONFIRMED else 0)
 
 
-@pytest.mark.parametrize("status", [MutationStatus.ACCEPTED, MutationStatus.UNCERTAIN])
-def test_calendar_audit_nonterminal_status_is_not_discardable(
-    history: _HistoryRestore, status: MutationStatus
-) -> None:
+def test_calendar_uncertain_status_is_not_discardable(history: _HistoryRestore) -> None:
     adapter = FixtureCalendarProvider(_PROVIDER)
     with history.session() as session:
         plan = _calendar_plan(_calendar_service(session, history, adapter), _PROVIDER)
     manifest = history.backup()
     with history.session() as session:
-        CommunicationRepository(session, history.cipher).add_audit(
-            MutationAudit(
-                id=str(uuid4()),
-                kind=plan.kind,
-                provider=plan.provider,
-                resource_id=plan.id,
-                idempotency_key="synthetic-calendar-key",
-                fingerprint=plan.fingerprint,
-                status=status,
-                confirmed_by="synthetic-reviewer",
-                occurred_at=_NOW,
-            )
+        repository = CommunicationRepository(session, history.cipher)
+        planned = MutationAudit(
+            id=str(uuid4()),
+            kind=plan.kind,
+            provider=plan.provider,
+            resource_id=plan.id,
+            idempotency_key="synthetic-calendar-key",
+            fingerprint=plan.fingerprint,
+            status=MutationStatus.PLANNED,
+            confirmed_by="synthetic-reviewer",
+            occurred_at=_NOW,
         )
+        claimed, won = repository.claim_calendar_mutation(planned)
+        assert won and claimed == planned
+        session.execute(
+            text(
+                "UPDATE communication_mutation_audits "
+                "SET status=:status,error_code=:error_code WHERE id=:id"
+            ),
+            {
+                "status": MutationStatus.UNCERTAIN.value,
+                "error_code": "ProviderCalendarUncertainError",
+                "id": planned.id,
+            },
+        )
+        session.commit()
     history.assert_refused(manifest)
     assert not adapter.mutations
 

@@ -143,6 +143,23 @@ class BoundMailTokenProvider:
         return self.oauth.access_token_bound(provider, self.expected_reference)
 
 
+@dataclass(frozen=True)
+class BoundCalendarTokenProvider:
+    """Resolve only the connection selected for this calendar provider invocation."""
+
+    oauth: OAuthConnectionService = field(repr=False)
+    provider: IntegrationProvider
+    expected_reference: str = field(repr=False)
+
+    def access_token(self, provider: IntegrationProvider) -> str:
+        if provider != self.provider or provider not in {
+            IntegrationProvider.GOOGLE_CALENDAR,
+            IntegrationProvider.OUTLOOK_CALENDAR,
+        }:
+            raise OAuthAuthorizationError("The reviewed calendar provider does not match")
+        return self.oauth.access_token_bound(provider, self.expected_reference)
+
+
 class OAuthConnectionService:
     """Authorization Code + PKCE lifecycle with encrypted, one-time state persistence."""
 

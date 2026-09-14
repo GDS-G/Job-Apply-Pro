@@ -24,9 +24,11 @@ import type {
 } from "@job-apply-pro/contracts";
 
 import type { BackendSupervisor } from "./backend-supervisor.js";
+import { registerCalendarEventIpc } from "./calendar-event-ipc.js";
 import { registerGreenhouseDiscoveryIpc } from "./greenhouse-discovery-ipc.js";
 import { registerJobReadinessIpc } from "./job-readiness-ipc.js";
 import { registerMailDraftIpc } from "./mail-draft-ipc.js";
+import { integrationHealthForRenderer } from "./integration-health-view.js";
 import type { DesktopNotificationManager } from "./notification-manager.js";
 import { readProviderConfigurationFile } from "./provider-configuration-file.js";
 import type { UpdateManager } from "./update-manager.js";
@@ -709,6 +711,7 @@ export function registerWorkbenchIpc(
   registerGreenhouseDiscoveryIpc(supervisor.client);
   registerJobReadinessIpc(supervisor.client);
   registerMailDraftIpc(supervisor.client);
+  registerCalendarEventIpc(supervisor.client);
   ipcMain.handle("workbench:get-status", () => supervisor.status);
   ipcMain.handle("workbench:list-workflows", () =>
     supervisor.client.listWorkflows(),
@@ -1185,8 +1188,10 @@ export function registerWorkbenchIpc(
           requiredText(workflowIdValue, "Workflow id", 100),
         ),
   );
-  ipcMain.handle("communications:integrations", () =>
-    supervisor.client.listIntegrationHealth(),
+  ipcMain.handle("communications:integrations", async () =>
+    integrationHealthForRenderer(
+      await supervisor.client.listIntegrationHealth(),
+    ),
   );
   ipcMain.handle("communications:configuration", () =>
     supervisor.client.getProviderConfigurationStatus(),

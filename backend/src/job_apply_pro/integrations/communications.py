@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+import unicodedata
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import SecretStr
 
 from job_apply_pro.domain.communications import (
+    CalendarCreateFields,
     CalendarEventSnapshot,
     IntegrationProvider,
     NormalizedMessage,
@@ -21,6 +25,7 @@ from job_apply_pro.domain.mail import (
 from job_apply_pro.domain.mail_threading import (
     parse_gmail_reply_headers,
     parse_outlook_reply_headers,
+    validate_mailbox,
 )
 
 
@@ -119,6 +124,86 @@ class ProviderSendUncertainError(ProviderMutationError):
         )
 
 
+class ProviderCalendarUncertainError(ProviderMutationError):
+    def __init__(self) -> None:
+        super().__init__(
+            "Calendar creation outcome is uncertain; inspect the provider before creating again"
+        )
+
+
+class ProviderCalendarNotAppliedError(ProviderMutationError):
+    """A typed pre-dispatch refusal or clean rejection proving no create occurred."""
+
+    def __init__(
+        self, message: str = "The calendar provider did not apply the create request"
+    ) -> None:
+        super().__init__(message)
+
+
+MAX_CALENDAR_CREATE_WIRE_BYTES = 65_536
+
+
+def validate_calendar_create(event: CalendarCreateFields) -> CalendarCreateFields:
+    """Pure, no-repair validation before a calendar attempt is claimed or dispatched."""
+    try:
+        if (
+            not isinstance(event, CalendarCreateFields)
+            or event.model_extra
+            or set(event.__dict__) - set(CalendarCreateFields.model_fields)
+        ):
+            raise ValueError
+        reviewed = CalendarCreateFields.model_validate(event.model_dump(mode="python"))
+        if reviewed.conferencing_url is not None:
+            raise ValueError
+        if not reviewed.title.strip() or (
+            reviewed.location is not None and not reviewed.location.strip()
+        ):
+            raise ValueError
+        for value in (reviewed.title, reviewed.location):
+            if value is not None and (
+                any(unicodedata.category(character).startswith("C") for character in value)
+                or any(character in "\u2028\u2029" for character in value)
+            ):
+                raise ValueError
+        zone = ZoneInfo(reviewed.time_zone)
+        for timestamp in (reviewed.start_at, reviewed.end_at):
+            in_zone = timestamp.astimezone(zone)
+            if timestamp.utcoffset() != in_zone.utcoffset() or timestamp.replace(
+                tzinfo=None
+            ) != in_zone.replace(tzinfo=None):
+                raise ValueError
+        normalized_attendees = [
+            validate_mailbox(attendee).casefold() for attendee in reviewed.attendees
+        ]
+        if len(normalized_attendees) != len(set(normalized_attendees)):
+            raise ValueError
+        # Invitations have provider-specific side effects. This API-only alpha
+        # supports an explicit no-invitations policy, so recipients fail closed.
+        if (
+            reviewed.attendee_notification_policy != "NONE"
+            or reviewed.reminder_policy != "NONE"
+            or reviewed.visibility_policy != "PRIVATE"
+            or reviewed.availability_policy != "BUSY"
+            or reviewed.attendees
+        ):
+            raise ValueError
+        # Bound the neutral snapshot plus a conservative per-attendee/field envelope
+        # budget for either supported provider's JSON representation.
+        size = len(
+            json.dumps(
+                reviewed.model_dump(mode="json"),
+                ensure_ascii=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+        if size + 96 * len(reviewed.attendees) + 2_048 > MAX_CALENDAR_CREATE_WIRE_BYTES:
+            raise ValueError
+        return reviewed
+    except (ValueError, TypeError, AttributeError, ZoneInfoNotFoundError) as error:
+        raise ValueError("Calendar creation payload is invalid or unsupported") from error
+
+
 def reject_mail_attachments(document_version_ids: Sequence[str]) -> None:
     """Do not silently send text when reviewed document selections cannot be delivered."""
     if document_version_ids:
@@ -156,7 +241,7 @@ class CalendarProviderAdapter(Protocol):
         self, *, start_at: datetime, end_at: datetime
     ) -> list[CalendarEventSnapshot]: ...
 
-    def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str: ...
+    def create_event(self, event: CalendarCreateFields, *, idempotency_key: str) -> str: ...
 
     def update_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str: ...
 
@@ -197,9 +282,11 @@ class DisabledCalendarProvider:
         del start_at, end_at
         raise ProviderNotConfiguredError(f"{self.provider.value} read access is not configured")
 
-    def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
+    def create_event(self, event: CalendarCreateFields, *, idempotency_key: str) -> str:
         del event, idempotency_key
-        raise ProviderNotConfiguredError(f"{self.provider.value} write access is not configured")
+        raise ProviderCalendarNotAppliedError(
+            f"{self.provider.value} write access is not configured"
+        )
 
     def update_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
         del event, idempotency_key
@@ -247,7 +334,7 @@ class FixtureMessageProvider:
 
 
 class FixtureCalendarProvider:
-    """Sanitized replay adapter that records create/update calls without network access."""
+    """Sanitized create-only replay adapter without network access."""
 
     def __init__(
         self, provider: IntegrationProvider, events: list[CalendarEventSnapshot] | None = None
@@ -261,15 +348,25 @@ class FixtureCalendarProvider:
             event for event in self.events if event.start_at < end_at and event.end_at > start_at
         ]
 
-    def create_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
+    def create_event(self, event: CalendarCreateFields, *, idempotency_key: str) -> str:
+        reviewed = validate_calendar_create(event)
         self.mutations.append(("create", idempotency_key))
-        self.events.append(event)
-        return f"fixture-event-{len(self.mutations)}"
+        provider_id = f"fixture-event-{len(self.mutations)}"
+        self.events.append(
+            CalendarEventSnapshot(
+                provider_event_id=provider_id,
+                **reviewed.model_dump(
+                    exclude={
+                        "attendee_notification_policy",
+                        "reminder_policy",
+                        "visibility_policy",
+                        "availability_policy",
+                    }
+                ),
+            )
+        )
+        return provider_id
 
     def update_event(self, event: CalendarEventSnapshot, *, idempotency_key: str) -> str:
-        self.mutations.append(("update", idempotency_key))
-        self.events = [
-            event if current.provider_event_id == event.provider_event_id else current
-            for current in self.events
-        ]
-        return event.provider_event_id
+        del event, idempotency_key
+        raise ProviderMutationError("Calendar updates are not supported; no update was requested")

@@ -796,6 +796,15 @@ class MailSendClaimRow(Base):
     )
 
 
+class CalendarMutationClaimRow(Base):
+    __tablename__ = "calendar_mutation_claims"
+
+    plan_id: Mapped[str] = mapped_column(ForeignKey("calendar_mutation_plans.id"), primary_key=True)
+    audit_id: Mapped[str] = mapped_column(
+        ForeignKey("communication_mutation_audits.id"), unique=True
+    )
+
+
 class FollowUpRow(Base):
     __tablename__ = "communication_follow_ups"
     __table_args__ = (
