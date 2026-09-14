@@ -492,6 +492,64 @@ class BrowserActionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ExternalEffectOperationRow(Base):
+    __tablename__ = "external_effect_operations"
+    __table_args__ = (
+        UniqueConstraint("claim_fingerprint", name="uq_external_effect_operation_claim"),
+        Index(
+            "ix_external_effect_operation_subject",
+            "subject_type",
+            "subject_id",
+            "created_at",
+        ),
+        Index("ix_external_effect_operation_recovery", "status", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    claim_fingerprint: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    subject_type: Mapped[str] = mapped_column(String(40))
+    subject_id: Mapped[str] = mapped_column(String(200))
+    actor: Mapped[str] = mapped_column(String(200))
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    policy_version: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    result_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    result_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ExternalEffectAttemptRow(Base):
+    __tablename__ = "external_effect_attempts"
+    __table_args__ = (
+        UniqueConstraint("operation_id", "sequence", name="uq_external_effect_attempt_sequence"),
+        Index("ix_external_effect_attempt_recovery", "status", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("external_effect_operations.id"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    provider: Mapped[str] = mapped_column(String(200))
+    target_code: Mapped[str] = mapped_column(String(200))
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    native_key_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    result_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    result_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_micros: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ModelInvocationRow(Base):
     __tablename__ = "model_invocations"
 

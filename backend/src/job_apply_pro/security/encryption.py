@@ -81,5 +81,15 @@ class SensitiveDataCipher:
             hashlib.sha256,
         ).hexdigest()
 
+    def keyed_fingerprint(self, value: bytes, *, context: str) -> str:
+        """Return a domain-separated HMAC without normalizing exact input bytes."""
+        if not context or "\x00" in context:
+            raise ValueError("Fingerprint context is invalid")
+        return hmac.new(
+            self._key_provider.load_key(),
+            context.encode("utf-8") + b"\x00" + value,
+            hashlib.sha256,
+        ).hexdigest()
+
     def validate_envelope(self, envelope: str, *, context: str) -> None:
         self.decrypt_json(envelope, context=context)
