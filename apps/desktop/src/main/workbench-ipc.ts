@@ -876,6 +876,35 @@ export function registerWorkbenchIpc(
       return supervisor.client.approveBrowserNavigationReconciliation(preview);
     },
   );
+  ipcMain.handle(
+    "workbench:reconcile-browser-upload",
+    async (event, operationValue: unknown, sessionValue: unknown) => {
+      const operationId = uuid(operationValue, "External effect id");
+      const sessionId = uuid(sessionValue, "Browser session id");
+      const preview =
+        await supervisor.client.previewBrowserUploadReconciliation(
+          operationId,
+          sessionId,
+        );
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        type: "warning" as const,
+        title: "Record reviewed file selection?",
+        message:
+          "The exact reviewed filename is visible on the same Greenhouse form stage.",
+        detail: `File: ${preview.file_name}\nPage: ${preview.page_type}\nSession: ${preview.session_id}\nResult page fingerprint: ${preview.result_page_fingerprint}\nReview fingerprint: ${preview.review_fingerprint}\n\nThis records local filename evidence for the prior uncertain upload. It does not upload again, navigate, submit, or prove provider receipt.`,
+        buttons: ["Cancel", "Record upload outcome"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveBrowserUploadReconciliation(preview);
+    },
+  );
   ipcMain.handle("knowledge:get", (_event, value: unknown) =>
     supervisor.client.getCandidateKnowledge(
       requiredText(value, "Profile id", 100),

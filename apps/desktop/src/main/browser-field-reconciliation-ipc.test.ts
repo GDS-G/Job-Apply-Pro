@@ -6,6 +6,8 @@ import type {
   BrowserFieldReconciliationResult,
   BrowserNavigationReconciliationPreview,
   BrowserNavigationReconciliationResult,
+  BrowserUploadReconciliationPreview,
+  BrowserUploadReconciliationResult,
   BrowserProfileCleanupPreview,
   BrowserProfileCleanupResult,
   BrowserProfileRetirementPreview,
@@ -86,6 +88,27 @@ const navigationResult: BrowserNavigationReconciliationResult = {
   reconciliation_kind: "BROWSER_NAVIGATION_CONFIRMED",
   reconciled_at: "2026-09-15T19:00:00+00:00",
   notice: "Reviewed navigation was recorded without retrying it.",
+};
+const uploadPreview: BrowserUploadReconciliationPreview = {
+  operation_id: operationId,
+  attempt_id: attemptId,
+  session_id: sessionId,
+  file_name: "candidate-resume.pdf",
+  page_type: "DOCUMENT_UPLOAD",
+  result_page_fingerprint: "greenhouse-documents-uploaded-v2",
+  review_fingerprint: "e".repeat(64),
+  notice: "The exact reviewed filename is visible on the same form stage.",
+};
+const uploadResult: BrowserUploadReconciliationResult = {
+  operation_id: operationId,
+  attempt_id: attemptId,
+  session_id: sessionId,
+  file_name: uploadPreview.file_name,
+  page_type: uploadPreview.page_type,
+  result_page_fingerprint: uploadPreview.result_page_fingerprint,
+  reconciliation_kind: "BROWSER_UPLOAD_CONFIRMED",
+  reconciled_at: "2026-09-15T20:00:00+00:00",
+  notice: "Reviewed file selection was recorded without uploading again.",
 };
 const retirementPreview: BrowserProfileRetirementPreview = {
   engine: "msedge",
@@ -216,6 +239,34 @@ describe("browser field reconciliation backend client", () => {
     });
   });
 
+  it("previews and approves reviewed upload evidence through its separate routes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json(uploadPreview))
+      .mockResolvedValueOnce(Response.json(uploadResult));
+
+    await expect(
+      client.previewBrowserUploadReconciliation(operationId, sessionId),
+    ).resolves.toEqual(uploadPreview);
+    await expect(
+      client.approveBrowserUploadReconciliation(uploadPreview),
+    ).resolves.toEqual(uploadResult);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `http://127.0.0.1:8765/browser/sessions/${sessionId}/upload-reconciliations/${operationId}/preview`,
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      `http://127.0.0.1:8765/browser/sessions/${sessionId}/upload-reconciliations/${operationId}/approve`,
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        operation_id: operationId,
+        expected_review_fingerprint: "e".repeat(64),
+        confirmation_phrase: "RECONCILE REVIEWED UPLOAD",
+      }),
+    });
+  });
+
   it("lists and reviews browser profiles through authenticated routes", async () => {
     fetchMock
       .mockResolvedValueOnce(Response.json([retirementPreview]))
@@ -307,6 +358,10 @@ describe("browser field reconciliation IPC boundary", () => {
       vi.fn<BackendClient["previewBrowserNavigationReconciliation"]>(),
     approveBrowserNavigationReconciliation:
       vi.fn<BackendClient["approveBrowserNavigationReconciliation"]>(),
+    previewBrowserUploadReconciliation:
+      vi.fn<BackendClient["previewBrowserUploadReconciliation"]>(),
+    approveBrowserUploadReconciliation:
+      vi.fn<BackendClient["approveBrowserUploadReconciliation"]>(),
     listBrowserProfiles: vi.fn<BackendClient["listBrowserProfiles"]>(),
     previewBrowserProfileRetirement:
       vi.fn<BackendClient["previewBrowserProfileRetirement"]>(),
@@ -338,6 +393,13 @@ describe("browser field reconciliation IPC boundary", () => {
     return listener({ sender } as IpcMainInvokeEvent, ...args);
   }
 
+  async function invokeUpload(...args: unknown[]): Promise<unknown> {
+    const listener = handlers.get("workbench:reconcile-browser-upload");
+    if (!listener)
+      throw new Error("Browser upload reconciliation IPC was not registered");
+    return listener({ sender } as IpcMainInvokeEvent, ...args);
+  }
+
   beforeEach(() => {
     handlers.clear();
     vi.clearAllMocks();
@@ -351,6 +413,8 @@ describe("browser field reconciliation IPC boundary", () => {
     client.approveBrowserNavigationReconciliation.mockResolvedValue(
       navigationResult,
     );
+    client.previewBrowserUploadReconciliation.mockResolvedValue(uploadPreview);
+    client.approveBrowserUploadReconciliation.mockResolvedValue(uploadResult);
     client.listBrowserProfiles.mockResolvedValue([retirementPreview]);
     client.previewBrowserProfileRetirement.mockResolvedValue(retirementPreview);
     client.approveBrowserProfileRetirement.mockResolvedValue(retirementResult);
@@ -431,6 +495,53 @@ describe("browser field reconciliation IPC boundary", () => {
     expect(
       client.approveBrowserNavigationReconciliation,
     ).toHaveBeenCalledExactlyOnceWith(navigationPreview);
+  });
+
+  it("rejects malformed upload reconciliation identifiers before any review", async () => {
+    await expect(invokeUpload("../../other-route", sessionId)).rejects.toThrow(
+      "External effect id must be a UUID.",
+    );
+    await expect(invokeUpload(operationId, "not-a-session")).rejects.toThrow(
+      "Browser session id must be a UUID.",
+    );
+
+    expect(client.previewBrowserUploadReconciliation).not.toHaveBeenCalled();
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(client.approveBrowserUploadReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("keeps an uncertain upload unresolved when the cancel-default warning is canceled", async () => {
+    await expect(invokeUpload(operationId, sessionId)).resolves.toBeNull();
+
+    expect(
+      client.previewBrowserUploadReconciliation,
+    ).toHaveBeenCalledExactlyOnceWith(operationId, sessionId);
+    expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+      buttons: ["Cancel", "Record upload outcome"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      detail: expect.stringContaining("does not upload again"),
+    });
+    expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+      detail: expect.stringContaining("prove provider receipt"),
+    });
+    expect(client.approveBrowserUploadReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("approves only the immutable upload preview after explicit choice", async () => {
+    showMessageBox.mockResolvedValue({ response: 1 });
+
+    await expect(invokeUpload(operationId, sessionId)).resolves.toEqual(
+      uploadResult,
+    );
+
+    expect(
+      client.previewBrowserUploadReconciliation,
+    ).toHaveBeenCalledExactlyOnceWith(operationId, sessionId);
+    expect(
+      client.approveBrowserUploadReconciliation,
+    ).toHaveBeenCalledExactlyOnceWith(uploadPreview);
   });
 
   it("validates profile retirement input before preview or dialog", async () => {

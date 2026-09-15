@@ -20,6 +20,7 @@ from job_apply_pro.domain.browser import (
     BrowserActionDisposition,
     BrowserActionKind,
     BrowserActionResult,
+    BrowserControlKind,
     BrowserEngine,
     BrowserFieldReconciliationApproval,
     BrowserFieldReconciliationPreview,
@@ -41,6 +42,9 @@ from job_apply_pro.domain.browser import (
     BrowserSessionRecord,
     BrowserSessionSnapshot,
     BrowserSessionState,
+    BrowserUploadReconciliationApproval,
+    BrowserUploadReconciliationPreview,
+    BrowserUploadReconciliationResult,
     BrowserVerification,
     ConfirmationState,
     SemanticLocator,
@@ -106,6 +110,8 @@ _RECONCILABLE_FIELD_VERIFICATIONS = {
 }
 _FIELD_ACTION_INTENT = "Populate one explicitly approved application field"
 _GREENHOUSE_NAVIGATION_INTENT = "Advance the exact reviewed Greenhouse form by one control"
+_GREENHOUSE_UPLOAD_INTENT = "Upload the exact reviewed immutable application document"
+_GREENHOUSE_DOCUMENT_SUFFIXES = {".doc", ".docx", ".pdf"}
 _GREENHOUSE_STAGE_ORDER = {
     GreenhouseFormStage.APPLICATION: 1,
     GreenhouseFormStage.DOCUMENTS: 2,
@@ -721,9 +727,10 @@ class BrowserRuntimeService:
         self._validate_action(record, action)
         source_observation = record.observation
         reconcilable_field_action = self._is_reconcilable_field_action(action)
+        upload_intent = self._upload_reconciliation_intent(record, action, source_observation)
         navigation_intent = self._navigation_reconciliation_intent(action, source_observation)
         if (
-            reconcilable_field_action or navigation_intent is not None
+            reconcilable_field_action or upload_intent is not None or navigation_intent is not None
         ) and source_observation is None:
             raise BrowserPolicyError(
                 "Reviewed browser execution requires a current browser observation"
@@ -759,6 +766,18 @@ class BrowserRuntimeService:
                     payload={
                         "action_kind": action.kind.value,
                         "verification": action.verification.model_dump(mode="json"),
+                        "request_fingerprint": operation.request_fingerprint,
+                    },
+                    source_page_fingerprint=source_observation.page_fingerprint,
+                    actor="browser-runtime",
+                )
+            elif upload_intent is not None:
+                assert source_observation is not None  # validated before durable admission
+                self._external_effects.prepare_browser_upload_reconciliation(
+                    operation.id,
+                    attempt.id,
+                    payload={
+                        **upload_intent,
                         "request_fingerprint": operation.request_fingerprint,
                     },
                     source_page_fingerprint=source_observation.page_fingerprint,
@@ -1097,6 +1116,64 @@ class BrowserRuntimeService:
             ),
         )
 
+    def preview_upload_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> BrowserUploadReconciliationPreview:
+        preview, _observation, _evidence = self._prove_upload_reconciliation(
+            session_id, operation_id
+        )
+        return preview
+
+    def approve_upload_reconciliation(
+        self,
+        session_id: str,
+        approval: BrowserUploadReconciliationApproval,
+    ) -> BrowserUploadReconciliationResult:
+        preview, observation, evidence = self._prove_upload_reconciliation(
+            session_id, approval.operation_id
+        )
+        if preview.review_fingerprint != approval.expected_review_fingerprint:
+            raise BrowserReconciliationUnprovenError(
+                "Browser upload reconciliation changed after review"
+            )
+        saved = self._repository.save_observation(
+            session_id, BrowserSessionState.USER_TAKEOVER, observation
+        )
+        self._save_checkpoint(saved, observation, pending_action=None)
+        try:
+            effect = self._external_effects.reconcile_browser_upload(
+                preview.operation_id,
+                preview.attempt_id,
+                evidence_reference=f"browser-action:{preview.attempt_id}",
+                evidence=evidence,
+                page_fingerprint=observation.page_fingerprint,
+            )
+        except (ExternalEffectConflictError, ValueError) as error:
+            raise BrowserReconciliationUnprovenError(
+                "Browser upload reconciliation ownership changed"
+            ) from error
+        reconciliation = effect.reconciliation
+        if (
+            reconciliation is None
+            or reconciliation.status is not ExternalEffectReconciliationStatus.CONFIRMED_APPLIED
+            or reconciliation.reconciled_at is None
+        ):  # pragma: no cover - repository contract
+            raise RuntimeError("Browser upload reconciliation did not become durable")
+        return BrowserUploadReconciliationResult(
+            operation_id=preview.operation_id,
+            attempt_id=preview.attempt_id,
+            session_id=session_id,
+            file_name=preview.file_name,
+            page_type=preview.page_type,
+            result_page_fingerprint=observation.page_fingerprint,
+            reconciliation_kind=ExternalEffectReconciliationKind.BROWSER_UPLOAD_CONFIRMED.value,
+            reconciled_at=reconciliation.reconciled_at,
+            notice=(
+                "The exact reviewed filename is observed on the same Greenhouse form stage. "
+                "The original uncertain upload remains immutable and was not retried."
+            ),
+        )
+
     def stage_encrypted_upload(
         self,
         session_id: str,
@@ -1140,6 +1217,225 @@ class BrowserRuntimeService:
         if record is None:
             raise LookupError(f"Browser session {session_id} was not found")
         return record
+
+    def _prove_upload_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> tuple[
+        BrowserUploadReconciliationPreview,
+        BrowserObservation,
+        dict[str, object],
+    ]:
+        session = self._record(session_id)
+        if session.state is not BrowserSessionState.USER_TAKEOVER:
+            raise BrowserSessionStateError("Browser upload reconciliation requires user takeover")
+        effect = self._external_effects.get(operation_id)
+        if (
+            effect is None
+            or effect.operation.kind is not ExternalEffectKind.BROWSER_ACTION
+            or effect.operation.subject_type != "browser_session"
+            or effect.operation.subject_id != session_id
+            or effect.operation.status is not ExternalEffectStatus.UNCERTAIN
+            or effect.reconciliation is None
+            or effect.reconciliation.kind
+            is not ExternalEffectReconciliationKind.BROWSER_UPLOAD_CONFIRMED
+            or effect.reconciliation.status is not ExternalEffectReconciliationStatus.AVAILABLE
+            or effect.reconciliation.policy_version
+            != ExternalEffectService.UPLOAD_RECONCILIATION_POLICY_VERSION
+            or len(effect.attempts) != 1
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "External effect is not an available uncertain reviewed upload"
+            )
+        attempt = effect.attempts[0]
+        intent = effect.reconciliation
+        if (
+            attempt.id != intent.attempt_id
+            or attempt.status is not ExternalEffectStatus.UNCERTAIN
+            or attempt.provider != "playwright"
+            or attempt.request_fingerprint != effect.operation.request_fingerprint
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser upload attempt does not match its durable intent"
+            )
+        actions = [
+            item for item in self._repository.list_actions(session_id) if item.id == attempt.id
+        ]
+        if len(actions) != 1:
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain reviewed upload has no unique local action evidence"
+            )
+        action_result = actions[0]
+        action = action_result.action
+        try:
+            payload = self._external_effects.browser_upload_reconciliation_payload(intent)
+        except ValueError:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser upload reconciliation intent is invalid"
+            ) from None
+        if set(payload) != {
+            "action_kind",
+            "control_key",
+            "expected_file_bytes",
+            "expected_file_name",
+            "expected_file_sha256",
+            "locator",
+            "request_fingerprint",
+            "source_form_review_fingerprint",
+            "source_origin",
+            "source_page_type",
+            "source_stage",
+            "source_upload_status_fingerprint",
+        }:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser upload reconciliation intent is invalid"
+            )
+        try:
+            action_kind = BrowserActionKind(str(payload["action_kind"]))
+            locator_value = payload["locator"]
+            if not isinstance(locator_value, dict):
+                raise ValueError
+            locator = SemanticLocator.model_validate(locator_value)
+            source_stage = GreenhouseFormStage(str(payload["source_stage"]))
+            source_page_type = str(payload["source_page_type"])
+            source_origin = str(payload["source_origin"])
+            source_form_review = str(payload["source_form_review_fingerprint"])
+            source_upload_fingerprint = str(payload["source_upload_status_fingerprint"])
+            control_key = str(payload["control_key"])
+            file_name = str(payload["expected_file_name"])
+            file_sha256 = str(payload["expected_file_sha256"])
+            file_bytes_value = payload["expected_file_bytes"]
+            if isinstance(file_bytes_value, bool) or not isinstance(file_bytes_value, int):
+                raise ValueError
+            file_bytes = file_bytes_value
+            source_assessment = GreenhouseFormContractService().assess(action_result.observation)
+            source_upload_names = self._bounded_upload_names(
+                action_result.observation.upload_status
+            )
+        except (TypeError, ValueError, GreenhouseFormContractError):
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser upload reconciliation intent is invalid"
+            ) from None
+        expected_precondition = BrowserVerification(
+            kind=VerificationKind.LOCATOR_VISIBLE,
+            locator=locator,
+        )
+        source_controls = [
+            item
+            for item in source_assessment.controls
+            if item.control_key == control_key
+            and item.action is GreenhouseFormAction.REVIEW_DOCUMENT_UPLOAD
+            and item.control_kind is BrowserControlKind.FILE_UPLOAD
+        ]
+        source_observed = [
+            item
+            for item in action_result.observation.controls
+            if item.control_key == control_key and item.locator == locator
+        ]
+        if (
+            action_kind is not BrowserActionKind.UPLOAD
+            or action.kind is not action_kind
+            or action.locator != locator
+            or action.preconditions != [expected_precondition]
+            or action.intended_result != _GREENHOUSE_UPLOAD_INTENT
+            or action.verification.kind is not VerificationKind.NONE
+            or action.permission is not BrowserPermission.ELEVATED
+            or action.confirmation is not ConfirmationState.CONFIRMED
+            or not action.sensitive_value
+            or action.file_path is not None
+            or action.value is not None
+            or action.url is not None
+            or action.coordinates is not None
+            or action_result.verified
+            or action_result.error is None
+            or attempt.target_code != BrowserActionKind.UPLOAD.value
+            or payload["request_fingerprint"] != effect.operation.request_fingerprint
+            or action_result.observation.page_fingerprint != intent.source_page_fingerprint
+            or action_result.observation.origin != source_origin
+            or action_result.observation.page_type != source_page_type
+            or source_assessment.page_type != source_page_type
+            or source_assessment.stage is not source_stage
+            or source_assessment.review_fingerprint != source_form_review
+            or self._external_effects.request_fingerprint(source_upload_names)
+            != source_upload_fingerprint
+            or file_name in source_upload_names
+            or not file_name
+            or len(file_name) > 255
+            or Path(file_name).name != file_name
+            or Path(file_name).suffix.casefold() not in _GREENHOUSE_DOCUMENT_SUFFIXES
+            or len(file_sha256) != 64
+            or any(value not in "0123456789abcdef" for value in file_sha256)
+            or file_bytes < 0
+            or not control_key
+            or len(control_key) > 200
+            or len(source_controls) != 1
+            or len(source_observed) != 1
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser action is outside the reviewed upload contract"
+            )
+        try:
+            observation = BrowserObservation.model_validate(
+                self._worker.call("observe", {"session_id": session_id}, timeout_seconds=75)
+            )
+            self._validate_live_observation(session, observation)
+            assessment = GreenhouseFormContractService().assess(observation)
+            result_upload_names = self._bounded_upload_names(observation.upload_status)
+        except (TypeError, ValueError, BrowserPolicyError, GreenhouseFormContractError):
+            raise BrowserReconciliationUnprovenError(
+                "Current page does not prove a recognized reviewed upload result"
+            ) from None
+        if (
+            observation.origin != source_origin
+            or observation.page_type != source_page_type
+            or assessment.page_type != source_page_type
+            or assessment.stage is not source_stage
+            or observation.page_fingerprint == intent.source_page_fingerprint
+            or result_upload_names.count(file_name) != 1
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Current page does not prove the reviewed filename on the same Greenhouse stage"
+            )
+        evidence: dict[str, object] = {
+            "policy_version": ExternalEffectService.UPLOAD_RECONCILIATION_POLICY_VERSION,
+            "operation_id": effect.operation.id,
+            "attempt_id": attempt.id,
+            "session_id": session_id,
+            "action_kind": action_kind.value,
+            "control_key": control_key,
+            "request_fingerprint": effect.operation.request_fingerprint,
+            "source_page_fingerprint": intent.source_page_fingerprint,
+            "source_page_type": source_page_type,
+            "source_stage": source_stage.value,
+            "source_upload_status_fingerprint": source_upload_fingerprint,
+            "result_page_fingerprint": observation.page_fingerprint,
+            "result_page_type": observation.page_type,
+            "result_stage": assessment.stage.value,
+            "result_upload_status_fingerprint": self._external_effects.request_fingerprint(
+                result_upload_names
+            ),
+            "expected_file_name": file_name,
+            "expected_file_sha256": file_sha256,
+            "expected_file_bytes": file_bytes,
+            "origin": observation.origin,
+        }
+        review_fingerprint = self._external_effects.request_fingerprint(evidence)
+        return (
+            BrowserUploadReconciliationPreview(
+                operation_id=effect.operation.id,
+                attempt_id=attempt.id,
+                session_id=session_id,
+                file_name=file_name,
+                page_type=observation.page_type,
+                result_page_fingerprint=observation.page_fingerprint,
+                review_fingerprint=review_fingerprint,
+                notice=(
+                    "The exact reviewed filename is currently observed on the same Greenhouse "
+                    "form stage. Approval records local reconciliation without uploading again."
+                ),
+            ),
+            observation,
+            evidence,
+        )
 
     def _prove_navigation_reconciliation(
         self, session_id: str, operation_id: str
@@ -1311,6 +1607,113 @@ class BrowserRuntimeService:
             observation,
             evidence,
         )
+
+    def _upload_reconciliation_intent(
+        self,
+        record: BrowserSessionRecord,
+        action: BrowserAction,
+        observation: BrowserObservation | None,
+    ) -> dict[str, object] | None:
+        if action.intended_result != _GREENHOUSE_UPLOAD_INTENT:
+            return None
+        if observation is None:
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse upload requires a current browser observation"
+            )
+        if action.file_path is None:
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse upload requires an approved staged document"
+            )
+        try:
+            assessment = GreenhouseFormContractService().assess(observation)
+            source_upload_names = self._bounded_upload_names(observation.upload_status)
+        except (ValueError, GreenhouseFormContractError):
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse upload requires a current recognized form stage"
+            ) from None
+        upload_path = Path(action.file_path).resolve()
+        upload_root = (Path(record.artifact_dir) / "staged-uploads").resolve()
+        file_name = upload_path.name
+        expected_precondition = (
+            BrowserVerification(
+                kind=VerificationKind.LOCATOR_VISIBLE,
+                locator=action.locator,
+            )
+            if action.locator is not None
+            else None
+        )
+        controls = [
+            item
+            for item in assessment.controls
+            if item.action is GreenhouseFormAction.REVIEW_DOCUMENT_UPLOAD
+            and item.control_kind is BrowserControlKind.FILE_UPLOAD
+            and item.control_key
+            in {
+                observed.control_key
+                for observed in observation.controls
+                if observed.locator == action.locator
+            }
+        ]
+        observed = [
+            item
+            for item in observation.controls
+            if item.locator == action.locator and item.kind is BrowserControlKind.FILE_UPLOAD
+        ]
+        if (
+            action.kind is not BrowserActionKind.UPLOAD
+            or action.locator is None
+            or expected_precondition is None
+            or action.preconditions != [expected_precondition]
+            or action.verification.kind is not VerificationKind.NONE
+            or action.permission is not BrowserPermission.ELEVATED
+            or action.confirmation is not ConfirmationState.CONFIRMED
+            or not action.sensitive_value
+            or action.value is not None
+            or action.url is not None
+            or action.coordinates is not None
+            or assessment.stage is GreenhouseFormStage.CONFIRMATION
+            or len(controls) != 1
+            or len(observed) != 1
+            or controls[0].control_key != observed[0].control_key
+            or upload_path.parent != upload_root
+            or not upload_path.is_file()
+            or not file_name
+            or len(file_name) > 255
+            or Path(file_name).suffix.casefold() not in _GREENHOUSE_DOCUMENT_SUFFIXES
+            or file_name in source_upload_names
+        ):
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse upload is outside the reconciliation contract"
+            )
+        with upload_path.open("rb") as source:
+            file_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+        return {
+            "action_kind": action.kind.value,
+            "control_key": controls[0].control_key,
+            "expected_file_bytes": upload_path.stat().st_size,
+            "expected_file_name": file_name,
+            "expected_file_sha256": file_sha256,
+            "locator": action.locator.model_dump(mode="json"),
+            "source_form_review_fingerprint": assessment.review_fingerprint,
+            "source_origin": observation.origin,
+            "source_page_type": observation.page_type,
+            "source_stage": assessment.stage.value,
+            "source_upload_status_fingerprint": self._external_effects.request_fingerprint(
+                source_upload_names
+            ),
+        }
+
+    @staticmethod
+    def _bounded_upload_names(values: list[str]) -> list[str]:
+        if len(values) > 20:
+            raise ValueError("Upload observation contains too many filenames")
+        names: list[str] = []
+        for value in values:
+            name = Path(value.replace("\\", "/")).name
+            if not name or len(name) > 255 or any(ord(character) < 32 for character in name):
+                raise ValueError("Upload observation contains an invalid filename")
+            names.append(name)
+        return names
 
     @staticmethod
     def _navigation_reconciliation_intent(

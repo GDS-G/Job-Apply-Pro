@@ -512,6 +512,68 @@ def test_prepared_external_effect_history_is_semantically_admitted(
     _service(history)
 
 
+def _reviewed_reconciliation_payload(kind: str) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "action_kind": "CLICK" if kind == "BROWSER_NAVIGATION_CONFIRMED" else "UPLOAD",
+        "control_key": "greenhouse-resume",
+        "locator": {
+            "strategy": "LABEL",
+            "value": "Resume",
+            "name": None,
+            "exact": True,
+        },
+        "request_fingerprint": "a" * 64,
+        "source_form_review_fingerprint": "b" * 64,
+        "source_origin": "https://boards.greenhouse.io",
+        "source_page_type": "DOCUMENT_UPLOAD",
+        "source_stage": "DOCUMENTS",
+    }
+    if kind == "BROWSER_UPLOAD_CONFIRMED":
+        payload.update(
+            {
+                "expected_file_bytes": 1_024,
+                "expected_file_name": "candidate-resume.pdf",
+                "expected_file_sha256": "c" * 64,
+                "source_upload_status_fingerprint": "d" * 64,
+            }
+        )
+    return payload
+
+
+@pytest.mark.parametrize("kind", ["BROWSER_NAVIGATION_CONFIRMED", "BROWSER_UPLOAD_CONFIRMED"])
+def test_restore_authenticates_kind_specific_reviewed_reconciliation_payload(
+    kind: str,
+) -> None:
+    guard._authenticate_external_effect_reconciliation(
+        {"kind": kind},
+        _reviewed_reconciliation_payload(kind),
+        "a" * 64,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("expected_file_name", "../candidate-resume.pdf"),
+        ("expected_file_name", "candidate-resume.exe"),
+        ("expected_file_bytes", True),
+        ("source_stage", "QUESTIONNAIRE"),
+        ("source_origin", "https://user:secret@boards.greenhouse.io"),
+        ("expected_file_sha256", "not-a-fingerprint"),
+        ("request_fingerprint", "e" * 64),
+    ],
+)
+def test_restore_refuses_changed_reviewed_upload_meaning(field: str, value: object) -> None:
+    payload = _reviewed_reconciliation_payload("BROWSER_UPLOAD_CONFIRMED")
+    payload[field] = value
+    with pytest.raises(inspection.RestoreHistoryError, match=inspection.UNAVAILABLE):
+        guard._authenticate_external_effect_reconciliation(
+            {"kind": "BROWSER_UPLOAD_CONFIRMED"},
+            payload,
+            "a" * 64,
+        )
+
+
 @pytest.mark.parametrize(
     ("statement", "parameters"),
     [

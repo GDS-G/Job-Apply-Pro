@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.77.0-alpha.1] - Unreleased
+
+### Reviewed Browser Upload Reconciliation
+
+- Prepare encrypted reconciliation intent before dispatch only for the exact reviewed Greenhouse selected-document upload.
+- Bind operation/attempt/request, control/locator, source origin/page/stage/form review/upload status, and the exact staged filename, byte count and SHA-256.
+- Redact every persisted upload path and clear the staged plaintext after the one attempt.
+- Require two fresh read-only same-stage observations with a changed page fingerprint and exactly one expected filename occurrence.
+- Reprove on approval, preserve the original `UNCERTAIN` operation and attempt, and terminalize only reconciliation without uploading again.
+- Add authenticated API, typed client/preload contracts, strict IPC identifiers, a Cancel-default native warning and an upload-specific Operations control.
+- Extend forward-restore authentication to exact field, navigation and upload reconciliation payloads while reusing schema `20260915_0030`.
+- State explicitly that filename observation is local file-selection evidence, not proof of provider receipt, bytes, retention, parsing, application attachment or submission.
+
 ## [0.76.0-alpha.1] - Unreleased
 
 ### Reviewed Browser Navigation Reconciliation

@@ -4,13 +4,15 @@ import hashlib
 import json
 import time
 from collections.abc import Callable, Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
 from job_apply_pro.domain.browser import (
     BrowserActionKind,
     BrowserVerification,
+    SemanticLocator,
     VerificationKind,
 )
 from job_apply_pro.domain.communications import (
@@ -20,6 +22,8 @@ from job_apply_pro.domain.communications import (
     IntegrationProvider,
     MutationKind,
 )
+from job_apply_pro.domain.external_effects import ExternalEffectReconciliationKind
+from job_apply_pro.domain.greenhouse_form import GreenhouseFormStage
 from job_apply_pro.domain.job_readiness import (
     QualificationReview,
     ReadinessSelectionReview,
@@ -114,6 +118,131 @@ _RECONCILABLE_VERIFICATIONS = {
     VerificationKind.SELECTED_LABEL_EQUALS,
     VerificationKind.CHECKED_EQUALS,
 }
+_GREENHOUSE_RECONCILIATION_STAGES = {
+    "APPLICATION_FORM": GreenhouseFormStage.APPLICATION,
+    "DOCUMENT_UPLOAD": GreenhouseFormStage.DOCUMENTS,
+    "QUESTIONNAIRE": GreenhouseFormStage.QUESTIONNAIRE,
+    "SUBMISSION_REVIEW": GreenhouseFormStage.REVIEW,
+}
+_GREENHOUSE_DOCUMENT_SUFFIXES = {".doc", ".docx", ".pdf"}
+
+
+def _fingerprint(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _bounded_text(value: object, maximum: int) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= maximum
+
+
+def _origin(value: object) -> bool:
+    if not _bounded_text(value, 2_000):
+        return False
+    assert isinstance(value, str)
+    parsed = urlsplit(value)
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _authenticate_external_effect_reconciliation(
+    row: Mapping[str, object], payload: dict[str, object], request_fingerprint: object
+) -> None:
+    """Authenticate the executable, kind-specific reconciliation intent."""
+    try:
+        kind = ExternalEffectReconciliationKind(str(row["kind"]))
+    except (KeyError, ValueError):
+        raise RestoreHistoryError(UNAVAILABLE) from None
+    common_request = payload.get("request_fingerprint")
+    if not _fingerprint(common_request) or common_request != request_fingerprint:
+        raise RestoreHistoryError(UNAVAILABLE)
+    if kind is ExternalEffectReconciliationKind.BROWSER_FIELD_VALUE_CONFIRMED:
+        if set(payload) != {"action_kind", "verification", "request_fingerprint"}:
+            raise RestoreHistoryError(UNAVAILABLE)
+        try:
+            action_kind = BrowserActionKind(str(payload["action_kind"]))
+            verification = BrowserVerification.model_validate(payload["verification"])
+        except (TypeError, ValueError, ValidationError):
+            raise RestoreHistoryError(UNAVAILABLE) from None
+        if (
+            action_kind not in _RECONCILABLE_ACTIONS
+            or verification.kind not in _RECONCILABLE_VERIFICATIONS
+            or verification.locator is None
+        ):
+            raise RestoreHistoryError(UNAVAILABLE)
+        return
+
+    navigation_keys = {
+        "action_kind",
+        "control_key",
+        "locator",
+        "request_fingerprint",
+        "source_form_review_fingerprint",
+        "source_origin",
+        "source_page_type",
+        "source_stage",
+    }
+    upload_keys = navigation_keys | {
+        "expected_file_bytes",
+        "expected_file_name",
+        "expected_file_sha256",
+        "source_upload_status_fingerprint",
+    }
+    expected_keys = (
+        navigation_keys
+        if kind is ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED
+        else upload_keys
+    )
+    try:
+        action_kind = BrowserActionKind(str(payload["action_kind"]))
+        locator_value = payload["locator"]
+        if not isinstance(locator_value, dict):
+            raise ValueError
+        SemanticLocator.model_validate(locator_value)
+        stage = GreenhouseFormStage(str(payload["source_stage"]))
+    except (KeyError, TypeError, ValueError, ValidationError):
+        raise RestoreHistoryError(UNAVAILABLE) from None
+    page_type = payload.get("source_page_type")
+    if (
+        set(payload) != expected_keys
+        or not isinstance(page_type, str)
+        or _GREENHOUSE_RECONCILIATION_STAGES.get(page_type) is not stage
+        or not _bounded_text(payload.get("control_key"), 200)
+        or not _fingerprint(payload.get("source_form_review_fingerprint"))
+        or not _origin(payload.get("source_origin"))
+    ):
+        raise RestoreHistoryError(UNAVAILABLE)
+    if kind is ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED:
+        if action_kind is not BrowserActionKind.CLICK:
+            raise RestoreHistoryError(UNAVAILABLE)
+        return
+
+    file_name = payload.get("expected_file_name")
+    file_bytes = payload.get("expected_file_bytes")
+    if (
+        action_kind is not BrowserActionKind.UPLOAD
+        or not _bounded_text(file_name, 255)
+        or not isinstance(file_name, str)
+        or PurePosixPath(file_name.replace("\\", "/")).name != file_name
+        or PurePosixPath(file_name).suffix.casefold() not in _GREENHOUSE_DOCUMENT_SUFFIXES
+        or any(ord(character) < 32 for character in file_name)
+        or isinstance(file_bytes, bool)
+        or not isinstance(file_bytes, int)
+        or file_bytes < 0
+        or not _fingerprint(payload.get("expected_file_sha256"))
+        or not _fingerprint(payload.get("source_upload_status_fingerprint"))
+    ):
+        raise RestoreHistoryError(UNAVAILABLE)
 
 
 def _calendar_plan_payload(row: Mapping[str, object], payload: dict[str, object]) -> None:
@@ -273,33 +402,13 @@ def _authenticate(snapshot: HistorySnapshot, cipher: SensitiveDataCipher, deadli
                         reviews[record.id] = record
                     if table == "external_effect_reconciliations":
                         assert isinstance(payload, dict)
-                        if set(payload) != {
-                            "action_kind",
-                            "verification",
-                            "request_fingerprint",
-                        }:
-                            raise RestoreHistoryError(UNAVAILABLE)
-                        try:
-                            action_kind = BrowserActionKind(str(payload["action_kind"]))
-                            verification = BrowserVerification.model_validate(
-                                payload["verification"]
-                            )
-                        except (TypeError, ValueError, ValidationError):
-                            raise RestoreHistoryError(UNAVAILABLE) from None
-                        request_fingerprint = payload["request_fingerprint"]
-                        if (
-                            action_kind not in _RECONCILABLE_ACTIONS
-                            or verification.kind not in _RECONCILABLE_VERIFICATIONS
-                            or verification.locator is None
-                            or not isinstance(request_fingerprint, str)
-                            or len(request_fingerprint) != 64
-                            or any(value not in "0123456789abcdef" for value in request_fingerprint)
-                            or request_fingerprint
-                            != snapshot.tables["external_effect_operations"][
-                                (row["operation_id"],)
-                            ]["request_fingerprint"]
-                        ):
-                            raise RestoreHistoryError(UNAVAILABLE)
+                        _authenticate_external_effect_reconciliation(
+                            row,
+                            payload,
+                            snapshot.tables["external_effect_operations"][(row["operation_id"],)][
+                                "request_fingerprint"
+                            ],
+                        )
     _review_dependencies(snapshot, reviews, deadline)
 
 

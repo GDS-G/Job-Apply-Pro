@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from job_apply_pro.domain.applications import Application, ApplicationCreate
 from job_apply_pro.domain.browser import (
     BrowserAction,
+    BrowserActionKind,
     BrowserActionResult,
     BrowserEngine,
     BrowserObservation,
@@ -453,10 +454,11 @@ class BrowserRuntimeRepository:
         try:
             stored_action = result.action
             stored_error = result.error
-            if result.action.sensitive_value:
+            if result.action.sensitive_value or result.action.kind is BrowserActionKind.UPLOAD:
                 stored_action = result.action.model_copy(
                     update={
                         "value": None,
+                        "file_path": None,
                         "verification": result.action.verification.model_copy(
                             update={"value": None}
                         ),

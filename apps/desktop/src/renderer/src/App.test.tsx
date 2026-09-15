@@ -670,7 +670,7 @@ describe("App", () => {
 
     expect(
       screen.getByText(
-        "Reviewed Browser Navigation Reconciliation v0.76.0-alpha.1",
+        "Reviewed Browser Upload Reconciliation v0.77.0-alpha.1",
       ),
     ).toBeInTheDocument();
     expect(
@@ -1076,6 +1076,82 @@ describe("App", () => {
     );
     expect(
       await screen.findByText(/recorded without retrying the action/i),
+    ).toBeInTheDocument();
+  });
+
+  it("offers reviewed upload reconciliation for a matching takeover session", async () => {
+    const api = window.jobApplyPro.workbench;
+    const operationId = "84a4cc96-07d1-4a0e-8000-a74811a13c0e";
+    const attemptId = "39c70be6-ea1b-4c71-b668-d359f7ce4b06";
+    const sessionId = "7fdf419a-0771-4d75-99d2-c76ba2f89719";
+    const operations = await api.getOperationsDashboard();
+    vi.spyOn(api, "listBrowserSessions").mockResolvedValue([
+      {
+        id: sessionId,
+        workflow_id: "fixture-workflow",
+        engine: "chromium",
+        profile_name: "fixture-upload-profile",
+        state: "USER_TAKEOVER",
+        current_url: "https://boards.greenhouse.io/example/jobs/123",
+        allowed_origins: ["https://boards.greenhouse.io"],
+        observation: null,
+        action_count: 1,
+        trace_path: null,
+        created_at: new Date(0).toISOString(),
+        updated_at: new Date(0).toISOString(),
+      },
+    ]);
+    vi.spyOn(api, "getOperationsDashboard").mockResolvedValue({
+      ...operations,
+      external_effects: {
+        total: 1,
+        unresolved: 1,
+        by_status: { UNCERTAIN: 1 },
+        by_kind: { BROWSER_ACTION: 1 },
+      },
+      unresolved_external_effects: [
+        {
+          id: operationId,
+          kind: "BROWSER_ACTION",
+          subject_type: "browser_session",
+          subject_id: sessionId,
+          status: "UNCERTAIN",
+          error_code: "WORKER_RESPONSE_UNAVAILABLE",
+          attempt_count: 1,
+          created_at: new Date(0).toISOString(),
+          updated_at: new Date(0).toISOString(),
+          completed_at: new Date(0).toISOString(),
+          reconciliation_available: true,
+          reconciliation_kind: "BROWSER_UPLOAD_CONFIRMED",
+        },
+      ],
+    });
+    const reconcile = vi
+      .spyOn(api, "reconcileBrowserUpload")
+      .mockResolvedValue({
+        operation_id: operationId,
+        attempt_id: attemptId,
+        session_id: sessionId,
+        file_name: "candidate-resume.pdf",
+        page_type: "DOCUMENT_UPLOAD",
+        result_page_fingerprint: "greenhouse-documents-uploaded-v2",
+        reconciliation_kind: "BROWSER_UPLOAD_CONFIRMED",
+        reconciled_at: "2026-09-15T20:00:00+00:00",
+        notice: "Reviewed file selection recorded without uploading again.",
+      });
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /verify current upload outcome/i,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(reconcile).toHaveBeenCalledExactlyOnceWith(operationId, sessionId),
+    );
+    expect(
+      await screen.findByText(/recorded without uploading again/i),
     ).toBeInTheDocument();
   });
 

@@ -22,6 +22,7 @@ class ExternalEffectStatus(StrEnum):
 class ExternalEffectReconciliationKind(StrEnum):
     BROWSER_FIELD_VALUE_CONFIRMED = "BROWSER_FIELD_VALUE_CONFIRMED"
     BROWSER_NAVIGATION_CONFIRMED = "BROWSER_NAVIGATION_CONFIRMED"
+    BROWSER_UPLOAD_CONFIRMED = "BROWSER_UPLOAD_CONFIRMED"
 
 
 class ExternalEffectReconciliationStatus(StrEnum):

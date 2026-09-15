@@ -876,6 +876,29 @@ export function App() {
     }
   }
 
+  async function reconcileBrowserUpload(
+    operationId: string,
+    sessionId: string,
+  ) {
+    setBusy(true);
+    setReconciliationMessage(null);
+    try {
+      const result = await window.jobApplyPro.workbench.reconcileBrowserUpload(
+        operationId,
+        sessionId,
+      );
+      if (result) {
+        setReconciliationMessage(result.notice);
+        await refreshWorkflows();
+      }
+      setError(null);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importResume(form: FormData) {
     if (!profileId) return;
     const input: CandidateDocumentImportInput = {
@@ -1845,13 +1868,13 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Browser Navigation Reconciliation v0.76.0-alpha.1
+                Reviewed Browser Upload Reconciliation v0.77.0-alpha.1
               </strong>
               <p>
-                Persistent portal data can now be retired only after an exact
-                backend preview and cancel-default native confirmation.
-                Historical evidence remains; passwords and security codes are
-                never stored.
+                An uncertain exact reviewed Greenhouse file selection can be
+                recorded only after two read-only same-stage filename proofs.
+                The upload is never retried, and filename evidence is not
+                provider receipt.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -4283,7 +4306,9 @@ export function App() {
                         (effect.reconciliation_kind ===
                           "BROWSER_FIELD_VALUE_CONFIRMED" ||
                           effect.reconciliation_kind ===
-                            "BROWSER_NAVIGATION_CONFIRMED") &&
+                            "BROWSER_NAVIGATION_CONFIRMED" ||
+                          effect.reconciliation_kind ===
+                            "BROWSER_UPLOAD_CONFIRMED") &&
                         browserSessions.some(
                           (session) => session.id === effect.subject_id,
                         ) && (
@@ -4297,10 +4322,16 @@ export function App() {
                                     effect.id,
                                     effect.subject_id,
                                   )
-                                : reconcileBrowserField(
-                                    effect.id,
-                                    effect.subject_id,
-                                  ))
+                                : effect.reconciliation_kind ===
+                                    "BROWSER_UPLOAD_CONFIRMED"
+                                  ? reconcileBrowserUpload(
+                                      effect.id,
+                                      effect.subject_id,
+                                    )
+                                  : reconcileBrowserField(
+                                      effect.id,
+                                      effect.subject_id,
+                                    ))
                             }
                             type="button"
                           >
@@ -4308,7 +4339,10 @@ export function App() {
                             {effect.reconciliation_kind ===
                             "BROWSER_NAVIGATION_CONFIRMED"
                               ? "Verify current form stage"
-                              : "Verify current field outcome"}
+                              : effect.reconciliation_kind ===
+                                  "BROWSER_UPLOAD_CONFIRMED"
+                                ? "Verify current upload outcome"
+                                : "Verify current field outcome"}
                           </button>
                         )}
                     </article>

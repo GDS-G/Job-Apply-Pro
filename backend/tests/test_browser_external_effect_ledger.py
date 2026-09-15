@@ -21,6 +21,7 @@ from job_apply_pro.domain.browser import (
     BrowserRetryPolicy,
     BrowserSessionRecord,
     BrowserSessionState,
+    BrowserUploadReconciliationApproval,
     BrowserVerification,
     ConfirmationState,
     LocatorStrategy,
@@ -267,6 +268,75 @@ def _navigation_action() -> BrowserAction:
         verification=BrowserVerification(kind=VerificationKind.NONE),
         permission="ELEVATED",
         confirmation=ConfirmationState.CONFIRMED,
+    )
+
+
+def _greenhouse_upload_observation(
+    *,
+    page_fingerprint: str,
+    upload_status: list[str],
+    satisfied: bool,
+) -> BrowserObservation:
+    locator = SemanticLocator(
+        strategy=LocatorStrategy.LABEL,
+        value="Resume",
+        exact=True,
+    )
+    return BrowserObservation(
+        sequence=1,
+        url="https://boards.greenhouse.io/example/jobs/123",
+        title="Synthetic Greenhouse document fixture",
+        origin="https://boards.greenhouse.io",
+        page_type="DOCUMENT_UPLOAD",
+        page_fingerprint=page_fingerprint,
+        tabs=[],
+        accessibility_snapshot="",
+        visible_text="Upload resume",
+        controls=[
+            BrowserObservedControl(
+                index=0,
+                control_key="greenhouse-resume",
+                kind=BrowserControlKind.FILE_UPLOAD,
+                tag="input",
+                input_type="file",
+                label="Resume",
+                label_source="LABEL",
+                accept=".pdf,.doc,.docx",
+                required=True,
+                native_required=True,
+                visible=True,
+                will_validate=True,
+                constraint_satisfied=satisfied,
+                locator=locator,
+            )
+        ],
+        validation_errors=[],
+        modals=[],
+        console_errors=[],
+        network_failures=[],
+        upload_status=upload_status,
+        download_status=[],
+        screenshot_path="fixture.png",
+        observed_at=datetime.now(UTC),
+    )
+
+
+def _upload_action(path: Path) -> BrowserAction:
+    locator = SemanticLocator(
+        strategy=LocatorStrategy.LABEL,
+        value="Resume",
+        exact=True,
+    )
+    return BrowserAction(
+        kind=BrowserActionKind.UPLOAD,
+        locator=locator,
+        file_path=str(path),
+        preconditions=[BrowserVerification(kind=VerificationKind.LOCATOR_VISIBLE, locator=locator)],
+        intended_result="Upload the exact reviewed immutable application document",
+        verification=BrowserVerification(kind=VerificationKind.NONE),
+        permission="ELEVATED",
+        confirmation=ConfirmationState.CONFIRMED,
+        sensitive_value=True,
     )
 
 
@@ -641,6 +711,178 @@ def test_navigation_reconciliation_approval_rechecks_current_stage(
                 operation_id=operation.id,
                 expected_review_fingerprint=preview.review_fingerprint,
                 confirmation_phrase="RECONCILE REVIEWED NAVIGATION",
+            ),
+        )
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe", "observe"]
+
+
+def test_uncertain_upload_is_reconciled_only_by_exact_new_filename(
+    session: Session, tmp_path: Path
+) -> None:
+    source = _greenhouse_upload_observation(
+        page_fingerprint="greenhouse-documents-v1",
+        upload_status=[],
+        satisfied=False,
+    )
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=source,
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    staged = tmp_path / "artifacts" / "staged-uploads" / "candidate-resume.pdf"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"exact reviewed resume bytes")
+
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _upload_action(staged))
+    operation = effects.list_public()[0]
+    assert operation.reconciliation_available
+    assert operation.reconciliation_kind == "BROWSER_UPLOAD_CONFIRMED"
+    stored_action = service.list_actions(session_id)[0]
+    assert stored_action.action.file_path is None
+    assert stored_action.error == "Sensitive browser action failed or could not be verified"
+    service.clear_staged_uploads(session_id)
+
+    result_observation = _greenhouse_upload_observation(
+        page_fingerprint="greenhouse-documents-uploaded-v2",
+        upload_status=["candidate-resume.pdf"],
+        satisfied=True,
+    )
+    worker.result = result_observation.model_dump(mode="json")
+    preview = service.preview_upload_reconciliation(session_id, operation.id)
+    result = service.approve_upload_reconciliation(
+        session_id,
+        BrowserUploadReconciliationApproval(
+            operation_id=operation.id,
+            expected_review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="RECONCILE REVIEWED UPLOAD",
+        ),
+    )
+
+    assert preview.file_name == "candidate-resume.pdf"
+    assert preview.page_type == "DOCUMENT_UPLOAD"
+    assert result.reconciliation_kind == "BROWSER_UPLOAD_CONFIRMED"
+    assert result.result_page_fingerprint == "greenhouse-documents-uploaded-v2"
+    assert worker.methods == ["execute", "observe", "observe"]
+    assert not effects.has_unresolved_subject("browser_session", session_id)
+    record = effects.get(operation.id)
+    assert record is not None
+    assert record.operation.status is ExternalEffectStatus.UNCERTAIN
+
+
+def test_reviewed_upload_outside_session_staging_has_no_reconciliation_authority(
+    session: Session, tmp_path: Path
+) -> None:
+    source = _greenhouse_upload_observation(
+        page_fingerprint="greenhouse-documents-v1",
+        upload_status=[],
+        satisfied=False,
+    )
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("must not dispatch"),
+        observation=source,
+    )
+    outside = tmp_path / "candidate-resume.pdf"
+    outside.write_bytes(b"not in the exact session staging directory")
+
+    with pytest.raises(BrowserPolicyError, match="outside the reconciliation contract"):
+        service.execute_action("00000000-0000-4000-8000-000000000101", _upload_action(outside))
+
+    assert effects.list_public() == []
+    assert worker.methods == []
+
+
+@pytest.mark.parametrize(
+    ("page_fingerprint", "upload_status"),
+    [
+        ("greenhouse-documents-v1", ["candidate-resume.pdf"]),
+        ("greenhouse-documents-uploaded-v2", []),
+        ("greenhouse-documents-uploaded-v2", ["candidate-resume.pdf", "candidate-resume.pdf"]),
+    ],
+)
+def test_upload_reconciliation_refuses_stale_absent_or_duplicate_filename(
+    session: Session,
+    tmp_path: Path,
+    page_fingerprint: str,
+    upload_status: list[str],
+) -> None:
+    source = _greenhouse_upload_observation(
+        page_fingerprint="greenhouse-documents-v1",
+        upload_status=[],
+        satisfied=False,
+    )
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=source,
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    staged = tmp_path / "artifacts" / "staged-uploads" / "candidate-resume.pdf"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"exact reviewed resume bytes")
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _upload_action(staged))
+    operation = effects.list_public()[0]
+    worker.result = _greenhouse_upload_observation(
+        page_fingerprint=page_fingerprint,
+        upload_status=upload_status,
+        satisfied=bool(upload_status),
+    ).model_dump(mode="json")
+
+    with pytest.raises(BrowserSessionStateError, match="does not prove"):
+        service.preview_upload_reconciliation(session_id, operation.id)
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe"]
+
+
+def test_upload_reconciliation_approval_rechecks_current_filename(
+    session: Session, tmp_path: Path
+) -> None:
+    source = _greenhouse_upload_observation(
+        page_fingerprint="greenhouse-documents-v1",
+        upload_status=[],
+        satisfied=False,
+    )
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=source,
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    staged = tmp_path / "artifacts" / "staged-uploads" / "candidate-resume.pdf"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"exact reviewed resume bytes")
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _upload_action(staged))
+    operation = effects.list_public()[0]
+    worker.result = _greenhouse_upload_observation(
+        page_fingerprint="greenhouse-documents-uploaded-v2",
+        upload_status=["candidate-resume.pdf"],
+        satisfied=True,
+    ).model_dump(mode="json")
+    preview = service.preview_upload_reconciliation(session_id, operation.id)
+    worker.result = _greenhouse_upload_observation(
+        page_fingerprint="greenhouse-documents-changed-v3",
+        upload_status=["different-resume.pdf"],
+        satisfied=True,
+    ).model_dump(mode="json")
+
+    with pytest.raises(BrowserSessionStateError, match="does not prove"):
+        service.approve_upload_reconciliation(
+            session_id,
+            BrowserUploadReconciliationApproval(
+                operation_id=operation.id,
+                expected_review_fingerprint=preview.review_fingerprint,
+                confirmation_phrase="RECONCILE REVIEWED UPLOAD",
             ),
         )
 

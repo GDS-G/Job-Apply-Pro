@@ -1,5 +1,9 @@
 # Production threat model
 
+## Reviewed upload reconciliation boundary
+
+Reviewed Browser Upload Reconciliation `v0.77.0-alpha.1` grants no generic upload retry or success assertion. Authority exists only when encrypted intent was prepared before dispatch for the exact reviewed Greenhouse file control. It binds operation/attempt/request, locator/control, source origin/page/stage/form review/upload status, and exact filename/byte count/SHA-256. Persisted actions redact paths and staged plaintext is cleared after the attempt. Preview and approval each use fresh read-only observation and require the same origin, page type and stage, a changed fingerprint, and exactly one expected filename. The renderer cannot choose the file, path, hash, evidence or outcome. Path-like names, unsupported suffixes, absent/duplicate/stale names, another stage/origin, changed reviews and old/generic uploads fail closed. Recorded filename evidence does not establish provider receipt, content, retention, parsing, attachment or submission.
+
 ## Reviewed navigation reconciliation boundary
 
 Reviewed Browser Navigation Reconciliation `v0.76.0-alpha.1` does not infer success from a changed URL or page alone. Reconciliation authority must exist before dispatch and is limited to the exact reviewed Greenhouse navigation contract. Encrypted intent binds operation, attempt, request, control, semantic locator, source origin/page/stage, form-review fingerprint, and source page fingerprint. Both preview and approval independently perform a read-only observation and require the same origin plus a different, recognized, strictly later non-confirmation stage. Renderer input cannot choose the evidence or target stage. The original effect remains immutable and `UNCERTAIN`; reconciliation never replays a click and never grants upload or submit authority. Same-page, earlier/equal, confirmation, unknown, foreign-origin, stale, generic-click, and changed-review cases fail closed.

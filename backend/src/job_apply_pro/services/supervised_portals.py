@@ -332,6 +332,7 @@ class SupervisedPortalService:
                 verification=BrowserVerification(kind=VerificationKind.NONE),
                 permission=BrowserPermission.ELEVATED,
                 confirmation=ConfirmationState.CONFIRMED,
+                sensitive_value=True,
             )
             result = self._browser.execute_action(run.browser_session_id, action)
             postcondition = self._greenhouse_forms.verify_upload(

@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Reviewed Browser Navigation Reconciliation"
+    BUILD_NAME = "Reviewed Browser Upload Reconciliation"
 
     def __init__(
         self,

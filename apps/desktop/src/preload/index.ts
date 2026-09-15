@@ -106,6 +106,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
         operationId,
         sessionId,
       ),
+    reconcileBrowserUpload: (operationId: string, sessionId: string) =>
+      ipcRenderer.invoke(
+        "workbench:reconcile-browser-upload",
+        operationId,
+        sessionId,
+      ),
     getCandidateKnowledge: (profileId: string) =>
       ipcRenderer.invoke("knowledge:get", profileId),
     selectAndImportResume: (

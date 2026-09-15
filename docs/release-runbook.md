@@ -1,5 +1,11 @@
 # Windows release and rollback runbook
 
+## v0.77 candidate-specific checks
+
+For Reviewed Browser Upload Reconciliation `v0.77.0-alpha.1`, freeze one candidate and verify exact staged-byte hashing, path redaction, plaintext cleanup, pre-dispatch intent, response-loss handling, same-stage filename proof, same-fingerprint/absent/duplicate refusal, approval-time reproof, immutable uncertain history, API/client/IPC identity, Cancel-default native review, kind-specific renderer control and exact restore authentication. Inspect all saved/public/support output for paths, document bytes, credentials and encrypted intent. Package and protocol checks must run against both built and installer-delivered copies. Never claim provider receipt from a filename, replay the upload, enable production Greenhouse, or transfer v0.76 evidence. Signed, physical, update/rollback and authorized live-portal checks remain separate release-owner gates.
+
+Exact source and package checkpoints, tests, coverage, hashes and Authenticode status are recorded after the frozen candidate completes the full gate.
+
 ## v0.76 candidate-specific checks
 
 For Reviewed Browser Navigation Reconciliation `v0.76.0-alpha.1`, verify the frozen candidate proves the pre-dispatch intent, response-loss path, later-stage reconciliation, same-page/confirmation refusal, approval-time reproof, immutable uncertain history, authenticated API, strict client/IPC identifiers, cancel-default native review, kind-specific renderer control, and restore-history validation. Package and protocol checks must run against the exact delivered copies. Do not promote a changed page or URL as success, enable production Greenhouse, or transfer v0.75 evidence. Signed, physical, update/rollback, and authorized live-portal checks remain separate release-owner gates.
