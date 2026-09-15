@@ -28,7 +28,7 @@ class GreenhouseFormContractError(ValueError):
     pass
 
 
-GREENHOUSE_FORM_POLICY_VERSION = "greenhouse-form-execution-contract/1"
+GREENHOUSE_FORM_POLICY_VERSION = "greenhouse-form-execution-contract/2"
 
 _STAGES = {
     "APPLICATION_FORM": GreenhouseFormStage.APPLICATION,
@@ -105,9 +105,12 @@ def is_reviewed_greenhouse_single_select(control: BrowserObservedControl) -> boo
     """Return whether one observed custom widget has a bounded executable shape."""
 
     labels = [option.label for option in control.options]
+    editable_shape = control.tag.casefold() == "input" or (
+        control.tag.casefold() in {"div", "span"} and control.widget_contenteditable
+    )
     return (
         control.kind is BrowserControlKind.CUSTOM
-        and control.tag.casefold() == "input"
+        and editable_shape
         and control.role.casefold() == "combobox"
         and control.widget_popup.casefold() == "listbox"
         and control.widget_expanded is True
@@ -226,9 +229,9 @@ class GreenhouseFormContractService:
                 "evidence remains separate."
             ),
             (
-                "Only bounded expanded single-select combobox widgets may use reviewed field "
-                "execution; other custom widgets, legal attestations, signatures, and final "
-                "submission remain manual or separately gated."
+                "Only bounded expanded input or contenteditable single-select combobox widgets "
+                "may use reviewed field execution; other custom widgets, legal attestations, "
+                "signatures, and final submission remain manual or separately gated."
             ),
         ]
         payload: dict[str, object] = {

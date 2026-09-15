@@ -324,12 +324,16 @@ class BrowserWorker:
                     raise ValueError("CHOOSE_CONTROLLED_OPTION requires a visible label")
                 if locator.count() != 1:
                     raise ValueError("Controlled option action requires one exact combobox")
-                if (
-                    locator.evaluate("element => element.tagName.toLowerCase()") != "input"
-                    or (locator.get_attribute("role") or "").casefold() != "combobox"
-                    or (locator.get_attribute("aria-haspopup") or "").casefold() != "listbox"
+                tag = locator.evaluate("element => element.tagName.toLowerCase()")
+                contenteditable = bool(locator.evaluate("element => element.isContentEditable"))
+                if not (
+                    (tag == "input" or (tag in {"div", "span"} and contenteditable))
+                    and (locator.get_attribute("role") or "").casefold() == "combobox"
+                    and (locator.get_attribute("aria-haspopup") or "").casefold() == "listbox"
                 ):
-                    raise ValueError("Controlled option action requires an input combobox")
+                    raise ValueError(
+                        "Controlled option action requires an input or contenteditable combobox"
+                    )
                 if not locator.is_visible() or not locator.is_enabled():
                     raise ValueError("Controlled option action requires a visible enabled combobox")
                 if (locator.get_attribute("aria-expanded") or "").casefold() != "true":
@@ -385,7 +389,19 @@ class BrowserWorker:
         if rule.kind is VerificationKind.LOCATOR_VISIBLE:
             return locator.is_visible()
         if rule.kind is VerificationKind.VALUE_EQUALS:
-            return rule.value is not None and locator.input_value() == rule.value
+            observed_value = locator.evaluate(
+                """element => {
+                  const tag = element.tagName.toLowerCase();
+                  if (['input', 'textarea', 'select'].includes(tag)) {
+                    return String(element.value);
+                  }
+                  if (['div', 'span'].includes(tag) && element.isContentEditable) {
+                    return (element.textContent || '').trim().replace(/\\s+/g, ' ');
+                  }
+                  return null;
+                }"""
+            )
+            return rule.value is not None and observed_value == rule.value
         if rule.kind is VerificationKind.SELECTED_LABEL_EQUALS:
             selected_label = locator.evaluate(
                 "el => el.selectedOptions?.[0]?.textContent?.trim() || ''"
@@ -558,7 +574,8 @@ class BrowserWorker:
                   (controlledListbox?.getAttribute('aria-multiselectable') || '')
                     .toLowerCase() === 'true',
                 widgetSearchable: el.getAttribute('role') === 'combobox' &&
-                  (el.tagName.toLowerCase() === 'input' || el.hasAttribute('contenteditable')),
+                  (el.tagName.toLowerCase() === 'input' || Boolean(el.isContentEditable)),
+                widgetContenteditable: Boolean(el.isContentEditable),
                 widgetControlsOneVisibleListbox: controlledIds.length === 1 &&
                   Boolean(controlledListbox && isVisible(controlledListbox)),
                 accept: el.getAttribute('accept') || '',

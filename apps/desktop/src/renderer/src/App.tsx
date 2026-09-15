@@ -1953,13 +1953,16 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Reviewed Browser Link Navigation v0.80.0-alpha.1</strong>
+              <strong>
+                Reviewed Greenhouse Contenteditable Single-Select
+                v0.81.0-alpha.1
+              </strong>
               <p>
-                Ordinary same-portal anchors can be reviewed and navigated by
-                exact URL without activating page scripts. Changed,
-                credentialed, query, fragment, download, redirect, and
-                cross-portal targets fail closed under the existing no-replay
-                recovery contract.
+                Expanded Greenhouse contenteditable comboboxes can use the
+                reviewed exact-option flow only when one visible single-select
+                listbox and every safety guard remain current. Changed,
+                collapsed, ambiguous, repeated, legal, signature, and
+                multiselect controls remain manual or fail closed.
               </p>
             </div>
             <span className="status-pill status-pill--safe">

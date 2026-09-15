@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Browser Link Navigation",
-  version: "0.80.0-alpha.1",
+  name: "Reviewed Greenhouse Contenteditable Single-Select",
+  version: "0.81.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -403,6 +403,7 @@ export interface BrowserObservedControl {
   widget_expanded?: boolean | null;
   widget_multiselectable: boolean;
   widget_searchable: boolean;
+  widget_contenteditable?: boolean;
   widget_controls_one_visible_listbox: boolean;
   accept: string;
   checked: boolean;

@@ -236,7 +236,7 @@ describe("App", () => {
         },
       ],
       greenhouse_form: {
-        policy_version: "greenhouse-form-execution-contract/1",
+        policy_version: "greenhouse-form-execution-contract/2",
         page_fingerprint: "gh-upload-pending",
         page_type: "DOCUMENT_UPLOAD",
         stage: "DOCUMENTS",
@@ -455,7 +455,7 @@ describe("App", () => {
         } as never,
       ],
       greenhouse_form: {
-        policy_version: "greenhouse-form-execution-contract/1",
+        policy_version: "greenhouse-form-execution-contract/2",
         page_fingerprint: "greenhouse-widget-page",
         page_type: "APPLICATION_FORM",
         stage: "APPLICATION",
@@ -590,7 +590,7 @@ describe("App", () => {
       evidence: [],
       observed_controls: [],
       greenhouse_form: {
-        policy_version: "greenhouse-form-execution-contract/1",
+        policy_version: "greenhouse-form-execution-contract/2",
         page_fingerprint: "greenhouse-submit-page",
         page_type: "SUBMISSION_REVIEW",
         stage: "REVIEW",
@@ -731,7 +731,12 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Reviewed Browser Link Navigation v0.80.0-alpha.1"),
+      screen.getByText(
+        "Reviewed Greenhouse Contenteditable Single-Select v0.81.0-alpha.1",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/contenteditable comboboxes.*exact-option flow/i),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

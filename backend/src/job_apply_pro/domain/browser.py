@@ -210,6 +210,7 @@ class BrowserObservedControl(BaseModel):
     widget_expanded: bool | None = None
     widget_multiselectable: bool = False
     widget_searchable: bool = False
+    widget_contenteditable: bool = False
     widget_controls_one_visible_listbox: bool = False
     accept: str = Field(default="", max_length=500)
     checked: bool = False
@@ -329,10 +330,13 @@ class BrowserObservedControl(BaseModel):
             BrowserControlKind.SELECT: "combobox",
             BrowserControlKind.CHECKBOX: "checkbox",
         }
-        if semantic_name and label_source == "ARIA_LABELLEDBY" and kind in role_by_kind:
+        semantic_role = role_by_kind.get(kind)
+        if kind is BrowserControlKind.CUSTOM and role.casefold() in {"combobox", "listbox"}:
+            semantic_role = role.casefold()
+        if semantic_name and label_source == "ARIA_LABELLEDBY" and semantic_role:
             locator = {
                 "strategy": LocatorStrategy.ROLE,
-                "value": role_by_kind[kind],
+                "value": semantic_role,
                 "name": semantic_name,
                 "exact": True,
             }
@@ -484,6 +488,9 @@ class BrowserObservedControl(BaseModel):
                 item.get("widget_multiselectable", item.get("widgetMultiselectable"))
             ),
             "widget_searchable": bool(item.get("widget_searchable", item.get("widgetSearchable"))),
+            "widget_contenteditable": bool(
+                item.get("widget_contenteditable", item.get("widgetContenteditable"))
+            ),
             "widget_controls_one_visible_listbox": bool(
                 item.get(
                     "widget_controls_one_visible_listbox",

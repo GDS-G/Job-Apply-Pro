@@ -314,6 +314,32 @@ def test_review_maps_only_provider_reviewed_single_select_to_executable_kind() -
     assert linkedin.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
 
 
+def test_review_maps_provider_reviewed_contenteditable_single_select() -> None:
+    control = _single_select_widget().model_copy(
+        update={
+            "tag": "div",
+            "input_type": "",
+            "widget_contenteditable": True,
+        }
+    )
+    binding = _binding(
+        portal=PortalKind.GREENHOUSE.value,
+        control_key=control.control_key,
+        control_kind=PortalFieldControlKind.SINGLE_SELECT_WIDGET,
+    )
+
+    review = _service(
+        [control],
+        bindings=[binding],
+        answers=[_answer()],
+        portal=PortalKind.GREENHOUSE,
+    ).review("run-1", "application-1")
+
+    assert review.ready_to_execute_count == 1
+    assert review.items[0].control_kind is PortalFieldControlKind.SINGLE_SELECT_WIDGET
+    assert review.items[0].status is ApplicationFieldCoverageStatus.READY_TO_EXECUTE
+
+
 def test_review_marks_verified_stale_and_ambiguous_bindings() -> None:
     control = _control("email-control")
     verified = _service(

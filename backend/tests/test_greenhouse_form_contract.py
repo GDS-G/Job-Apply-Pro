@@ -18,6 +18,8 @@ from job_apply_pro.domain.browser import (
     BrowserPermission,
     BrowserTab,
     ConfirmationState,
+    LocatorStrategy,
+    SemanticLocator,
 )
 from job_apply_pro.domain.greenhouse_form import (
     GreenhouseFormAction,
@@ -32,7 +34,7 @@ from job_apply_pro.services.greenhouse_form import (
 
 
 def _corpus() -> dict[str, Any]:
-    path = Path(__file__).parent / "fixtures" / "greenhouse_form_contracts_v1.json"
+    path = Path(__file__).parent / "fixtures" / "greenhouse_form_contracts_v2.json"
     value = json.loads(path.read_text(encoding="utf-8"))
     assert isinstance(value, dict)
     return cast(dict[str, Any], value)
@@ -175,6 +177,82 @@ def test_expanded_greenhouse_single_select_is_a_reviewed_field() -> None:
     assert assessment.manual_intervention_count == 0
     assert assessment.controls[0].action is GreenhouseFormAction.REVIEW_FIELD
     assert assessment.controls[0].postcondition is GreenhousePostconditionKind.VALUE_EQUALS
+
+
+@pytest.mark.parametrize("tag", ["div", "span"])
+def test_expanded_contenteditable_greenhouse_single_select_is_a_reviewed_field(
+    tag: str,
+) -> None:
+    service = GreenhouseFormContractService()
+    contenteditable = _single_select_widget().model_copy(
+        update={
+            "tag": tag,
+            "input_type": "",
+            "widget_contenteditable": True,
+        }
+    )
+    observation = _observation(_cases()["contact-ready"]).model_copy(
+        update={"controls": [contenteditable]}
+    )
+
+    assessment = service.assess(observation)
+
+    assert assessment.review_field_count == 1
+    assert assessment.manual_intervention_count == 0
+    assert assessment.controls[0].action is GreenhouseFormAction.REVIEW_FIELD
+    assert assessment.controls[0].postcondition is GreenhousePostconditionKind.VALUE_EQUALS
+
+
+@pytest.mark.parametrize(
+    ("tag", "widget_contenteditable"),
+    [("div", False), ("section", True)],
+)
+def test_unsupported_contenteditable_greenhouse_combobox_remains_manual(
+    tag: str,
+    widget_contenteditable: bool,
+) -> None:
+    service = GreenhouseFormContractService()
+    noneditable = _single_select_widget().model_copy(
+        update={
+            "tag": tag,
+            "input_type": "",
+            "widget_contenteditable": widget_contenteditable,
+        }
+    )
+    observation = _observation(_cases()["contact-ready"]).model_copy(
+        update={"controls": [noneditable]}
+    )
+
+    assessment = service.assess(observation)
+
+    assert assessment.review_field_count == 0
+    assert assessment.manual_intervention_count == 1
+    assert assessment.controls[0].action is GreenhouseFormAction.USER_INTERVENTION
+
+
+def test_worker_contenteditable_metadata_normalizes_from_camel_case() -> None:
+    control = BrowserObservedControl.model_validate(
+        {
+            "index": 0,
+            "tag": "div",
+            "role": "combobox",
+            "label": "Preferred work location",
+            "labelSource": "ARIA_LABELLEDBY",
+            "widgetContenteditable": True,
+            "widgetSearchable": True,
+            "widgetPopup": "listbox",
+            "widgetExpanded": True,
+            "widgetControlsOneVisibleListbox": True,
+        }
+    )
+
+    assert control.widget_contenteditable
+    assert control.widget_searchable
+    assert control.locator == SemanticLocator(
+        strategy=LocatorStrategy.ROLE,
+        value="combobox",
+        name="Preferred work location",
+    )
 
 
 @pytest.mark.parametrize(

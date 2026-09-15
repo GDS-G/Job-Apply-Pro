@@ -131,6 +131,39 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </div>
                 </body>
             """,
+            "/contenteditable-single-select-widget": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Contenteditable location preference</h1>
+                  <label id="contenteditable-location-label">
+                    Preferred contenteditable work location
+                  </label>
+                  <div id="contenteditable-location" role="combobox" contenteditable="true"
+                    aria-labelledby="contenteditable-location-label" aria-haspopup="listbox"
+                    aria-expanded="true" aria-controls="contenteditable-location-options"></div>
+                  <button type="button" onclick="document.getElementById(
+                    'contenteditable-location').removeAttribute('contenteditable')">
+                    Disable editor
+                  </button>
+                  <div id="contenteditable-location-options" role="listbox">
+                    <div role="option" data-value="remote"
+                      onclick="document.getElementById(
+                        'contenteditable-location').textContent='Remote'">
+                      Remote
+                    </div>
+                    <div role="option" data-value="hybrid"
+                      onclick="document.getElementById(
+                        'contenteditable-location').textContent='Hybrid'">
+                      Hybrid
+                    </div>
+                    <div role="option" data-value="spoofed"
+                      onclick="document.getElementById(
+                        'contenteditable-location').value='Spoofed'">
+                      Spoofed
+                    </div>
+                    <div role="option" aria-disabled="true" data-value="on-site">On-site</div>
+                  </div>
+                </body>
+            """,
             "/conditional-fields": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Conditional questions</h1>
@@ -939,6 +972,159 @@ def test_controlled_single_select_refuses_live_collapsed_state(
                         locator=control.locator,
                         value="Remote",
                         intended_result="Refuse a changed collapsed widget",
+                        verification=BrowserVerification(
+                            kind=VerificationKind.VALUE_EQUALS,
+                            locator=control.locator,
+                            value="Remote",
+                        ),
+                    ),
+                )
+    finally:
+        worker.close()
+
+
+def test_contenteditable_single_select_uses_one_owned_visible_option(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/contenteditable-single-select-widget"),
+                    profile_name="contenteditable-single-select",
+                )
+            )
+            assert started.observation is not None
+            control = next(
+                item
+                for item in started.observation.controls
+                if item.element_id == "contenteditable-location"
+            )
+            assert control.kind is BrowserControlKind.CUSTOM
+            assert control.tag == "div"
+            assert control.role == "combobox"
+            assert control.widget_contenteditable
+            assert control.widget_searchable
+            assert control.widget_popup == "listbox"
+            assert control.widget_expanded is True
+            assert not control.widget_multiselectable
+            assert control.widget_controls_one_visible_listbox
+            assert [option.label for option in control.options] == [
+                "Remote",
+                "Hybrid",
+                "Spoofed",
+            ]
+            assert control.locator == SemanticLocator(
+                strategy=LocatorStrategy.ROLE,
+                value="combobox",
+                name="Preferred contenteditable work location",
+            )
+
+            action = BrowserAction(
+                kind=BrowserActionKind.CHOOSE_CONTROLLED_OPTION,
+                locator=control.locator,
+                value="Remote",
+                intended_result="Choose one reviewed contenteditable option",
+                verification=BrowserVerification(
+                    kind=VerificationKind.VALUE_EQUALS,
+                    locator=control.locator,
+                    value="Remote",
+                ),
+            )
+            assert service.execute_action(started.id, action).verified
+    finally:
+        worker.close()
+
+
+def test_contenteditable_verification_rejects_spoofed_value_property(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/contenteditable-single-select-widget"),
+                    profile_name="spoofed-contenteditable-value",
+                )
+            )
+            assert started.observation is not None
+            control = next(
+                item
+                for item in started.observation.controls
+                if item.element_id == "contenteditable-location"
+            )
+            assert control.locator is not None
+
+            with pytest.raises(BrowserActionUncertainError, match="outcome is uncertain"):
+                service.execute_action(
+                    started.id,
+                    BrowserAction(
+                        kind=BrowserActionKind.CHOOSE_CONTROLLED_OPTION,
+                        locator=control.locator,
+                        value="Spoofed",
+                        intended_result="Reject a property-only contenteditable result",
+                        verification=BrowserVerification(
+                            kind=VerificationKind.VALUE_EQUALS,
+                            locator=control.locator,
+                            value="Spoofed",
+                        ),
+                    ),
+                )
+    finally:
+        worker.close()
+
+
+def test_contenteditable_single_select_refuses_live_noneditable_state(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/contenteditable-single-select-widget"),
+                    profile_name="noneditable-single-select",
+                )
+            )
+            assert started.observation is not None
+            control = next(
+                item
+                for item in started.observation.controls
+                if item.element_id == "contenteditable-location"
+            )
+            disable = next(
+                item for item in started.observation.controls if item.text == "Disable editor"
+            )
+            assert disable.locator is not None
+            assert service.execute_action(
+                started.id,
+                BrowserAction(
+                    kind=BrowserActionKind.CLICK,
+                    locator=disable.locator,
+                    intended_result="Disable the fixture editor before the guarded action",
+                ),
+            ).verified
+            assert control.locator is not None
+
+            with pytest.raises(BrowserActionUncertainError, match="outcome is uncertain"):
+                service.execute_action(
+                    started.id,
+                    BrowserAction(
+                        kind=BrowserActionKind.CHOOSE_CONTROLLED_OPTION,
+                        locator=control.locator,
+                        value="Remote",
+                        intended_result="Refuse a changed noneditable widget",
                         verification=BrowserVerification(
                             kind=VerificationKind.VALUE_EQUALS,
                             locator=control.locator,

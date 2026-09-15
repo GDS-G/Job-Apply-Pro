@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.81.0-alpha.1] - Unreleased
+
+### Reviewed Greenhouse Contenteditable Single-Select
+
+- Extend the reviewed Greenhouse single-select contract to a `div` or `span` only when the live DOM reports `isContentEditable` and all existing expanded, single-owned-visible-listbox invariants hold.
+- Record explicit contenteditable metadata in backend observations and the shared desktop contract without exposing entered values.
+- Give ARIA-labelledby custom comboboxes an exact role-and-accessible-name locator instead of generic label targeting.
+- Recheck tag, live editability, role, popup, expansion, listbox ownership, visibility, enabled state, multiselect state, and exact unique option label immediately before one scoped click.
+- Verify contenteditable selection by normalized element text while preserving native input-value verification for input comboboxes.
+- Advance the Greenhouse form policy identifier to `greenhouse-form-execution-contract/2` so v0.81 reviews cannot be confused with the narrower historical contract.
+- Add domain, contract, coverage, execution, and real Chromium positive/stale-state tests; changed noneditable controls fail closed and uncertain dispatches remain non-retryable.
+- Reuse schema `20260915_0030`; live Greenhouse acceptance, protected integration, signing, and physical Windows validation remain separate gates.
+
 ## [0.80.0-alpha.1] - Unreleased
 
 ### Reviewed Browser Link Navigation

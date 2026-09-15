@@ -158,7 +158,7 @@ def _action_run(
         intervention_reasons=[PortalInterventionReason.USER_TAKEOVER],
         evidence=[],
         greenhouse_form=GreenhouseFormContractAssessment(
-            policy_version="greenhouse-form-execution-contract/1",
+            policy_version="greenhouse-form-execution-contract/2",
             page_fingerprint="greenhouse-page-1",
             page_type=(
                 "DOCUMENT_UPLOAD"

@@ -428,6 +428,40 @@ def test_greenhouse_single_select_executes_one_exact_controlled_option() -> None
     assert browser.takeovers == 1
 
 
+def test_greenhouse_contenteditable_single_select_executes_one_exact_option() -> None:
+    control = _single_select_widget(
+        tag="div",
+        input_type="",
+        widget_contenteditable=True,
+    )
+    service, browser, executions = _fixture_service(
+        portal=PortalKind.GREENHOUSE,
+        answer_value="Remote",
+        answer_kind=ApplicationAnswerKind.MULTIPLE_CHOICE,
+        validation_rules={"choices": ["Remote", "Hybrid"]},
+        observed_control=control,
+        binding_control_kind=PortalFieldControlKind.SINGLE_SELECT_WIDGET,
+    )
+    assessment = GreenhouseFormContractService().assess(browser.observation)
+
+    result = service.execute(
+        "run-1",
+        ApplicationFieldExecutionApproval(
+            binding_id="binding-1",
+            review_page_fingerprint="page-v1",
+            greenhouse_form_review_fingerprint=assessment.review_fingerprint,
+            confirmation_phrase="EXECUTE APPROVED FIELD",
+        ),
+    )
+
+    assert result.verified
+    assert executions.values == [result]
+    assert browser.action is not None
+    assert browser.action.kind is BrowserActionKind.CHOOSE_CONTROLLED_OPTION
+    assert browser.action.value == "Remote"
+    assert browser.action.verification.kind is VerificationKind.VALUE_EQUALS
+
+
 @pytest.mark.parametrize(
     ("portal", "control"),
     [
