@@ -63,6 +63,7 @@ class _FixtureHandler(BaseHTTPRequestHandler):
             "/start": """
                 <body data-page-type="CANDIDATE_IDENTITY">
                   <h1>Candidate identity</h1>
+                  <h1 style="display:none">Hidden decoy identity</h1>
                   <label>Full name <input name="full_name" required
                     oninput="localStorage.setItem('full_name', this.value)"></label>
                   <label>Email <input name="email" type="email" required
@@ -524,6 +525,10 @@ def test_browser_runtime_verifies_direct_navigation_by_exact_url(
                     profile_name="exact-url-navigation",
                 )
             )
+            assert started.observation is not None
+            assert [(heading.level, heading.text) for heading in started.observation.headings] == [
+                (1, "Candidate identity")
+            ]
             target_url = f"{origin}/experience"
             result = service.execute_action(
                 started.id,
@@ -540,6 +545,9 @@ def test_browser_runtime_verifies_direct_navigation_by_exact_url(
 
             assert result.verified
             assert result.observation.url == target_url
+            assert [(heading.level, heading.text) for heading in result.observation.headings] == [
+                (1, "Experience")
+            ]
             assert result.observation.previous_action == BrowserActionKind.NAVIGATE.value
             service.stop(started.id)
     finally:

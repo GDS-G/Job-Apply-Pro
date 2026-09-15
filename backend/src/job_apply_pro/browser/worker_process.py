@@ -16,6 +16,7 @@ from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionDisposition,
     BrowserActionKind,
+    BrowserHeading,
     BrowserObservation,
     BrowserObservedControl,
     BrowserTab,
@@ -434,7 +435,18 @@ class BrowserWorker:
             )
             for index, candidate in enumerate(pages)
         ]
-        headings = page.locator("h1,h2,h3").all_inner_texts()
+        headings_raw: list[dict[str, object]] = page.locator("h1,h2,h3").evaluate_all(
+            """els => els.filter(el => {
+              const style = window.getComputedStyle(el);
+              const rect = el.getBoundingClientRect();
+              return style.visibility !== 'hidden' && style.display !== 'none' &&
+                rect.width > 0 && rect.height > 0;
+            }).slice(0, 50).map(el => ({
+              level: Number(el.tagName.slice(1)),
+              text: (el.innerText || '').trim().replace(/\\s+/g, ' ').slice(0, 300)
+            })).filter(item => item.text)"""
+        )
+        headings = [BrowserHeading.model_validate(value) for value in headings_raw]
         controls_raw: list[dict[str, object]] = page.locator(
             "input:not([type='hidden']):not([type='password']),select,textarea,button,a,[role]"
         ).evaluate_all(
@@ -679,7 +691,7 @@ class BrowserWorker:
                 "origin": _origin(page.url),
                 "path": urlsplit(page.url).path,
                 "title": page.title(),
-                "headings": headings,
+                "headings": [value.model_dump(mode="json") for value in headings],
                 "forms": form_signatures,
                 "controls": [
                     [item.get("tag"), item.get("type"), item.get("role"), item.get("name")]
@@ -716,6 +728,7 @@ class BrowserWorker:
             origin=_origin(page.url),
             page_type=page_type[:100],
             page_fingerprint=fingerprint,
+            headings=headings,
             tabs=tabs,
             accessibility_snapshot=accessibility[:20_000],
             visible_text=visible_text[:12_000],

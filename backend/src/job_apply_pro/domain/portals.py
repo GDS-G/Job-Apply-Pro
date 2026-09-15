@@ -323,6 +323,25 @@ class SupervisedPortalStepEvidence(BaseModel):
     created_at: datetime
 
 
+class LinkedInJobIdentityReview(BaseModel):
+    """Read-only identity derived from one exact captured LinkedIn job-detail page."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    policy_version: Literal["linkedin-job-identity-v1"] = "linkedin-job-identity-v1"
+    run_id: str = Field(pattern=_UUID_PATTERN)
+    browser_session_id: str = Field(pattern=_UUID_PATTERN)
+    source_url: AnyHttpUrl
+    external_id: str = Field(pattern=r"^[1-9][0-9]{0,18}$")
+    title: str = Field(min_length=1, max_length=200)
+    page_fingerprint: str = Field(min_length=1, max_length=200)
+    review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    captured_at: datetime
+    notice: Literal[
+        "Read-only identity review. No job was imported and no LinkedIn action was performed."
+    ] = "Read-only identity review. No job was imported and no LinkedIn action was performed."
+
+
 class SupervisedPortalRunSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 

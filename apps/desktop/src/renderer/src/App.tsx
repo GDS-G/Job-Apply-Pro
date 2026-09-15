@@ -57,6 +57,7 @@ import type {
   HelpTopic,
   IntegrationHealth,
   IntegrationProvider,
+  LinkedInJobIdentityReview,
   OperationsDashboard,
   ProviderConfigurationStatus,
   PortalAdapterDefinition,
@@ -138,6 +139,8 @@ export function App() {
   const [supervisedPortalRuns, setSupervisedPortalRuns] = useState<
     SupervisedPortalRunSnapshot[]
   >([]);
+  const [linkedInJobIdentity, setLinkedInJobIdentity] =
+    useState<LinkedInJobIdentityReview | null>(null);
   const [portalCatalog, setPortalCatalog] = useState<PortalAdapterDefinition[]>(
     [],
   );
@@ -1565,8 +1568,33 @@ export function App() {
       setSupervisedPortalRuns((current) =>
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
+      setLinkedInJobIdentity(null);
       await refreshWorkflows();
     } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewLinkedInJobIdentity(run: SupervisedPortalRunSnapshot) {
+    setBusy(true);
+    setError(null);
+    try {
+      const review =
+        await window.jobApplyPro.workbench.reviewLinkedInJobIdentity(run.id);
+      if (
+        review.run_id !== run.id ||
+        review.browser_session_id !== run.browser_session_id ||
+        review.page_fingerprint !== run.page_fingerprint
+      ) {
+        throw new Error(
+          "LinkedIn job identity review did not match the selected captured page.",
+        );
+      }
+      setLinkedInJobIdentity(review);
+    } catch (caught) {
+      setLinkedInJobIdentity(null);
       setError(readableError(caught));
     } finally {
       setBusy(false);
@@ -1953,16 +1981,12 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>
-                Reviewed Greenhouse Contenteditable Single-Select
-                v0.81.0-alpha.1
-              </strong>
+              <strong>Reviewed LinkedIn Job Identity v0.82.0-alpha.1</strong>
               <p>
-                Expanded Greenhouse contenteditable comboboxes can use the
-                reviewed exact-option flow only when one visible single-select
-                listbox and every safety guard remain current. Changed,
-                collapsed, ambiguous, repeated, legal, signature, and
-                multiselect controls remain manual or fail closed.
+                One exact captured LinkedIn job-detail page can expose its
+                canonical job ID and single visible H1 through a read-only
+                review. Changed pages, noncanonical URLs, ambiguous headings,
+                login, import, and provider actions remain blocked.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3859,6 +3883,49 @@ export function App() {
                         Manual:{" "}
                         {latestSupervisedRun.intervention_reasons.join(", ")}
                       </small>
+                    ) : null}
+                    {latestSupervisedRun.portal === "LINKEDIN" &&
+                    latestSupervisedRun.current_match?.page_type ===
+                      "JOB_DETAIL" ? (
+                      <article className="answer-entry field-binding-preview">
+                        <strong>Reviewed LinkedIn job identity</strong>
+                        {linkedInJobIdentity?.run_id ===
+                          latestSupervisedRun.id &&
+                        linkedInJobIdentity.page_fingerprint ===
+                          latestSupervisedRun.page_fingerprint ? (
+                          <>
+                            <span>{linkedInJobIdentity.title}</span>
+                            <small>
+                              Job {linkedInJobIdentity.external_id} ·{" "}
+                              {linkedInJobIdentity.source_url}
+                            </small>
+                            <small>
+                              Review{" "}
+                              {linkedInJobIdentity.review_fingerprint.slice(
+                                0,
+                                16,
+                              )}
+                              … · read-only; nothing imported or sent
+                            </small>
+                          </>
+                        ) : (
+                          <small>
+                            Review the exact captured URL, page fingerprint, and
+                            single visible H1. This reads no credentials and
+                            performs no LinkedIn action or job import.
+                          </small>
+                        )}
+                        <button
+                          className="button button--secondary"
+                          disabled={busy}
+                          onClick={() =>
+                            void reviewLinkedInJobIdentity(latestSupervisedRun)
+                          }
+                          type="button"
+                        >
+                          <Search size={14} /> Review job identity
+                        </button>
+                      </article>
                     ) : null}
                     {latestSupervisedRun.reviewed_links?.length ? (
                       <article className="answer-entry field-binding-preview">

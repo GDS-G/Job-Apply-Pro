@@ -113,3 +113,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0089: Reviewed browser exact URL reconciliation](0089-reviewed-browser-exact-url-reconciliation.md)
 - [ADR-0090: Reviewed browser link navigation](0090-reviewed-browser-link-navigation.md)
 - [ADR-0091: Reviewed Greenhouse contenteditable single-select](0091-reviewed-greenhouse-contenteditable-single-select.md)
+- [ADR-0092: Reviewed LinkedIn job identity](0092-reviewed-linkedin-job-identity.md)

@@ -67,6 +67,7 @@ import type {
   GreenhouseJobReviewInput,
   IntegrationHealth,
   IntegrationProvider,
+  LinkedInJobIdentityReview,
   HelpTopic,
   MockWorkflowCreate,
   MediaCleanupListResponse,
@@ -790,6 +791,14 @@ export class BackendClient {
           prior_page_fingerprint: priorPageFingerprint,
         }),
       },
+      120_000,
+    );
+  }
+
+  reviewLinkedInJobIdentity(runId: string): Promise<LinkedInJobIdentityReview> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(runId)}/linkedin/job-identity`,
+      { method: "GET" },
       120_000,
     );
   }

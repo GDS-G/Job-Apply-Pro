@@ -15,6 +15,7 @@ from job_apply_pro.domain.browser import (
     BrowserActionKind,
     BrowserActionResult,
     BrowserEngine,
+    BrowserHeading,
     BrowserObservation,
     BrowserObservedControl,
     BrowserSessionCreate,
@@ -52,6 +53,7 @@ def _observation(
     fingerprint: str,
     visible_text: str,
     controls: list[dict[str, object]] | None = None,
+    headings: list[dict[str, object]] | None = None,
     url: str | None = None,
 ) -> BrowserObservation:
     page_url = url or f"https://www.linkedin.com/jobs/{page_type.casefold()}"
@@ -64,6 +66,7 @@ def _observation(
         origin=f"{parsed.scheme}://{parsed.hostname}",
         page_type=page_type,
         page_fingerprint=fingerprint,
+        headings=[BrowserHeading.model_validate(value) for value in headings or []],
         tabs=[BrowserTab(index=0, url=page_url, title="LinkedIn fixture", active=True)],
         accessibility_snapshot="",
         visible_text=visible_text,
@@ -205,6 +208,7 @@ def _service(
     *,
     enabled: bool = True,
     submission_enabled: bool = True,
+    allowed_portals: set[PortalKind] | None = None,
 ) -> SupervisedPortalService:
     return SupervisedPortalService(
         SupervisedPortalRepository(session),
@@ -212,7 +216,7 @@ def _service(
         PortalCatalog(),
         enabled=enabled,
         submission_enabled=submission_enabled,
-        allowed_portals={PortalKind.LINKEDIN},
+        allowed_portals=allowed_portals or {PortalKind.LINKEDIN},
     )
 
 
@@ -351,6 +355,152 @@ def test_native_reviewed_link_navigation_composes_exact_url_action(
     assert updated.evidence[-1].action_kind is BrowserActionKind.NAVIGATE
     assert updated.evidence[-1].verified
     assert browser.state is BrowserSessionState.USER_TAKEOVER
+
+
+def test_linkedin_job_identity_is_read_only_and_bound_to_exact_captured_page(
+    session: Session,
+) -> None:
+    detail = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="linkedin-detail-v2",
+        visible_text="LinkedIn Senior Platform Engineer Apply",
+        url="https://www.linkedin.com/jobs/view/456",
+        headings=[{"level": 1, "text": "  Senior   Platform Engineer  "}],
+    )
+    browser = _Browser(detail)
+    service = _service(session, browser)
+    run = _start(service)
+
+    review = service.review_linkedin_job_identity(run.id)
+
+    assert review.run_id == run.id
+    assert review.browser_session_id == run.browser_session_id
+    assert str(review.source_url) == "https://www.linkedin.com/jobs/view/456"
+    assert review.external_id == "456"
+    assert review.title == "Senior Platform Engineer"
+    assert review.page_fingerprint == run.page_fingerprint
+    assert len(review.review_fingerprint) == 64
+    assert review.notice.startswith("Read-only identity review")
+    assert browser.executed == []
+    assert browser.state is BrowserSessionState.USER_TAKEOVER
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.linkedin.com/jobs/view/456?tracking=blocked",
+        "https://www.linkedin.com/jobs/view/456#apply",
+        "https://www.linkedin.com/jobs/view/0456",
+        "https://www.linkedin.com/jobs/search/456",
+    ],
+)
+def test_linkedin_job_identity_rejects_noncanonical_urls(session: Session, url: str) -> None:
+    detail = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="linkedin-detail-v2",
+        visible_text="LinkedIn Senior Platform Engineer Apply",
+        url=url,
+        headings=[{"level": 1, "text": "Senior Platform Engineer"}],
+    )
+    service = _service(session, _Browser(detail))
+    run = _start(service)
+
+    with pytest.raises(SupervisedPortalPolicyError, match="plain canonical"):
+        service.review_linkedin_job_identity(run.id)
+
+
+@pytest.mark.parametrize(
+    "headings",
+    [
+        [],
+        [{"level": 2, "text": "Senior Platform Engineer"}],
+        [
+            {"level": 1, "text": "Senior Platform Engineer"},
+            {"level": 1, "text": "Unexpected duplicate"},
+        ],
+    ],
+)
+def test_linkedin_job_identity_requires_one_visible_h1(
+    session: Session, headings: list[dict[str, object]]
+) -> None:
+    detail = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="linkedin-detail-v2",
+        visible_text="LinkedIn Senior Platform Engineer Apply",
+        url="https://www.linkedin.com/jobs/view/456",
+        headings=headings,
+    )
+    service = _service(session, _Browser(detail))
+    run = _start(service)
+
+    with pytest.raises(SupervisedPortalPolicyError, match="exactly one visible"):
+        service.review_linkedin_job_identity(run.id)
+
+
+def test_linkedin_job_identity_rejects_a_page_changed_after_capture(
+    session: Session,
+) -> None:
+    detail = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="linkedin-detail-v2",
+        visible_text="LinkedIn Senior Platform Engineer Apply",
+        url="https://www.linkedin.com/jobs/view/456",
+        headings=[{"level": 1, "text": "Senior Platform Engineer"}],
+    )
+    changed = detail.model_copy(update={"page_fingerprint": "linkedin-detail-v3"})
+    service = _service(session, _Browser(detail, observe_observations=[changed]))
+    run = _start(service)
+
+    with pytest.raises(SupervisedPortalStateError, match="page changed"):
+        service.review_linkedin_job_identity(run.id)
+
+
+def test_linkedin_job_identity_requires_user_takeover(
+    session: Session,
+) -> None:
+    detail = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="linkedin-detail-v2",
+        visible_text="LinkedIn Senior Platform Engineer Apply",
+        url="https://www.linkedin.com/jobs/view/456",
+        headings=[{"level": 1, "text": "Senior Platform Engineer"}],
+    )
+    browser = _Browser(detail)
+    service = _service(session, browser)
+    run = _start(service)
+    browser.state = BrowserSessionState.ACTIVE
+
+    with pytest.raises(SupervisedPortalStateError, match="user-takeover session"):
+        service.review_linkedin_job_identity(run.id)
+
+
+def test_linkedin_job_identity_rejects_other_portal_authority(
+    session: Session,
+) -> None:
+    detail = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="indeed-detail-v1",
+        visible_text="Indeed Senior Platform Engineer Apply",
+        url="https://www.indeed.com/jobs/view/456",
+        headings=[{"level": 1, "text": "Senior Platform Engineer"}],
+    )
+    browser = _Browser(detail, expected_start_prefix="https://www.indeed.com/")
+    service = _service(
+        session,
+        browser,
+        allowed_portals={PortalKind.LINKEDIN, PortalKind.INDEED},
+    )
+    run = service.start(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.INDEED,
+            start_url=AnyHttpUrl("https://www.indeed.com/jobs/view/456"),
+            profile_name="indeed-fixture",
+        )
+    )
+
+    with pytest.raises(SupervisedPortalPolicyError, match="LINKEDIN runs only"):
+        service.review_linkedin_job_identity(run.id)
 
 
 def test_reviewed_link_navigation_reproves_page_and_rejects_injected_authority(

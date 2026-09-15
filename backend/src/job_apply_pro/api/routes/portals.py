@@ -14,6 +14,7 @@ from job_apply_pro.domain.applications import (
 )
 from job_apply_pro.domain.browser import BrowserEngine
 from job_apply_pro.domain.portals import (
+    LinkedInJobIdentityReview,
     PortalAdapterDefinition,
     PortalKind,
     PortalPageMatch,
@@ -290,6 +291,27 @@ def capture_supervised_portal_step(
 ) -> SupervisedPortalRunSnapshot:
     try:
         return service.capture(run_id, command)
+    except (
+        LookupError,
+        BrowserPolicyError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        SupervisedPortalPolicyError,
+        SupervisedPortalStateError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/supervised/runs/{run_id}/linkedin/job-identity",
+    response_model=LinkedInJobIdentityReview,
+)
+def review_linkedin_job_identity(
+    run_id: str,
+    service: SupervisedPortalServiceDependency,
+) -> LinkedInJobIdentityReview:
+    try:
+        return service.review_linkedin_job_identity(run_id)
     except (
         LookupError,
         BrowserPolicyError,

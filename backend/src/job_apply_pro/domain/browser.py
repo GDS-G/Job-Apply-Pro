@@ -168,6 +168,15 @@ class BrowserTab(BaseModel):
     active: bool
 
 
+class BrowserHeading(BaseModel):
+    """One bounded visible heading used for provider-specific read-only review."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    level: Literal[1, 2, 3]
+    text: str = Field(min_length=1, max_length=300)
+
+
 class BrowserControlOption(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -555,6 +564,7 @@ class BrowserObservation(BaseModel):
     origin: str
     page_type: str
     page_fingerprint: str
+    headings: list[BrowserHeading] = Field(default_factory=list, max_length=50)
     tabs: list[BrowserTab]
     accessibility_snapshot: str
     visible_text: str

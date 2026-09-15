@@ -52,6 +52,13 @@ def test_configured_local_api_token_protects_privileged_routes(
             ).status_code
             == 401
         )
+        assert (
+            client.get(
+                "/api/v1/portals/supervised/runs/"
+                "6f3cf568-ec3b-4d8c-bccb-49ca1db4bb35/linkedin/job-identity"
+            ).status_code
+            == 401
+        )
         assert client.get("/api/v1/challenges/sessions").status_code == 401
         assert client.get("/api/v1/communications/integrations").status_code == 401
         assert client.get("/api/v1/communications/configuration").status_code == 401
@@ -78,7 +85,7 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert response.status_code == 200
         assert response.json() == {
             "status": "ready",
-            "version": "0.81.0-alpha.1",
+            "version": "0.82.0-alpha.1",
             "automation_enabled": False,
             "browser_runtime_available": True,
             "candidate_knowledge_available": True,

@@ -1,6 +1,10 @@
 # Production threat model
 
-## Reviewed contenteditable single-select boundary
+## Reviewed LinkedIn job identity boundary
+
+Reviewed LinkedIn Job Identity `v0.82.0-alpha.1` grants no login, scraping, import, navigation, or application authority. A read-only review requires the exact active LinkedIn run in user takeover, allowed origin, stored `JOB_DETAIL`/`JOB_EXTRACTION` match, unchanged URL and page fingerprint, canonical query-free and fragment-free `/jobs/view/<positive id>` HTTPS URL, and exactly one visible bounded H1. Browser observation retains at most 50 bounded visible H1-H3 records and binds their ordered values into the page fingerprint. The renderer supplies only a validated run UUID and rejects mismatched run/session/fingerprint output. The returned review contains no credentials, arbitrary body text, candidate data, application result, or claimed provider acceptance. Changed or ambiguous evidence fails closed, and production LinkedIn remains disabled and live-unvalidated.
+
+## Historical reviewed contenteditable single-select boundary
 
 Reviewed Greenhouse Contenteditable Single-Select `v0.81.0-alpha.1` grants no generic content-editing authority. A custom Greenhouse control is eligible only when it is an input or a live contenteditable `div`/`span` and the existing single-select contract proves an exact expanded combobox, one controlled visible listbox, no multiselect, one semantic locator, unique nonempty enabled option labels, and no unsafe visibility, state, repeated, conditional, legal or signature semantics. The worker records editability from `element.isContentEditable`, uses exact role/name location for ARIA-labelledby custom comboboxes, and reproves live editability and listbox ownership before one scoped exact-label option click. Verification reads normalized text only from a still-contenteditable element. Changed state, ambiguous controls and uncertain outcomes fail closed; no automatic retry or widget-opening behavior is added.
 

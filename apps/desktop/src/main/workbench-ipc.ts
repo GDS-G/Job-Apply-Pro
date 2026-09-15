@@ -1376,6 +1376,13 @@ export function registerWorkbenchIpc(
       ),
   );
   ipcMain.handle(
+    "portals:review-linkedin-job-identity",
+    (_event, runIdValue: unknown) =>
+      supervisor.client.reviewLinkedInJobIdentity(
+        uuid(runIdValue, "Supervised portal run id"),
+      ),
+  );
+  ipcMain.handle(
     "portals:navigate-reviewed-link",
     async (
       event,

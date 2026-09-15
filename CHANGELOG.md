@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.82.0-alpha.1] - Unreleased
+
+### Reviewed LinkedIn Job Identity
+
+- Record a bounded list of visible H1-H3 headings in browser observations and bind it into the existing page fingerprint.
+- Add a read-only LinkedIn identity review that accepts only the exact captured takeover session, allowed origin, `JOB_DETAIL`/`JOB_EXTRACTION` match, canonical `/jobs/view/<id>` HTTPS URL, and one visible bounded H1.
+- Reject query strings, fragments, embedded credentials, nondefault ports, alternate paths, zero-prefixed or missing IDs, stale observations, ambiguous headings, and non-LinkedIn authority.
+- Return only the canonical source URL, provider job ID, normalized title, evidence identifiers, timestamp, and a deterministic review fingerprint; persist or import nothing.
+- Add authenticated GET API, typed backend client, UUID-validating sandboxed IPC/preload bridge, and an exact-run/fingerprint renderer review card.
+- Add service, API, real Chromium, client, IPC, and renderer regressions while retaining schema `20260915_0030` and default-disabled production portals.
+- Treat controlled fixtures as contract evidence only; authorized LinkedIn legal/terms approval, live validation, signing, and physical Windows qualification remain separate gates.
+
 ## [0.81.0-alpha.1] - Unreleased
 
 ### Reviewed Greenhouse Contenteditable Single-Select

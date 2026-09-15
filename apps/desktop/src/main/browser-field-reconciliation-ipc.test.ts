@@ -10,6 +10,7 @@ import type {
   BrowserSubmissionReconciliationResult,
   BrowserUploadReconciliationPreview,
   BrowserUploadReconciliationResult,
+  LinkedInJobIdentityReview,
   BrowserProfileCleanupPreview,
   BrowserProfileCleanupResult,
   BrowserProfileRetirementPreview,
@@ -196,6 +197,19 @@ const supervisedLinkResult = {
   current_url: "https://www.linkedin.com/jobs/view/456",
   page_fingerprint: "linkedin-detail-v2",
 } as unknown as SupervisedPortalRunSnapshot;
+const linkedInJobIdentity: LinkedInJobIdentityReview = {
+  policy_version: "linkedin-job-identity-v1",
+  run_id: runId,
+  browser_session_id: sessionId,
+  source_url: "https://www.linkedin.com/jobs/view/456",
+  external_id: "456",
+  title: "Senior Platform Engineer",
+  page_fingerprint: "linkedin-detail-v2",
+  review_fingerprint: "b".repeat(64),
+  captured_at: "2026-09-15T20:00:00Z",
+  notice:
+    "Read-only identity review. No job was imported and no LinkedIn action was performed.",
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -457,6 +471,26 @@ describe("browser field reconciliation backend client", () => {
       }),
     });
   });
+
+  it("reads the exact LinkedIn job identity without a request body", async () => {
+    fetchMock.mockResolvedValue(Response.json(linkedInJobIdentity));
+
+    await expect(client.reviewLinkedInJobIdentity(runId)).resolves.toEqual(
+      linkedInJobIdentity,
+    );
+
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      `http://127.0.0.1:8765/portals/supervised/runs/${runId}/linkedin/job-identity`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Job-Apply-Pro-Token": "test-api-token",
+        },
+        signal: expect.any(AbortSignal),
+      },
+    );
+  });
 });
 
 describe("browser field reconciliation IPC boundary", () => {
@@ -490,6 +524,8 @@ describe("browser field reconciliation IPC boundary", () => {
       vi.fn<BackendClient["previewSupervisedPortalLinkNavigation"]>(),
     approveSupervisedPortalLinkNavigation:
       vi.fn<BackendClient["approveSupervisedPortalLinkNavigation"]>(),
+    reviewLinkedInJobIdentity:
+      vi.fn<BackendClient["reviewLinkedInJobIdentity"]>(),
   };
   const supervisor = { client } as unknown as BackendSupervisor;
   const updates = {} as UpdateManager;
@@ -535,6 +571,15 @@ describe("browser field reconciliation IPC boundary", () => {
     return listener({ sender } as IpcMainInvokeEvent, ...args);
   }
 
+  async function invokeLinkedInJobIdentity(
+    ...args: unknown[]
+  ): Promise<unknown> {
+    const listener = handlers.get("portals:review-linkedin-job-identity");
+    if (!listener)
+      throw new Error("LinkedIn job identity IPC was not registered");
+    return listener({ sender } as IpcMainInvokeEvent, ...args);
+  }
+
   beforeEach(() => {
     handlers.clear();
     vi.clearAllMocks();
@@ -567,7 +612,26 @@ describe("browser field reconciliation IPC boundary", () => {
     client.approveSupervisedPortalLinkNavigation.mockResolvedValue(
       supervisedLinkResult,
     );
+    client.reviewLinkedInJobIdentity.mockResolvedValue(linkedInJobIdentity);
     registerWorkbenchIpc(supervisor, updates, notifications);
+  });
+
+  it("rejects malformed LinkedIn run identifiers before backend access", async () => {
+    await expect(invokeLinkedInJobIdentity("not-a-run")).rejects.toThrow(
+      "Supervised portal run id must be a UUID.",
+    );
+
+    expect(client.reviewLinkedInJobIdentity).not.toHaveBeenCalled();
+  });
+
+  it("passes only the validated LinkedIn run identifier", async () => {
+    await expect(invokeLinkedInJobIdentity(runId)).resolves.toEqual(
+      linkedInJobIdentity,
+    );
+
+    expect(client.reviewLinkedInJobIdentity).toHaveBeenCalledExactlyOnceWith(
+      runId,
+    );
   });
 
   it("rejects malformed reviewed-link run identifiers before preview", async () => {

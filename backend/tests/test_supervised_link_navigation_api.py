@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from job_apply_pro.api.routes.portals import get_supervised_portal_service
 from job_apply_pro.config import get_settings
 from job_apply_pro.domain.portals import (
+    LinkedInJobIdentityReview,
     PortalInterventionReason,
     PortalKind,
     SupervisedPortalDisposition,
@@ -78,6 +79,33 @@ def _run() -> SupervisedPortalRunSnapshot:
         created_at=now,
         updated_at=now,
     )
+
+
+def _identity_review() -> LinkedInJobIdentityReview:
+    return LinkedInJobIdentityReview(
+        run_id=_RUN_ID,
+        browser_session_id=_SESSION_ID,
+        source_url="https://www.linkedin.com/jobs/view/456",
+        external_id="456",
+        title="Senior Platform Engineer",
+        page_fingerprint="linkedin-detail-v2",
+        review_fingerprint="b" * 64,
+        captured_at=datetime(2026, 9, 15, 20, tzinfo=UTC),
+    )
+
+
+def test_linkedin_job_identity_api_returns_only_the_backend_review(
+    link_navigation_api: tuple[TestClient, Mock],
+) -> None:
+    client, service = link_navigation_api
+    review = _identity_review()
+    service.review_linkedin_job_identity.return_value = review
+
+    response = client.get(f"/api/v1/portals/supervised/runs/{_RUN_ID}/linkedin/job-identity")
+
+    assert response.status_code == 200
+    assert response.json() == review.model_dump(mode="json")
+    service.review_linkedin_job_identity.assert_called_once_with(_RUN_ID)
 
 
 def test_link_navigation_api_previews_then_approves_exact_backend_review(

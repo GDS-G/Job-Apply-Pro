@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Reviewed Greenhouse Contenteditable Single-Select"
+    BUILD_NAME = "Reviewed LinkedIn Job Identity"
 
     def __init__(
         self,

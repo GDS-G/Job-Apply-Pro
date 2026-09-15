@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ApplicationFieldBinding,
+  LinkedInJobIdentityReview,
   PortalRunSnapshot,
   SupervisedPortalRunSnapshot,
   WorkflowControlAction,
@@ -411,6 +412,72 @@ describe("App", () => {
     );
   });
 
+  it("shows a read-only LinkedIn job identity for the exact captured page", async () => {
+    const api = window.jobApplyPro.workbench;
+    const run: SupervisedPortalRunSnapshot = {
+      id: "6f3cf568-ec3b-4d8c-bccb-49ca1db4bb35",
+      portal: "LINKEDIN",
+      workflow_id: discoveredWorkflow.workflow_id,
+      browser_session_id: "6a17312e-f9d4-4aca-a8f6-833b459cc678",
+      state: "AWAITING_USER",
+      current_url: "https://www.linkedin.com/jobs/view/456",
+      allowed_origins: ["https://www.linkedin.com"],
+      page_fingerprint: "linkedin-detail-v2",
+      current_match: {
+        portal: "LINKEDIN",
+        capability: "JOB_EXTRACTION",
+        page_type: "JOB_DETAIL",
+        confidence: 1,
+        matched_signals: ["linkedin", "apply"],
+        page_fingerprint: "linkedin-detail-v2",
+        requires_user_intervention: false,
+      },
+      disposition: "USER_ACTION_REQUIRED",
+      intervention_reasons: ["USER_TAKEOVER"],
+      evidence: [],
+      observed_controls: [],
+      reviewed_links: [],
+      greenhouse_form: null,
+      trace_path: null,
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    };
+    const review: LinkedInJobIdentityReview = {
+      policy_version: "linkedin-job-identity-v1",
+      run_id: run.id,
+      browser_session_id: run.browser_session_id,
+      source_url: run.current_url,
+      external_id: "456",
+      title: "Senior Platform Engineer",
+      page_fingerprint: run.page_fingerprint,
+      review_fingerprint: "b".repeat(64),
+      captured_at: discoveredWorkflow.updated_at,
+      notice:
+        "Read-only identity review. No job was imported and no LinkedIn action was performed.",
+    };
+    vi.spyOn(api, "listWorkflows").mockResolvedValue([discoveredWorkflow]);
+    vi.spyOn(api, "listSupervisedPortalRuns").mockResolvedValue([run]);
+    const identity = vi
+      .spyOn(api, "reviewLinkedInJobIdentity")
+      .mockResolvedValue(review);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Reviewed LinkedIn job identity"),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review job identity" }),
+    );
+
+    await waitFor(() =>
+      expect(identity).toHaveBeenCalledExactlyOnceWith(run.id),
+    );
+    expect(screen.getByText(review.title)).toBeInTheDocument();
+    expect(screen.getByText(/Job 456/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing imported or sent/i)).toBeInTheDocument();
+  });
+
   it("maps only a Greenhouse reviewed custom control to a single-select binding", async () => {
     const run: SupervisedPortalRunSnapshot = {
       id: "greenhouse-widget-run",
@@ -731,12 +798,10 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText(
-        "Reviewed Greenhouse Contenteditable Single-Select v0.81.0-alpha.1",
-      ),
+      screen.getByText("Reviewed LinkedIn Job Identity v0.82.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/contenteditable comboboxes.*exact-option flow/i),
+      screen.getByText(/captured LinkedIn job-detail page.*read-only review/i),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

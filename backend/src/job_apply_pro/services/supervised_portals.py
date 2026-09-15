@@ -35,6 +35,7 @@ from job_apply_pro.domain.greenhouse_form import (
 )
 from job_apply_pro.domain.knowledge import CandidateDocumentVersionRecord
 from job_apply_pro.domain.portals import (
+    LinkedInJobIdentityReview,
     PortalAdapterDefinition,
     PortalCapability,
     PortalInterventionReason,
@@ -125,6 +126,8 @@ _INTERVENTION_CAPABILITIES = {
 }
 _SUBMIT_PATTERN = re.compile(r"\b(?:submit(?: application)?|send application|apply now)\b", re.I)
 _LINK_NAVIGATION_POLICY_VERSION = "reviewed-browser-link-navigation-v1"
+_LINKEDIN_JOB_IDENTITY_POLICY_VERSION = "linkedin-job-identity-v1"
+_LINKEDIN_JOB_PATH = re.compile(r"^/jobs/view/([1-9][0-9]{0,18})/?$")
 
 
 def parse_portal_allowlist(value: str) -> set[PortalKind]:
@@ -304,6 +307,85 @@ class SupervisedPortalService:
             verified=match is not None,
         )
         return self._with_runtime_observation(self.get(run_id), observation)
+
+    def review_linkedin_job_identity(self, run_id: str) -> LinkedInJobIdentityReview:
+        """Review one exact current LinkedIn job identity without importing or mutating."""
+
+        run = self._active(run_id)
+        self._require_portal_policy(run.portal)
+        if run.portal is not PortalKind.LINKEDIN:
+            raise SupervisedPortalPolicyError("LinkedIn job review accepts LINKEDIN runs only")
+        session = self._browser.get_session(run.browser_session_id)
+        if session.state is not BrowserSessionState.USER_TAKEOVER:
+            raise SupervisedPortalStateError(
+                "LinkedIn job review requires a captured user-takeover session"
+            )
+        observation = self._browser.observe(run.browser_session_id).observation
+        if observation is None:
+            raise SupervisedPortalStateError("Browser session did not produce an observation")
+        self._require_allowed_observation(run.allowed_origins, observation.origin)
+        if (
+            observation.page_fingerprint != run.page_fingerprint
+            or observation.url != run.current_url
+        ):
+            raise SupervisedPortalStateError(
+                "LinkedIn page changed; capture the current page before reviewing its identity"
+            )
+        match = run.current_match
+        if (
+            match is None
+            or match.portal is not PortalKind.LINKEDIN
+            or match.capability is not PortalCapability.JOB_EXTRACTION
+            or match.page_type != "JOB_DETAIL"
+            or match.page_fingerprint != run.page_fingerprint
+        ):
+            raise SupervisedPortalPolicyError(
+                "The captured LinkedIn page is not a reviewed job-detail page"
+            )
+        parsed = urlsplit(observation.url)
+        host = (parsed.hostname or "").casefold()
+        path_match = _LINKEDIN_JOB_PATH.fullmatch(parsed.path)
+        try:
+            port = parsed.port
+        except ValueError as error:
+            raise SupervisedPortalPolicyError(
+                "LinkedIn job review requires a plain canonical /jobs/view/<id> HTTPS URL"
+            ) from error
+        if (
+            parsed.scheme != "https"
+            or host not in {"linkedin.com", "www.linkedin.com"}
+            or port not in {None, 443}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or path_match is None
+        ):
+            raise SupervisedPortalPolicyError(
+                "LinkedIn job review requires a plain canonical /jobs/view/<id> HTTPS URL"
+            )
+        h1 = [heading.text for heading in observation.headings if heading.level == 1]
+        if len(h1) != 1 or not h1[0].strip() or len(h1[0].strip()) > 200:
+            raise SupervisedPortalPolicyError(
+                "LinkedIn job review requires exactly one visible bounded H1 title"
+            )
+        title = " ".join(h1[0].split())
+        payload = {
+            "policy_version": _LINKEDIN_JOB_IDENTITY_POLICY_VERSION,
+            "run_id": run.id,
+            "browser_session_id": run.browser_session_id,
+            "source_url": observation.url,
+            "external_id": path_match.group(1),
+            "title": title,
+            "page_fingerprint": observation.page_fingerprint,
+            "captured_at": observation.observed_at.isoformat(),
+        }
+        review_fingerprint = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return LinkedInJobIdentityReview.model_validate(
+            {**payload, "review_fingerprint": review_fingerprint}
+        )
 
     def preview_reviewed_link_navigation(
         self,

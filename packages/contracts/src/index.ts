@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Greenhouse Contenteditable Single-Select",
-  version: "0.81.0-alpha.1",
+  name: "Reviewed LinkedIn Job Identity",
+  version: "0.82.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -447,6 +447,11 @@ export interface BrowserTab {
   active: boolean;
 }
 
+export interface BrowserHeading {
+  level: 1 | 2 | 3;
+  text: string;
+}
+
 export interface BrowserObservation {
   sequence: number;
   url: string;
@@ -454,6 +459,7 @@ export interface BrowserObservation {
   origin: string;
   page_type: string;
   page_fingerprint: string;
+  headings: BrowserHeading[];
   tabs: BrowserTab[];
   accessibility_snapshot: string;
   visible_text: string;
@@ -790,6 +796,19 @@ export interface SupervisedPortalLinkNavigationPreview extends SupervisedPortalL
   page_fingerprint: string;
   review_fingerprint: string;
   notice: string;
+}
+
+export interface LinkedInJobIdentityReview {
+  policy_version: "linkedin-job-identity-v1";
+  run_id: string;
+  browser_session_id: string;
+  source_url: string;
+  external_id: string;
+  title: string;
+  page_fingerprint: string;
+  review_fingerprint: string;
+  captured_at: string;
+  notice: "Read-only identity review. No job was imported and no LinkedIn action was performed.";
 }
 
 export interface SupervisedPortalStepEvidence {
@@ -2357,6 +2376,9 @@ export interface DesktopBridge {
       runId: string,
       priorPageFingerprint: string,
     ): Promise<SupervisedPortalRunSnapshot>;
+    reviewLinkedInJobIdentity(
+      runId: string,
+    ): Promise<LinkedInJobIdentityReview>;
     navigateSupervisedPortalLink(
       runId: string,
       controlKey: string,
