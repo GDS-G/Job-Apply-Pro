@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.api.routes import browser as browser_routes
@@ -281,6 +282,24 @@ def test_startup_recovery_marks_interrupted_browser_session_for_takeover(
     assert record is not None
     assert record.operation.status is ExternalEffectStatus.UNCERTAIN
     assert record.operation.error_code == "PROCESS_INTERRUPTED"
+
+
+def test_startup_recovery_is_a_noop_before_ledger_migration(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bind = session.get_bind()
+    session.execute(text("DROP TABLE external_effect_attempts"))
+    session.execute(text("DROP TABLE external_effect_operations"))
+    session.commit()
+    factory = sessionmaker(bind=bind, expire_on_commit=False)
+    monkeypatch.setattr(browser_routes, "SessionFactory", factory)
+
+    assert (
+        browser_routes.recover_browser_external_effects(
+            SensitiveDataCipher(StaticKeyProvider(b"e" * 32))
+        )
+        == 0
+    )
 
 
 def test_browser_retry_contract_rejects_more_than_one_attempt() -> None:

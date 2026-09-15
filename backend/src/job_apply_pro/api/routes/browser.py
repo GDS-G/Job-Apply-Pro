@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from job_apply_pro.browser.client import (
@@ -50,6 +51,21 @@ def _external_effect_service(cipher: SensitiveDataCipher) -> ExternalEffectServi
 
 def recover_browser_external_effects(cipher: SensitiveDataCipher) -> int:
     """Fence browser sessions whose prior process lost an effect response."""
+
+    with SessionFactory() as session:
+        inspector = inspect(session.get_bind())
+        if not all(
+            inspector.has_table(table_name)
+            for table_name in (
+                "external_effect_operations",
+                "external_effect_attempts",
+            )
+        ):
+            # The packaged desktop runs Alembic before serving. This narrow
+            # compatibility path keeps standalone legacy-schema inspection and
+            # isolated API tests available before that migration has run; effect
+            # routes still cannot dispatch without the ledger schema.
+            return 0
 
     effects = _external_effect_service(cipher)
     recovered = effects.recover_interrupted()
