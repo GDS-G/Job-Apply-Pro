@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Guided Application Workspace",
-  version: "0.64.0-alpha.1",
+  name: "Greenhouse Application Vertical Slice",
+  version: "0.65.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -250,6 +250,33 @@ export interface JobReadinessSnapshot {
     "REVIEW_REQUIREMENTS" | "REVIEW_QUALIFICATION" | "SELECT_RESUME"
   )[];
   notice: string;
+}
+export interface GreenhouseApplicationLaunchPreview {
+  application_id: string;
+  workflow_id: string;
+  profile_id: string;
+  job_id: string;
+  employer: string;
+  title: string;
+  start_url: string;
+  start_origin: string;
+  selected_document_version_id: string;
+  source_fingerprint: string;
+  requirements_review_id: string;
+  qualification_review_id: string;
+  selection_review_id: string;
+  policy_version: string;
+  review_fingerprint: string;
+  notice: string;
+}
+export interface GreenhouseApplicationLaunchInput {
+  application_id: string;
+  review_fingerprint: string;
+  profile_name: string;
+  engine: BrowserEngine;
+}
+export interface GreenhouseApplicationLaunchApproval extends GreenhouseApplicationLaunchInput {
+  confirmation_phrase: string;
 }
 export interface ReadinessRequirementsApprovalInput {
   input: RequirementsRequest;
@@ -1924,6 +1951,12 @@ export interface DesktopBridge {
     approveJobResume(
       input: ReadinessResumeApprovalInput,
     ): Promise<JobReadinessSnapshot | null>;
+    previewGreenhouseApplicationLaunch(
+      applicationId: string,
+    ): Promise<GreenhouseApplicationLaunchPreview>;
+    startGreenhouseApplicationLaunch(
+      input: GreenhouseApplicationLaunchInput,
+    ): Promise<SupervisedPortalRunSnapshot | null>;
     listGreenhouseJobs(
       input: GreenhouseJobListInput,
     ): Promise<GreenhouseJobList>;

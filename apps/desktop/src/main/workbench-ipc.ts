@@ -26,6 +26,7 @@ import type {
 import type { BackendSupervisor } from "./backend-supervisor.js";
 import { registerCalendarEventIpc } from "./calendar-event-ipc.js";
 import { registerGreenhouseDiscoveryIpc } from "./greenhouse-discovery-ipc.js";
+import { registerGreenhouseApplicationIpc } from "./greenhouse-application-ipc.js";
 import { registerJobReadinessIpc } from "./job-readiness-ipc.js";
 import { registerMailDraftIpc } from "./mail-draft-ipc.js";
 import { integrationHealthForRenderer } from "./integration-health-view.js";
@@ -58,7 +59,6 @@ const supervisedPortals = new Set<PortalKind>([
   "COMPANY_CAREERS",
   "WORKDAY",
   "TALEO",
-  "GREENHOUSE",
 ]);
 const permittedUses = new Set(["PROFILE_ONLY", "APPLICATIONS", "ANY"]);
 const portalFieldControlKinds = new Set([
@@ -709,6 +709,7 @@ export function registerWorkbenchIpc(
   notifications: DesktopNotificationManager,
 ): void {
   registerGreenhouseDiscoveryIpc(supervisor.client);
+  registerGreenhouseApplicationIpc(supervisor.client);
   registerJobReadinessIpc(supervisor.client);
   registerMailDraftIpc(supervisor.client);
   registerCalendarEventIpc(supervisor.client);

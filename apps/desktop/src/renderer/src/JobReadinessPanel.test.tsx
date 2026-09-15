@@ -8,9 +8,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  GreenhouseApplicationLaunchPreview,
   JobReadinessSnapshot,
   QualificationPreview,
   RequirementsPreview,
+  SupervisedPortalRunSnapshot,
 } from "@job-apply-pro/contracts";
 import { JobReadinessPanel } from "./JobReadinessPanel";
 
@@ -138,6 +140,66 @@ const withEligibility: JobReadinessSnapshot = {
     "SELECT_RESUME",
   ],
 };
+const withReady: JobReadinessSnapshot = {
+  ...withEligibility,
+  state: "DOCUMENTS_SELECTED",
+  status: "READY",
+  source: {
+    ...withEligibility.source!,
+    source_url: "https://job-boards.greenhouse.io/example/jobs/12",
+    navigation_supported: true,
+  },
+  selection_review: {
+    id: "selection-1",
+    revision: 1,
+    created_at: "2026-09-12T12:00:00Z",
+    application_id: "app-1",
+    requirements_review_id: "requirements-1",
+    qualification_review_id: "qualification-1",
+    requirements_fingerprint: digest,
+    candidate_fingerprint: digest,
+    document_fingerprint: digest,
+    document_version_id: "version-1",
+    review_fingerprint: "f".repeat(64),
+    policy_version: "reviewed-resume-selection/1",
+  },
+};
+const launchPreview: GreenhouseApplicationLaunchPreview = {
+  application_id: "app-1",
+  workflow_id: "workflow-1",
+  profile_id: "profile-1",
+  job_id: "job-1",
+  employer: "Example",
+  title: "Engineer",
+  start_url: "https://job-boards.greenhouse.io/example/jobs/12",
+  start_origin: "https://job-boards.greenhouse.io",
+  selected_document_version_id: "version-1",
+  source_fingerprint: digest,
+  requirements_review_id: "requirements-1",
+  qualification_review_id: "qualification-1",
+  selection_review_id: "selection-1",
+  policy_version: "reviewed-greenhouse-application-launch/1",
+  review_fingerprint: "9".repeat(64),
+  notice: "Opens a visible browser and does not submit.",
+};
+const greenhouseRun = {
+  id: "greenhouse-run-1",
+  portal: "GREENHOUSE",
+  workflow_id: "workflow-1",
+  browser_session_id: "browser-1",
+  state: "AWAITING_USER",
+  current_url: launchPreview.start_url,
+  allowed_origins: [launchPreview.start_origin],
+  page_fingerprint: "page-1",
+  current_match: null,
+  disposition: "USER_ACTION_REQUIRED",
+  intervention_reasons: ["USER_TAKEOVER"],
+  evidence: [],
+  observed_controls: [],
+  trace_path: null,
+  created_at: "2026-09-12T12:00:00Z",
+  updated_at: "2026-09-12T12:00:00Z",
+} satisfies SupervisedPortalRunSnapshot;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -150,14 +212,22 @@ function deferred<T>() {
 describe("Reviewed job readiness panel", () => {
   const api = window.jobApplyPro.workbench;
   const changed = vi.fn();
+  const portalStarted = vi.fn();
   beforeEach(() => {
     changed.mockReset();
+    portalStarted.mockReset();
     vi.spyOn(api, "getJobReadiness").mockResolvedValue(snapshot);
     vi.spyOn(api, "previewJobRequirements").mockResolvedValue(requirements);
     vi.spyOn(api, "approveJobRequirements").mockResolvedValue(withRequirements);
     vi.spyOn(api, "previewJobQualification").mockResolvedValue(qualification);
     vi.spyOn(api, "approveJobQualification").mockResolvedValue(withEligibility);
     vi.spyOn(api, "approveJobResume").mockResolvedValue(null);
+    vi.spyOn(api, "previewGreenhouseApplicationLaunch").mockResolvedValue(
+      launchPreview,
+    );
+    vi.spyOn(api, "startGreenhouseApplicationLaunch").mockResolvedValue(
+      greenhouseRun,
+    );
     vi.spyOn(api, "previewJobResume").mockResolvedValue({
       selection: {
         application_id: "app-1",
@@ -202,6 +272,7 @@ describe("Reviewed job readiness panel", () => {
         applicationId="app-1"
         profileId="profile-1"
         onChanged={changed}
+        onPortalStarted={portalStarted}
       />,
     );
   }
@@ -385,6 +456,44 @@ describe("Reviewed job readiness panel", () => {
     expect(changed).not.toHaveBeenCalled();
     expect(api.previewDocumentSelection).not.toHaveBeenCalled();
     expect(api.controlWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("opens only the exact backend-reviewed Greenhouse application after readiness", async () => {
+    panel();
+    await load(withReady);
+    expect(
+      screen.getByRole("button", { name: "Review Greenhouse launch" }),
+    ).toBeInTheDocument();
+    expect(api.previewGreenhouseApplicationLaunch).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review Greenhouse launch" }),
+    );
+    const open = await screen.findByRole("button", {
+      name: "Open reviewed Greenhouse application",
+    });
+    expect(
+      api.previewGreenhouseApplicationLaunch,
+    ).toHaveBeenCalledExactlyOnceWith("app-1");
+    expect(screen.getByText(/Exact allowed origin:/)).toHaveTextContent(
+      launchPreview.start_origin,
+    );
+    fireEvent.click(open);
+    await waitFor(() =>
+      expect(portalStarted).toHaveBeenCalledWith(greenhouseRun),
+    );
+    expect(
+      api.startGreenhouseApplicationLaunch,
+    ).toHaveBeenCalledExactlyOnceWith({
+      application_id: "app-1",
+      review_fingerprint: launchPreview.review_fingerprint,
+      profile_name: "greenhouse-profile",
+      engine: "msedge",
+    });
+    expect(
+      screen.getByText(
+        "The reviewed Greenhouse posting is open in a visible supervised browser. No application was submitted.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("sends eligibility clearance only after a separate explicit checkbox choice", async () => {

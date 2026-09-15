@@ -1,5 +1,7 @@
 from collections.abc import Generator
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -9,10 +11,21 @@ from sqlalchemy.orm import Session
 from job_apply_pro.api.routes import job_readiness as readiness_routes
 from job_apply_pro.api.routes import knowledge as knowledge_routes
 from job_apply_pro.api.routes.core import get_cipher
-from job_apply_pro.api.routes.job_readiness import get_readiness_service
+from job_apply_pro.api.routes.job_readiness import (
+    get_greenhouse_application_service,
+    get_readiness_service,
+)
 from job_apply_pro.config import Settings
 from job_apply_pro.domain.knowledge import DocumentKind
+from job_apply_pro.domain.portals import (
+    PortalInterventionReason,
+    PortalKind,
+    SupervisedPortalDisposition,
+    SupervisedPortalRunSnapshot,
+    SupervisedPortalRunState,
+)
 from job_apply_pro.main import app
+from job_apply_pro.services.greenhouse_application import GreenhouseApplicationService
 from job_apply_pro.storage.database import get_session
 from test_job_readiness import Fixture, fixture
 
@@ -54,6 +67,63 @@ def test_api_runs_full_local_review_without_network(
     assert evaluated.status_code == 200 and evaluated.json()["state"] == "ELIGIBILITY_CHECKED"
     selected = api.post(f"{path}/resume/approve", json=fixture.selection().model_dump(mode="json"))
     assert selected.status_code == 200 and selected.json()["status"] == "READY"
+
+
+def test_api_launches_only_the_exact_current_reviewed_greenhouse_application(
+    api: TestClient, fixture: Fixture
+) -> None:
+    fixture.ready_to_select()
+    fixture.service.approve_resume(fixture.selection())
+    supervised = Mock()
+    service = GreenhouseApplicationService(fixture.service, supervised)
+    app.dependency_overrides[get_greenhouse_application_service] = lambda: service
+    path = f"/api/v1/applications/{fixture.application_id}/job-review/greenhouse-launch"
+    preview = api.get(path)
+    assert preview.status_code == 200
+    reviewed = preview.json()
+    assert reviewed["application_id"] == fixture.application_id
+    assert reviewed["start_origin"].endswith("greenhouse.io")
+    assert reviewed["selected_document_version_id"] == fixture.version_id
+    now = datetime.now(UTC)
+    run = SupervisedPortalRunSnapshot(
+        id="run-1",
+        portal=PortalKind.GREENHOUSE,
+        workflow_id=reviewed["workflow_id"],
+        browser_session_id="browser-1",
+        state=SupervisedPortalRunState.AWAITING_USER,
+        current_url=reviewed["start_url"],
+        allowed_origins=[reviewed["start_origin"]],
+        page_fingerprint="page-1",
+        disposition=SupervisedPortalDisposition.USER_ACTION_REQUIRED,
+        intervention_reasons=[PortalInterventionReason.USER_TAKEOVER],
+        evidence=[],
+        created_at=now,
+        updated_at=now,
+    )
+    supervised.start_reviewed_greenhouse.return_value = run
+    body = {
+        "application_id": fixture.application_id,
+        "review_fingerprint": reviewed["review_fingerprint"],
+        "profile_name": "greenhouse-test",
+        "engine": "chromium",
+        "confirmation_phrase": "OPEN REVIEWED GREENHOUSE APPLICATION",
+    }
+    started = api.post(path, json=body)
+    assert started.status_code == 201 and started.json()["portal"] == "GREENHOUSE"
+    command, recorded_fingerprint = supervised.start_reviewed_greenhouse.call_args.args
+    assert command.workflow_id == reviewed["workflow_id"]
+    assert str(command.start_url) == reviewed["start_url"]
+    assert command.allowed_origins == []
+    assert recorded_fingerprint == reviewed["review_fingerprint"]
+
+    injected = api.post(
+        path,
+        json=body | {"start_url": "https://attacker.invalid/apply"},
+    )
+    assert injected.status_code == 422
+    stale = api.post(path, json=body | {"review_fingerprint": "0" * 64})
+    assert stale.status_code == 409
+    assert supervised.start_reviewed_greenhouse.call_count == 1
 
 
 def test_actual_dependency_needs_no_ai_registry_or_valid_provider_configuration(

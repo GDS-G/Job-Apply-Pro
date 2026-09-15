@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Guided Application Workspace"
+    BUILD_NAME = "Greenhouse Application Vertical Slice"
 
     def __init__(
         self,

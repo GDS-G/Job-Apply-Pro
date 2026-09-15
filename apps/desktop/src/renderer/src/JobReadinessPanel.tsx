@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
   DocumentSelectionRequest,
   FindingStatus,
+  GreenhouseApplicationLaunchPreview,
   JobReadinessSnapshot,
   QualificationPreview,
   QualificationRequest,
@@ -10,21 +11,30 @@ import type {
   RequirementFinding,
   RequirementsPreview,
   RequirementsRequest,
+  SupervisedPortalRunSnapshot,
 } from "@job-apply-pro/contracts";
 
 type Pending =
-  "load" | "requirements" | "qualification" | "resume" | "approval";
+  | "load"
+  | "requirements"
+  | "qualification"
+  | "resume"
+  | "approval"
+  | "launch-preview"
+  | "launch";
 
 export function JobReadinessPanel({
   backendReady,
   applicationId,
   profileId,
   onChanged,
+  onPortalStarted,
 }: {
   backendReady: boolean;
   applicationId: string | null;
   profileId: string | null;
   onChanged: () => void | Promise<void>;
+  onPortalStarted?: (run: SupervisedPortalRunSnapshot) => void | Promise<void>;
 }) {
   const [snapshot, setSnapshot] = useState<JobReadinessSnapshot | null>(null);
   const [choices, setChoices] = useState<
@@ -43,6 +53,8 @@ export function JobReadinessPanel({
     input: DocumentSelectionRequest;
     result: ReadinessSelectionPreview;
   } | null>(null);
+  const [launchPreview, setLaunchPreview] =
+    useState<GreenhouseApplicationLaunchPreview | null>(null);
   const [approveEligibility, setApproveEligibility] = useState(false);
   const [preferredTags, setPreferredTags] = useState("");
   const [preferPrimary, setPreferPrimary] = useState(true);
@@ -58,6 +70,7 @@ export function JobReadinessPanel({
     setRequirementsPreview(null);
     setQualificationPreview(null);
     setResumePreview(null);
+    setLaunchPreview(null);
     setApproveEligibility(false);
   }
 
@@ -251,6 +264,58 @@ export function JobReadinessPanel({
         )
           throw new Error("Mismatched review");
         setResumePreview({ input, result });
+      },
+    );
+  }
+
+  function previewGreenhouseLaunch() {
+    if (!snapshot || snapshot.status !== "READY") return;
+    setLaunchPreview(null);
+    void run(
+      "launch-preview",
+      () => api.previewGreenhouseApplicationLaunch(snapshot.application_id),
+      (result) => {
+        if (
+          result.application_id !== applicationId ||
+          result.profile_id !== profileId ||
+          result.workflow_id !== snapshot.workflow_id ||
+          result.source_fingerprint !== snapshot.source_fingerprint ||
+          result.selected_document_version_id !==
+            snapshot.selection_review?.document_version_id
+        )
+          throw new Error("Mismatched Greenhouse launch review");
+        setLaunchPreview(result);
+      },
+    );
+  }
+
+  function startGreenhouseLaunch() {
+    if (!launchPreview) return;
+    void run(
+      "launch",
+      () =>
+        api.startGreenhouseApplicationLaunch({
+          application_id: launchPreview.application_id,
+          review_fingerprint: launchPreview.review_fingerprint,
+          profile_name: "greenhouse-profile",
+          engine: "msedge",
+        }),
+      async (result) => {
+        if (!result) {
+          setNotice(
+            "Greenhouse launch was cancelled. No browser was opened and no application was submitted.",
+          );
+          return;
+        }
+        if (
+          result.portal !== "GREENHOUSE" ||
+          result.workflow_id !== launchPreview.workflow_id
+        )
+          throw new Error("Mismatched Greenhouse portal run");
+        setNotice(
+          "The reviewed Greenhouse posting is open in a visible supervised browser. No application was submitted.",
+        );
+        await onPortalStarted?.(result);
       },
     );
   }
@@ -698,6 +763,50 @@ export function JobReadinessPanel({
                   revision {snapshot.selection_review.revision}. This is not an
                   upload or application submission.
                 </p>
+              )}
+              {snapshot.status === "READY" && (
+                <article className="answer-entry">
+                  <h3>4. Open the reviewed Greenhouse application</h3>
+                  <p>
+                    The backend will recheck the saved posting, eligibility
+                    reviews, and immutable resume before it derives the exact
+                    Greenhouse URL and origin.
+                  </p>
+                  <button
+                    className="button button--secondary"
+                    type="button"
+                    disabled={!!pending}
+                    onClick={previewGreenhouseLaunch}
+                  >
+                    Review Greenhouse launch
+                  </button>
+                  {launchPreview && (
+                    <div>
+                      <p>
+                        {launchPreview.title} at {launchPreview.employer}
+                      </p>
+                      <p>Exact start URL: {launchPreview.start_url}</p>
+                      <p>Exact allowed origin: {launchPreview.start_origin}</p>
+                      <p>
+                        Immutable resume version:{" "}
+                        {launchPreview.selected_document_version_id}
+                      </p>
+                      <p>
+                        Launch review fingerprint:{" "}
+                        <code>{launchPreview.review_fingerprint}</code>
+                      </p>
+                      <p>{launchPreview.notice}</p>
+                      <button
+                        className="button button--primary"
+                        type="button"
+                        disabled={!!pending}
+                        onClick={startGreenhouseLaunch}
+                      >
+                        Open reviewed Greenhouse application
+                      </button>
+                    </div>
+                  )}
+                </article>
               )}
             </>
           )}

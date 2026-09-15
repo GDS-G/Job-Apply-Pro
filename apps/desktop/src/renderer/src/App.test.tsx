@@ -221,7 +221,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Guided Application Workspace v0.64.0-alpha.1"),
+      screen.getByText("Greenhouse Application Vertical Slice v0.65.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

@@ -6,7 +6,14 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from job_apply_pro.api.routes.core import CipherDependency
+from job_apply_pro.api.routes.portals import get_supervised_portal_service
+from job_apply_pro.browser.client import BrowserWorkerError, BrowserWorkerUnavailableError
 from job_apply_pro.config import get_settings
+from job_apply_pro.domain.greenhouse_application import (
+    GreenhouseApplicationLaunchApproval,
+    GreenhouseApplicationLaunchError,
+    GreenhouseApplicationLaunchPreview,
+)
 from job_apply_pro.domain.job_readiness import (
     JobReadinessError,
     JobReadinessSnapshot,
@@ -19,10 +26,18 @@ from job_apply_pro.domain.job_readiness import (
     RequirementsRequest,
 )
 from job_apply_pro.domain.knowledge import DocumentSelectionApproval, DocumentSelectionRequest
+from job_apply_pro.domain.portals import SupervisedPortalRunSnapshot
 from job_apply_pro.security.encryption import DecryptionError
 from job_apply_pro.security.keys import KeyConfigurationError
+from job_apply_pro.services.browser_runtime import BrowserPolicyError, BrowserSessionStateError
+from job_apply_pro.services.greenhouse_application import GreenhouseApplicationService
 from job_apply_pro.services.job_readiness import JobReadinessService
 from job_apply_pro.services.knowledge import CandidateKnowledgeError, CandidateKnowledgeService
+from job_apply_pro.services.supervised_portals import (
+    SupervisedPortalPolicyError,
+    SupervisedPortalService,
+    SupervisedPortalStateError,
+)
 from job_apply_pro.storage.database import get_session
 from job_apply_pro.storage.job_readiness_repository import JobReadinessRepository
 from job_apply_pro.storage.knowledge_repository import CandidateKnowledgeRepository
@@ -61,10 +76,39 @@ def get_readiness_service(
 ReadinessService = Annotated[JobReadinessService, Depends(get_readiness_service)]
 
 
+def get_greenhouse_application_preview_service(
+    readiness: ReadinessService,
+) -> GreenhouseApplicationService:
+    # Preview is deterministic and must remain available while browser execution
+    # is disabled or unavailable.
+    return GreenhouseApplicationService(readiness)
+
+
+GreenhouseApplicationPreviewServiceDependency = Annotated[
+    GreenhouseApplicationService,
+    Depends(get_greenhouse_application_preview_service),
+]
+
+
+def get_greenhouse_application_service(
+    readiness: ReadinessService,
+    supervised: Annotated[
+        SupervisedPortalService,
+        Depends(get_supervised_portal_service),
+    ],
+) -> GreenhouseApplicationService:
+    return GreenhouseApplicationService(readiness, supervised)
+
+
+GreenhouseApplicationServiceDependency = Annotated[
+    GreenhouseApplicationService, Depends(get_greenhouse_application_service)
+]
+
+
 def _run[Result](action: Callable[[], Result]) -> Result:
     try:
         return action()
-    except JobReadinessError as error:
+    except (JobReadinessError, GreenhouseApplicationLaunchError) as error:
         raise HTTPException(409, str(error)) from None
     except KeyConfigurationError:
         raise HTTPException(503, "Local encryption is unavailable") from None
@@ -137,3 +181,39 @@ def approve_resume(
 ) -> JobReadinessSnapshot:
     _match(application_id, command.application_id)
     return _run(lambda: service.approve_resume(command))
+
+
+@router.get(
+    "/greenhouse-launch",
+    response_model=GreenhouseApplicationLaunchPreview,
+)
+def preview_greenhouse_application_launch(
+    application_id: ApplicationId,
+    service: GreenhouseApplicationPreviewServiceDependency,
+) -> GreenhouseApplicationLaunchPreview:
+    return _run(lambda: service.preview(application_id))
+
+
+@router.post(
+    "/greenhouse-launch",
+    response_model=SupervisedPortalRunSnapshot,
+    status_code=201,
+)
+def start_greenhouse_application_launch(
+    application_id: ApplicationId,
+    command: GreenhouseApplicationLaunchApproval,
+    service: GreenhouseApplicationServiceDependency,
+) -> SupervisedPortalRunSnapshot:
+    _match(application_id, command.application_id)
+    try:
+        return _run(lambda: service.start(command))
+    except SupervisedPortalPolicyError as error:
+        raise HTTPException(403, str(error)) from None
+    except (SupervisedPortalStateError, BrowserSessionStateError) as error:
+        raise HTTPException(409, str(error)) from None
+    except BrowserPolicyError as error:
+        raise HTTPException(403, str(error)) from None
+    except BrowserWorkerUnavailableError:
+        raise HTTPException(503, "Browser worker is unavailable") from None
+    except BrowserWorkerError:
+        raise HTTPException(422, "The supervised browser could not be started") from None

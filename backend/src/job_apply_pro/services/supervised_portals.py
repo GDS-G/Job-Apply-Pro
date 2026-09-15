@@ -149,6 +149,27 @@ class SupervisedPortalService:
         self._allowed_portals = allowed_portals
 
     def start(self, command: SupervisedPortalRunCreate) -> SupervisedPortalRunSnapshot:
+        if command.portal is PortalKind.GREENHOUSE:
+            raise SupervisedPortalPolicyError(
+                "Use the reviewed Greenhouse application launch route"
+            )
+        return self._start(command)
+
+    def start_reviewed_greenhouse(
+        self, command: SupervisedPortalRunCreate, review_fingerprint: str
+    ) -> SupervisedPortalRunSnapshot:
+        if command.portal is not PortalKind.GREENHOUSE:
+            raise SupervisedPortalPolicyError("Reviewed Greenhouse launch accepts GREENHOUSE only")
+        if not re.fullmatch(r"[a-f0-9]{64}", review_fingerprint):
+            raise SupervisedPortalPolicyError("Reviewed Greenhouse launch fingerprint is invalid")
+        return self._start(command, launch_review_fingerprint=review_fingerprint)
+
+    def _start(
+        self,
+        command: SupervisedPortalRunCreate,
+        *,
+        launch_review_fingerprint: str | None = None,
+    ) -> SupervisedPortalRunSnapshot:
         self._require_portal_policy(command.portal)
         definition = self._catalog.get(command.portal)
         start_url = str(command.start_url)
@@ -194,7 +215,7 @@ class SupervisedPortalService:
         self._repository.save(run)
         self._record_evidence(
             run,
-            before=observation.page_fingerprint,
+            before=launch_review_fingerprint or observation.page_fingerprint,
             after=observation.page_fingerprint,
             action_kind=None,
             verified=match is not None,

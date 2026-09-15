@@ -1607,11 +1607,13 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Guided Application Workspace v0.64.0-alpha.1</strong>
+              <strong>
+                Greenhouse Application Vertical Slice v0.65.0-alpha.1
+              </strong>
               <p>
-                Every development view is now scoped to the selected saved
-                application, with a guided path through readiness, evidence,
-                fields, challenges, and follow-up.
+                A saved public Greenhouse posting can now open only after its
+                exact source, evidence, eligibility, and immutable resume are
+                reviewed and revalidated by the backend.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -2001,6 +2003,13 @@ export function App() {
             applicationId={selected?.application_id ?? null}
             profileId={selected?.profile_id ?? null}
             onChanged={refreshWorkflows}
+            onPortalStarted={async (run) => {
+              setSupervisedPortalRuns((current) => [
+                run,
+                ...current.filter((item) => item.id !== run.id),
+              ]);
+              await refreshWorkflows();
+            }}
           />
 
           <section className="panel knowledge-panel" id="candidate-evidence">
@@ -3318,7 +3327,12 @@ export function App() {
                   Portal
                   <select name="portal" defaultValue="LINKEDIN" required>
                     {portalCatalog
-                      .filter((adapter) => adapter.kind !== "REFERENCE_ATS")
+                      .filter(
+                        (adapter) =>
+                          !["REFERENCE_ATS", "GREENHOUSE"].includes(
+                            adapter.kind,
+                          ),
+                      )
                       .map((adapter) => (
                         <option key={adapter.kind} value={adapter.kind}>
                           {adapter.display_name}

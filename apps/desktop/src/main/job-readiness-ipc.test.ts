@@ -68,6 +68,16 @@ const saved: JobReadinessSnapshot = {
   allowed_actions: [],
   notice: "Synthetic test result",
 };
+const launchInput = {
+  application_id: "app-1",
+  review_fingerprint: hash,
+  profile_name: "greenhouse-profile",
+  engine: "msedge" as const,
+};
+const launchApproval = {
+  ...launchInput,
+  confirmation_phrase: "OPEN REVIEWED GREENHOUSE APPLICATION",
+};
 const approvalOperations = [
   {
     kind: "requirements",
@@ -361,6 +371,8 @@ describe("Job readiness fixed HTTP and preload routes", () => {
         await client.approveJobQualification(operation.body);
       else await client.approveJobResume(operation.body);
     }
+    await client.previewGreenhouseApplicationLaunch("app-1");
+    await client.startGreenhouseApplicationLaunch(launchApproval);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(
       [
         "",
@@ -370,13 +382,15 @@ describe("Job readiness fixed HTTP and preload routes", () => {
         "/requirements/approve",
         "/qualification/approve",
         "/resume/approve",
+        "/greenhouse-launch",
+        "/greenhouse-launch",
       ].map(
         (suffix) =>
           `http://127.0.0.1:8765/api/v1/applications/app-1/job-review${suffix}`,
       ),
     );
     expect(
-      fetchMock.mock.calls.slice(1).map(([, options]) => options?.body),
+      fetchMock.mock.calls.slice(1, 7).map(([, options]) => options?.body),
     ).toEqual(
       [
         requirements,
@@ -384,6 +398,10 @@ describe("Job readiness fixed HTTP and preload routes", () => {
         resume,
         ...approvalOperations.map((operation) => operation.body),
       ].map((body) => JSON.stringify(body)),
+    );
+    expect(fetchMock.mock.calls[7]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[8]?.[1]?.body).toBe(
+      JSON.stringify(launchApproval),
     );
     for (const [, options] of fetchMock.mock.calls)
       expect(options?.headers).toEqual({
@@ -403,21 +421,36 @@ describe("Job readiness fixed HTTP and preload routes", () => {
     ];
     expect(name).toBe("jobApplyPro");
     expect(rendererInvoke).not.toHaveBeenCalled();
-    const operations = [
+    const operations: readonly (readonly [string, string, unknown])[] = [
       ["getJobReadiness", "get", "app-1"],
       ["previewJobRequirements", "requirements-preview", requirements],
       ["previewJobQualification", "qualification-preview", qualification],
       ["previewJobResume", "resume-preview", resume],
-      ...approvalOperations.map((operation) => [
-        operation.method,
-        `${operation.kind}-approve`,
-        operation.value,
-      ]),
-    ] as const;
+      ...approvalOperations.map(
+        (operation) =>
+          [
+            operation.method,
+            `${operation.kind}-approve`,
+            operation.value,
+          ] as const,
+      ),
+      [
+        "previewGreenhouseApplicationLaunch",
+        "greenhouse-application:preview",
+        "app-1",
+      ],
+      [
+        "startGreenhouseApplicationLaunch",
+        "greenhouse-application:start",
+        launchInput,
+      ],
+    ];
     for (const [method, channel, value] of operations) {
       await exposed.workbench[method as string]!(value);
       expect(rendererInvoke).toHaveBeenLastCalledWith(
-        `job-readiness:${channel}`,
+        channel.startsWith("greenhouse-")
+          ? channel
+          : `job-readiness:${channel}`,
         value,
       );
     }

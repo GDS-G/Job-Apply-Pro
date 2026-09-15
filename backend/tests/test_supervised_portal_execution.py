@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
@@ -44,17 +45,19 @@ def _observation(
     fingerprint: str,
     visible_text: str,
     controls: list[dict[str, object]] | None = None,
+    url: str | None = None,
 ) -> BrowserObservation:
-    url = f"https://www.linkedin.com/jobs/{page_type.casefold()}"
+    page_url = url or f"https://www.linkedin.com/jobs/{page_type.casefold()}"
+    parsed = urlsplit(page_url)
     now = datetime.now(UTC)
     return BrowserObservation(
         sequence=1,
-        url=url,
+        url=page_url,
         title="LinkedIn fixture",
-        origin="https://www.linkedin.com",
+        origin=f"{parsed.scheme}://{parsed.hostname}",
         page_type=page_type,
         page_fingerprint=fingerprint,
-        tabs=[BrowserTab(index=0, url=url, title="LinkedIn fixture", active=True)],
+        tabs=[BrowserTab(index=0, url=page_url, title="LinkedIn fixture", active=True)],
         accessibility_snapshot="",
         visible_text=visible_text,
         controls=[BrowserObservedControl.model_validate(value) for value in controls or []],
@@ -76,6 +79,7 @@ class _Browser:
         *,
         resume_observations: list[BrowserObservation] | None = None,
         action_observations: list[BrowserObservation] | None = None,
+        expected_start_prefix: str = "https://www.linkedin.com/",
     ) -> None:
         self._observation = initial
         self._resume = list(resume_observations or [])
@@ -83,6 +87,7 @@ class _Browser:
         self.state = BrowserSessionState.ACTIVE
         self.executed: list[BrowserAction] = []
         self.session_id = str(uuid4())
+        self.expected_start_prefix = expected_start_prefix
 
     def _snapshot(self, trace_path: str | None = None) -> BrowserSessionSnapshot:
         now = datetime.now(UTC)
@@ -93,7 +98,7 @@ class _Browser:
             profile_name="linkedin-fixture",
             state=self.state,
             current_url=self._observation.url,
-            allowed_origins=["https://www.linkedin.com"],
+            allowed_origins=[self._observation.origin],
             observation=self._observation,
             action_count=len(self.executed),
             trace_path=trace_path,
@@ -103,7 +108,7 @@ class _Browser:
 
     def create_session(self, command: BrowserSessionCreate) -> BrowserSessionSnapshot:
         assert command.headless is False
-        assert str(command.start_url).startswith("https://www.linkedin.com/")
+        assert str(command.start_url).startswith(self.expected_start_prefix)
         return self._snapshot()
 
     def get_session(self, session_id: str) -> BrowserSessionSnapshot:
@@ -314,3 +319,61 @@ def test_supervised_login_requires_manual_intervention_and_allowlist_is_strict(
         parse_portal_allowlist("not-a-portal")
     with pytest.raises(SupervisedPortalPolicyError, match="dedicated"):
         parse_portal_allowlist("reference_ats")
+
+
+def test_greenhouse_cannot_start_through_the_generic_supervised_boundary(
+    session: Session,
+) -> None:
+    observation = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="greenhouse-detail",
+        visible_text="Synthetic Greenhouse role",
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        _Browser(observation),
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=False,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    command = SupervisedPortalRunCreate(
+        workflow_id="workflow-1",
+        portal=PortalKind.GREENHOUSE,
+        start_url=AnyHttpUrl("https://boards.greenhouse.io/example/jobs/1"),
+        profile_name="greenhouse-fixture",
+    )
+    with pytest.raises(SupervisedPortalPolicyError, match="reviewed Greenhouse"):
+        service.start(command)
+
+
+def test_reviewed_greenhouse_start_persists_launch_fingerprint_as_first_evidence(
+    session: Session,
+) -> None:
+    launch_fingerprint = "a" * 64
+    observation = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="greenhouse-detail",
+        visible_text="Greenhouse engineering role Apply",
+        url="https://boards.greenhouse.io/example/jobs/1",
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        _Browser(observation, expected_start_prefix="https://boards.greenhouse.io/"),
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=False,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    run = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl("https://boards.greenhouse.io/example/jobs/1"),
+            profile_name="greenhouse-fixture",
+        ),
+        launch_fingerprint,
+    )
+    assert run.evidence[0].before_fingerprint == launch_fingerprint
+    assert run.evidence[0].after_fingerprint == observation.page_fingerprint
+    assert len(run.evidence[0].action_fingerprint) == 64

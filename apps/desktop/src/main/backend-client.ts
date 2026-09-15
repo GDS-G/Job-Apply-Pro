@@ -41,6 +41,8 @@ import type {
   DocumentSelectionRequest,
   FollowUp,
   GreenhouseImportResult,
+  GreenhouseApplicationLaunchApproval,
+  GreenhouseApplicationLaunchPreview,
   GreenhouseJobImportInput,
   GreenhouseJobList,
   GreenhouseJobListInput,
@@ -162,6 +164,24 @@ export class BackendClient {
     return this.request(
       `/applications/${encodeURIComponent(input.application_id)}/job-review/resume/approve`,
       { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+
+  previewGreenhouseApplicationLaunch(
+    applicationId: string,
+  ): Promise<GreenhouseApplicationLaunchPreview> {
+    return this.request(
+      `/applications/${encodeURIComponent(applicationId)}/job-review/greenhouse-launch`,
+    );
+  }
+
+  startGreenhouseApplicationLaunch(
+    input: GreenhouseApplicationLaunchApproval,
+  ): Promise<SupervisedPortalRunSnapshot> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/greenhouse-launch`,
+      { method: "POST", body: JSON.stringify(input) },
+      120_000,
     );
   }
 
