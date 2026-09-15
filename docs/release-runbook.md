@@ -4,6 +4,8 @@
 
 For Reviewed Browser Navigation Reconciliation `v0.76.0-alpha.1`, verify the frozen candidate proves the pre-dispatch intent, response-loss path, later-stage reconciliation, same-page/confirmation refusal, approval-time reproof, immutable uncertain history, authenticated API, strict client/IPC identifiers, cancel-default native review, kind-specific renderer control, and restore-history validation. Package and protocol checks must run against the exact delivered copies. Do not promote a changed page or URL as success, enable production Greenhouse, or transfer v0.75 evidence. Signed, physical, update/rollback, and authorized live-portal checks remain separate release-owner gates.
 
+Exact source checkpoint `22435b2847ad481e5423c0a97767e85f9cc4f410` passes 1,909 backend tests at 86.64% coverage across 17,636 statements and 516 default desktop tests with two explicit package-only opt-ins skipped. Candidate checkpoint `00effd641a928fe33f69d8b70baae939d2319214` passes both packaged-backend smokes and the 2/2 delivered supervisor/recovery protocols. The local NSIS candidate remains unsigned; use the readiness-audit hashes and never treat this evidence as permission to publish.
+
 ## Release prerequisites
 
 - Clean protected release branch and version synchronized across `VERSION`, `build.json`, Python, npm packages, UI, health responses, and changelog.
