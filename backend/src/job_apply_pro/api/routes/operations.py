@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.api.routes.core import get_cipher
 from job_apply_pro.config import get_settings
@@ -20,11 +20,13 @@ from job_apply_pro.domain.operations import (
 from job_apply_pro.domain.support import SupportDiagnostics
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.backup import BackupError, BackupService
+from job_apply_pro.services.external_effects import ExternalEffectService
 from job_apply_pro.services.licensing import LicenseService, help_topics
 from job_apply_pro.services.operations import OperationsService
 from job_apply_pro.services.support import SupportService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
 from job_apply_pro.storage.database import get_session
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
 from job_apply_pro.storage.operations_repository import OperationsRepository
 from job_apply_pro.storage.support_repository import SupportRepository
 
@@ -53,6 +55,10 @@ def get_operations_service(
         OperationsRepository(session),
         CommunicationRepository(session, cipher),
         LicenseService(settings.license_public_key, settings.signed_license_json),
+        ExternalEffectService(
+            ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+            cipher,
+        ),
     )
 
 

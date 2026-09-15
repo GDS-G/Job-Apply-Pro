@@ -252,6 +252,26 @@ const bridge: DesktopBridge = {
       portals: [],
       application_report: [],
       interview_report: [],
+      external_effects: {
+        total: 1,
+        unresolved: 1,
+        by_status: { UNCERTAIN: 1 },
+        by_kind: { AI_COMPLETION: 1 },
+      },
+      unresolved_external_effects: [
+        {
+          id: "00000000-0000-4000-8000-000000000063",
+          kind: "AI_COMPLETION",
+          subject_type: "model_request",
+          subject_id: "fixture-request",
+          status: "UNCERTAIN",
+          error_code: "PROVIDER_RESPONSE_UNAVAILABLE",
+          attempt_count: 1,
+          created_at: new Date(0).toISOString(),
+          updated_at: new Date(0).toISOString(),
+          completed_at: new Date(0).toISOString(),
+        },
+      ],
       backup_count: 0,
       latest_backup: null,
       license: {

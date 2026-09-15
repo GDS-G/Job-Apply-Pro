@@ -88,6 +88,21 @@ that kind yet. Empty schemas 0025–0028 remain eligible only through the existi
 reviewed legacy compatibility path; recorded legacy history still requires a
 post-upgrade complete backup.
 
+## Operations visibility
+
+The authenticated Operations dashboard returns aggregate ledger counts and at
+most the 20 newest `PREPARED`, `DISPATCHING` or `UNCERTAIN` public records. Each
+record is limited to its ledger identifier, effect kind, bounded subject
+reference, state, safe result/error code, attempt count and timestamps. It does
+not expose request or claim fingerprints, actors, provider payloads, prompts,
+candidate facts, page content, media, credentials, tokens or native keys.
+
+The desktop presents state-specific guidance but no generic retry, clear or
+resolve button. `PREPARED` means no dispatch was recorded; `DISPATCHING` means a
+call began without a terminal result; `UNCERTAIN` means the remote outcome cannot
+be proved. All three remain consumed until provider- or browser-specific evidence
+supports a separately reviewed reconciliation contract.
+
 ## Consequences and remaining gates
 
 The ledger prevents automatic duplicate side effects after common response-loss

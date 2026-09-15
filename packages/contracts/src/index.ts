@@ -1269,6 +1269,33 @@ export interface SupportDiagnostics {
   redaction_policy_version: string;
 }
 
+export type ExternalEffectKind =
+  "BROWSER_ACTION" | "AI_COMPLETION" | "AI_EMBEDDING" | "CALENDAR_UPDATE";
+
+export type ExternalEffectStatus =
+  "PREPARED" | "DISPATCHING" | "CONFIRMED" | "FAILED" | "UNCERTAIN";
+
+export interface ExternalEffectMetrics {
+  total: number;
+  unresolved: number;
+  by_status: Partial<Record<ExternalEffectStatus, number>>;
+  by_kind: Partial<Record<ExternalEffectKind, number>>;
+}
+
+export interface ExternalEffectPublicRecord {
+  id: string;
+  kind: ExternalEffectKind;
+  subject_type: string;
+  subject_id: string;
+  status: ExternalEffectStatus;
+  result_reference?: string | null;
+  error_code?: string | null;
+  attempt_count: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+}
+
 export interface OperationsDashboard {
   generated_at: string;
   applications: {
@@ -1319,6 +1346,8 @@ export interface OperationsDashboard {
     subject: string;
     received_at: string;
   }[];
+  external_effects: ExternalEffectMetrics;
+  unresolved_external_effects: ExternalEffectPublicRecord[];
   backup_count: number;
   latest_backup?: BackupManifest | null;
   license: LicenseState;

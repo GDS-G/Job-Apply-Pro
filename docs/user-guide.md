@@ -64,6 +64,16 @@ Known-resource recovery runs at backend startup and periodically while it is run
 
 Recovery does not guarantee provider deletion and cannot safely guess an unknown resource. Keep API keys in local secret configuration only; never put them in chat, diagnostics, screenshots, or a support report. No unresolved local records means no outstanding journal entries, not a complete inventory or audit of the provider account.
 
+## Review unresolved external effects
+
+Open **Operations, recovery & licensing** and find **External effects requiring attention**. The count includes local browser actions and AI completion/embedding calls that are `PREPARED`, `DISPATCHING`, or `UNCERTAIN`. The list is read-only and shows at most the 20 newest safe records: effect kind, bounded subject reference, state, attempt count, safe error, and timestamps. It never displays a prompt, candidate fact, page content, provider response, credential, token, request fingerprint, or native idempotency key.
+
+- **Prepared:** no dispatch was recorded. Preserve the existing claim and inspect local evidence before deliberately starting anything new.
+- **Dispatching:** the call crossed the dispatch boundary without a terminal local result. Do not retry while its outcome is unknown.
+- **Uncertain:** the app cannot prove whether the remote action happened. Inspect the named provider or use browser user takeover before deciding on a separately reviewed new action.
+
+There is intentionally no generic retry, clear, or resolve button. Removing a record would erase replay authority, while blindly retrying could duplicate an external action or cost. A zero count means no unresolved records are present in this ledger; it does not prove that every external provider account has been audited.
+
 ## Review and enable notifications
 
 The **Actionable notifications** panel always shows current local action alerts. It covers sign-in verification, CAPTCHA and other user intervention, approaching assessment deadlines, stopped or expired workflows, recruiter/interview/offer messages, due follow-ups, upcoming synced interviews, backup failures, and update failures. Select an in-app alert to move to the relevant workflow, challenge, communication, or operations section. Calendar reminders use generic 24-hour and one-hour wording and never expose the event title, participants, provider identifier, location, or meeting URL.

@@ -134,7 +134,7 @@ describe("App", () => {
     ).toBeDisabled();
   });
 
-  it("shows the Workbench safety boundary", () => {
+  it("shows the Workbench safety boundary", async () => {
     render(<App />);
 
     expect(
@@ -170,6 +170,23 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: /export diagnostics/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/external effects requiring attention/i),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        /provider or browser outcome must be reconciled/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/safe code: provider_response_unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /retry external effect/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /clear external effect/i }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText(/updates are disabled for development builds/i),
     ).toBeInTheDocument();

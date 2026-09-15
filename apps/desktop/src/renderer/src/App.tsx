@@ -3554,6 +3554,61 @@ export function App() {
                 </small>
               </article>
             </div>
+            <div className="external-effects-workspace">
+              <div className="external-effects-workspace__header">
+                <div>
+                  <strong>External effects requiring attention</strong>
+                  <p>
+                    Automatic retry and automatic clearing are disabled. Review
+                    the provider or browser outcome before deliberately starting
+                    a new action.
+                  </p>
+                </div>
+                <span
+                  className={`status-pill ${
+                    (operations?.external_effects.unresolved ?? 0) === 0
+                      ? "status-pill--safe"
+                      : "status-pill--warning"
+                  }`}
+                >
+                  {operations?.external_effects.unresolved ?? 0} unresolved
+                </span>
+              </div>
+              {operations?.unresolved_external_effects.length ? (
+                <div className="external-effect-list">
+                  {operations.unresolved_external_effects.map((effect) => (
+                    <article key={effect.id}>
+                      <div>
+                        <span>{effect.kind.replaceAll("_", " ")}</span>
+                        <strong>{effect.status}</strong>
+                      </div>
+                      <small>
+                        {effect.subject_type} · {effect.subject_id} ·{" "}
+                        {effect.attempt_count} attempt
+                        {effect.attempt_count === 1 ? "" : "s"}
+                      </small>
+                      {effect.error_code && (
+                        <small>Safe code: {effect.error_code}</small>
+                      )}
+                      <small>
+                        {effect.status === "PREPARED"
+                          ? "No dispatch was recorded. Preserve the claim and inspect local evidence before any new action."
+                          : effect.status === "DISPATCHING"
+                            ? "Dispatch began without a terminal result. Do not retry while the outcome is unknown."
+                            : "The provider or browser outcome must be reconciled, or handed to the user, before a new action."}
+                      </small>
+                      <time dateTime={effect.updated_at}>
+                        Updated {new Date(effect.updated_at).toLocaleString()}
+                      </time>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state empty-state--compact">
+                  No unresolved external effects require attention.
+                </div>
+              )}
+            </div>
             <MediaCleanupPanel backendReady={status.state === "ready"} />
             <div className="backup-workspace">
               <div>

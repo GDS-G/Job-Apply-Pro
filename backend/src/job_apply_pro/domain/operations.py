@@ -3,6 +3,11 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from job_apply_pro.domain.external_effects import (
+    ExternalEffectMetrics,
+    ExternalEffectPublicRecord,
+)
+
 
 class BackupCategory(StrEnum):
     DATABASE = "DATABASE"
@@ -199,6 +204,8 @@ class OperationsDashboard(BaseModel):
     portals: list[PortalHealthMetric]
     application_report: list[ApplicationReportRow]
     interview_report: list[InterviewReportRow]
+    external_effects: ExternalEffectMetrics
+    unresolved_external_effects: list[ExternalEffectPublicRecord]
     backup_count: int
     latest_backup: BackupManifest | None = None
     license: "LicenseState"

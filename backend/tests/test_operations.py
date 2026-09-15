@@ -5,10 +5,15 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
+from job_apply_pro.api.routes.core import get_cipher
+from job_apply_pro.api.routes.operations import router as operations_router
+from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
 from job_apply_pro.domain.operations import (
     BackupCategory,
     BackupCreate,
@@ -23,10 +28,12 @@ from job_apply_pro.domain.operations import (
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.backup import BackupError, BackupService
+from job_apply_pro.services.external_effects import ExternalEffectService
 from job_apply_pro.services.licensing import LicenseService, help_topics
 from job_apply_pro.services.operations import OperationsService
 from job_apply_pro.storage.communication_repository import CommunicationRepository
-from job_apply_pro.storage.database import Base
+from job_apply_pro.storage.database import Base, get_session
+from job_apply_pro.storage.external_effect_repository import ExternalEffectRepository
 from job_apply_pro.storage.models import (
     ApplicationRow,
     BackupManifestRow,
@@ -238,10 +245,15 @@ def test_signed_license_active_grace_invalid_and_recovery_access() -> None:
 
 def test_empty_dashboard_reconciles_and_help_covers_recovery(session: Session) -> None:
     cipher = SensitiveDataCipher(StaticKeyProvider(b"o" * 32))
+    effects = ExternalEffectService(
+        ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+        cipher,
+    )
     dashboard = OperationsService(
         OperationsRepository(session),
         CommunicationRepository(session, cipher),
         LicenseService(None, None),
+        effects,
     ).dashboard()
     assert dashboard.applications.applications_total == 0
     assert dashboard.models.cost_micros == 0
@@ -249,8 +261,182 @@ def test_empty_dashboard_reconciles_and_help_covers_recovery(session: Session) -
     assert all(not portal.production_enabled for portal in dashboard.portals)
     assert all(len(portal.replay_validated_page_types) == 4 for portal in dashboard.portals)
     assert all(not portal.live_validated_page_types for portal in dashboard.portals)
+    assert dashboard.external_effects.total == 0
+    assert dashboard.unresolved_external_effects == []
     assert dashboard.license.status is LicenseStatus.DEVELOPMENT
     assert {topic.id for topic in help_topics()} >= {"backup-restore", "recovery-access"}
+
+
+def test_dashboard_lists_only_bounded_privacy_safe_unresolved_effects(session: Session) -> None:
+    cipher = SensitiveDataCipher(StaticKeyProvider(b"o" * 32))
+    effects = ExternalEffectService(
+        ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+        cipher,
+    )
+    now = datetime(2026, 9, 14, tzinfo=UTC)
+    request = {"prompt": "private candidate fact must not leave the ledger boundary"}
+
+    prepared = effects.admit(
+        effect_key="operations-prepared",
+        kind=ExternalEffectKind.AI_COMPLETION,
+        subject_type="model_request",
+        subject_id="prepared-request",
+        actor="fixture",
+        request=request,
+        now=now,
+    )
+    dispatching = effects.admit(
+        effect_key="operations-dispatching",
+        kind=ExternalEffectKind.AI_COMPLETION,
+        subject_type="model_request",
+        subject_id="dispatching-request",
+        actor="fixture",
+        request=request,
+        now=now + timedelta(seconds=1),
+    )
+    dispatching_attempt = effects.prepare_attempt(
+        dispatching.operation.id,
+        provider="fixture",
+        target_code="fixture-model",
+        request=request,
+        now=now + timedelta(seconds=1),
+    )
+    effects.begin_dispatch(
+        dispatching.operation.id,
+        dispatching_attempt.id,
+        now=now + timedelta(seconds=1),
+    )
+    uncertain = effects.admit(
+        effect_key="operations-uncertain",
+        kind=ExternalEffectKind.AI_COMPLETION,
+        subject_type="model_request",
+        subject_id="uncertain-request",
+        actor="fixture",
+        request=request,
+        now=now + timedelta(seconds=2),
+    )
+    uncertain_attempt = effects.prepare_attempt(
+        uncertain.operation.id,
+        provider="fixture",
+        target_code="fixture-model",
+        request=request,
+        now=now + timedelta(seconds=2),
+    )
+    effects.begin_dispatch(
+        uncertain.operation.id,
+        uncertain_attempt.id,
+        now=now + timedelta(seconds=2),
+    )
+    effects.finish(
+        uncertain.operation.id,
+        uncertain_attempt.id,
+        status=ExternalEffectStatus.UNCERTAIN,
+        error_code="PROVIDER_RESPONSE_UNAVAILABLE",
+        now=now + timedelta(seconds=2),
+    )
+    confirmed = effects.admit(
+        effect_key="operations-confirmed",
+        kind=ExternalEffectKind.AI_COMPLETION,
+        subject_type="model_request",
+        subject_id="confirmed-request",
+        actor="fixture",
+        request=request,
+        now=now + timedelta(seconds=3),
+    )
+    confirmed_attempt = effects.prepare_attempt(
+        confirmed.operation.id,
+        provider="fixture",
+        target_code="fixture-model",
+        request=request,
+        now=now + timedelta(seconds=3),
+    )
+    effects.begin_dispatch(
+        confirmed.operation.id,
+        confirmed_attempt.id,
+        now=now + timedelta(seconds=3),
+    )
+    effects.finish(
+        confirmed.operation.id,
+        confirmed_attempt.id,
+        status=ExternalEffectStatus.CONFIRMED,
+        result_reference="invocation-fixture",
+        result={"accepted": True},
+        now=now + timedelta(seconds=3),
+    )
+    for index in range(21):
+        effects.admit(
+            effect_key=f"operations-older-prepared-{index}",
+            kind=ExternalEffectKind.AI_EMBEDDING,
+            subject_type="model_request",
+            subject_id=f"older-prepared-{index}",
+            actor="fixture",
+            request=request,
+            now=now - timedelta(seconds=index + 1),
+        )
+
+    dashboard = OperationsService(
+        OperationsRepository(session),
+        CommunicationRepository(session, cipher),
+        LicenseService(None, None),
+        effects,
+    ).dashboard()
+
+    assert prepared.created and dashboard.external_effects.total == 25
+    assert dashboard.external_effects.unresolved == 24
+    assert len(dashboard.unresolved_external_effects) == OperationsService.ATTENTION_LIMIT
+    assert [item.status for item in dashboard.unresolved_external_effects[:3]] == [
+        ExternalEffectStatus.UNCERTAIN,
+        ExternalEffectStatus.DISPATCHING,
+        ExternalEffectStatus.PREPARED,
+    ]
+    assert all(
+        item.subject_id != "confirmed-request" for item in dashboard.unresolved_external_effects
+    )
+    assert "private candidate fact" not in dashboard.model_dump_json()
+
+
+def test_dashboard_api_wires_privacy_safe_effect_visibility(session: Session) -> None:
+    cipher = SensitiveDataCipher(StaticKeyProvider(b"o" * 32))
+    effects = ExternalEffectService(
+        ExternalEffectRepository(sessionmaker(bind=session.get_bind(), expire_on_commit=False)),
+        cipher,
+    )
+    effects.admit(
+        effect_key="operations-api-prepared",
+        kind=ExternalEffectKind.AI_EMBEDDING,
+        subject_type="model_request",
+        subject_id="safe-request-reference",
+        actor="fixture-actor-must-not-be-public",
+        request={"input": "private embedding input"},
+    )
+    application = FastAPI()
+    application.include_router(operations_router, prefix="/api/v1")
+    application.dependency_overrides[get_session] = lambda: session
+    application.dependency_overrides[get_cipher] = lambda: cipher
+
+    with TestClient(application) as client:
+        response = client.get("/api/v1/operations/dashboard")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["external_effects"]["unresolved"] == 1
+    assert payload["unresolved_external_effects"] == [
+        {
+            "id": payload["unresolved_external_effects"][0]["id"],
+            "kind": "AI_EMBEDDING",
+            "subject_type": "model_request",
+            "subject_id": "safe-request-reference",
+            "status": "PREPARED",
+            "result_reference": None,
+            "error_code": None,
+            "attempt_count": 0,
+            "created_at": payload["unresolved_external_effects"][0]["created_at"],
+            "updated_at": payload["unresolved_external_effects"][0]["updated_at"],
+            "completed_at": None,
+        }
+    ]
+    assert "private embedding input" not in response.text
+    assert "fixture-actor-must-not-be-public" not in response.text
 
 
 def test_metrics_reconcile_attempts_confirmations_and_model_cost(session: Session) -> None:
