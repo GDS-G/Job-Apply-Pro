@@ -669,7 +669,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Origin-Bound Portal Profiles v0.73.0-alpha.1"),
+      screen.getByText("Reviewed Portal Profile Retirement v0.74.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),
@@ -763,6 +763,16 @@ describe("App", () => {
         updated_at: discoveredWorkflow.updated_at,
       },
     ]);
+    vi.spyOn(api, "listBrowserProfiles").mockResolvedValue([
+      {
+        engine: "msedge",
+        profile_name: "workday-tenant-a",
+        state: "AVAILABLE",
+        allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
+        session_count: 1,
+        last_used_at: discoveredWorkflow.updated_at,
+      },
+    ]);
     vi.spyOn(api, "listSupervisedPortalRuns").mockResolvedValue([
       {
         id: "workday-run",
@@ -784,6 +794,13 @@ describe("App", () => {
         updated_at: discoveredWorkflow.updated_at,
       } satisfies SupervisedPortalRunSnapshot,
     ]);
+    const retire = vi.spyOn(api, "retireBrowserProfile").mockResolvedValue({
+      engine: "msedge",
+      profile_name: "workday-tenant-a",
+      removed: true,
+      retired_at: discoveredWorkflow.updated_at,
+      notice: "Local browser profile data was removed.",
+    });
 
     render(<App />);
 
@@ -801,6 +818,21 @@ describe("App", () => {
     ).not.toBeNull();
     expect(
       screen.getByText(/never stores or auto-fills the portal password/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Retire local profile data" }),
+    ).toBeEnabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retire local profile data" }),
+    );
+    await waitFor(() =>
+      expect(retire).toHaveBeenCalledExactlyOnceWith(
+        "msedge",
+        "workday-tenant-a",
+      ),
+    );
+    expect(
+      await screen.findByText("Local browser profile data was removed."),
     ).toBeInTheDocument();
   });
 

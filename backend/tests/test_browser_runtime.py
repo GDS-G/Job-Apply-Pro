@@ -18,6 +18,8 @@ from job_apply_pro.domain.browser import (
     BrowserActionKind,
     BrowserControlKind,
     BrowserEngine,
+    BrowserProfileRetirementApproval,
+    BrowserProfileState,
     BrowserSessionCreate,
     BrowserSessionState,
     BrowserVerification,
@@ -33,6 +35,7 @@ from job_apply_pro.services.browser_runtime import (
     BrowserActionUncertainError,
     BrowserPolicyError,
     BrowserRuntimeService,
+    BrowserSessionStateError,
 )
 from job_apply_pro.services.core import CoreService
 from job_apply_pro.services.external_effects import ExternalEffectService
@@ -515,6 +518,124 @@ def test_persistent_profile_reuse_is_bound_to_exact_origins_and_spelling(
                 )
             )
         assert len(service.list_sessions(workflow_id)) == session_count
+    finally:
+        worker.close()
+
+
+def test_reviewed_profile_retirement_preserves_history_and_blocks_reuse(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    profile_name = "workday-retirement"
+    profile_dir = tmp_path / "browser" / BrowserEngine.CHROMIUM.value / profile_name
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/start"),
+                    profile_name=profile_name,
+                )
+            )
+            with pytest.raises(BrowserSessionStateError, match="still active"):
+                service.preview_profile_retirement(BrowserEngine.CHROMIUM, profile_name)
+            service.stop(started.id)
+            session_count = len(service.list_sessions(workflow_id))
+
+            profiles = service.list_profiles()
+            assert len(profiles) == 1
+            assert profiles[0].state is BrowserProfileState.AVAILABLE
+            preview = service.preview_profile_retirement(BrowserEngine.CHROMIUM, profile_name)
+            assert preview.file_count > 0
+            assert preview.directory_count > 0
+            assert preview.total_bytes > 0
+            assert preview.allowed_origins == [origin]
+
+            marker = profile_dir / "retirement-review-marker"
+            marker.write_text("changed after preview", encoding="utf-8")
+            with pytest.raises(BrowserSessionStateError, match="stale"):
+                service.retire_profile(
+                    BrowserProfileRetirementApproval(
+                        engine=BrowserEngine.CHROMIUM,
+                        profile_name=profile_name,
+                        expected_review_fingerprint=preview.review_fingerprint,
+                        confirmation_phrase="RETIRE LOCAL BROWSER PROFILE",
+                    )
+                )
+            assert profile_dir.is_dir()
+
+            current = service.preview_profile_retirement(BrowserEngine.CHROMIUM, profile_name)
+            result = service.retire_profile(
+                BrowserProfileRetirementApproval(
+                    engine=BrowserEngine.CHROMIUM,
+                    profile_name=profile_name,
+                    expected_review_fingerprint=current.review_fingerprint,
+                    confirmation_phrase="RETIRE LOCAL BROWSER PROFILE",
+                )
+            )
+            assert result.removed is True
+            assert not profile_dir.exists()
+            assert len(service.list_sessions(workflow_id)) == session_count
+            assert service.list_profiles()[0].state is BrowserProfileState.RETIRED
+            with pytest.raises(BrowserPolicyError, match="retired"):
+                service.create_session(
+                    BrowserSessionCreate(
+                        workflow_id=workflow_id,
+                        start_url=AnyHttpUrl(f"{origin}/experience"),
+                        profile_name=profile_name,
+                    )
+                )
+    finally:
+        worker.close()
+
+
+def test_profile_retirement_cleanup_failure_keeps_name_retired(
+    session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    profile_name = "retirement-cleanup-failure"
+    profile_dir = tmp_path / "browser" / BrowserEngine.CHROMIUM.value / profile_name
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/start"),
+                    profile_name=profile_name,
+                )
+            )
+            service.stop(started.id)
+            preview = service.preview_profile_retirement(BrowserEngine.CHROMIUM, profile_name)
+
+            def fail_cleanup(_path: Path) -> None:
+                raise OSError("synthetic cleanup failure")
+
+            monkeypatch.setattr("job_apply_pro.services.browser_runtime.rmtree", fail_cleanup)
+            with pytest.raises(BrowserSessionStateError, match="cleanup did not finish"):
+                service.retire_profile(
+                    BrowserProfileRetirementApproval(
+                        engine=BrowserEngine.CHROMIUM,
+                        profile_name=profile_name,
+                        expected_review_fingerprint=preview.review_fingerprint,
+                        confirmation_phrase="RETIRE LOCAL BROWSER PROFILE",
+                    )
+                )
+
+            assert not profile_dir.exists()
+            assert len(list(profile_dir.parent.glob(".retiring-*"))) == 1
+            assert service.list_profiles()[0].state is BrowserProfileState.RETIRED
+            with pytest.raises(BrowserPolicyError, match="retired"):
+                service.create_session(
+                    BrowserSessionCreate(
+                        workflow_id=workflow_id,
+                        start_url=AnyHttpUrl(f"{origin}/start"),
+                        profile_name=profile_name,
+                    )
+                )
     finally:
         worker.close()
 

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Origin-Bound Portal Profiles",
-  version: "0.73.0-alpha.1",
+  name: "Reviewed Portal Profile Retirement",
+  version: "0.74.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -335,6 +335,8 @@ export interface WorkflowEvent {
 export type BrowserEngine = "chromium" | "chrome" | "msedge";
 export type BrowserSessionState =
   "STARTING" | "ACTIVE" | "USER_TAKEOVER" | "STOPPED" | "FAILED";
+export type BrowserProfileState =
+  "AVAILABLE" | "ACTIVE" | "RETIRED" | "INCONSISTENT";
 export type BrowserActionKind =
   | "NAVIGATE"
   | "CLICK"
@@ -475,6 +477,31 @@ export interface BrowserSessionSnapshot {
   trace_path?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface BrowserProfileSnapshot {
+  engine: BrowserEngine;
+  profile_name: string;
+  state: BrowserProfileState;
+  allowed_origins: string[];
+  session_count: number;
+  last_used_at: string;
+}
+
+export interface BrowserProfileRetirementPreview extends BrowserProfileSnapshot {
+  file_count: number;
+  directory_count: number;
+  total_bytes: number;
+  review_fingerprint: string;
+  notice: string;
+}
+
+export interface BrowserProfileRetirementResult {
+  engine: BrowserEngine;
+  profile_name: string;
+  removed: true;
+  retired_at: string;
+  notice: string;
 }
 
 export interface BrowserFieldReconciliationPreview {
@@ -2090,6 +2117,11 @@ export interface DesktopBridge {
       input: GreenhouseJobImportInput,
     ): Promise<GreenhouseImportResult>;
     listBrowserSessions(workflowId?: string): Promise<BrowserSessionSnapshot[]>;
+    listBrowserProfiles(): Promise<BrowserProfileSnapshot[]>;
+    retireBrowserProfile(
+      engine: BrowserEngine,
+      profileName: string,
+    ): Promise<BrowserProfileRetirementResult | null>;
     reconcileBrowserField(
       operationId: string,
       sessionId: string,

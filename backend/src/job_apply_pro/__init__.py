@@ -1,3 +1,3 @@
 """Job Apply Pro local backend."""
 
-__version__ = "0.73.0-alpha.1"
+__version__ = "0.74.0-alpha.1"

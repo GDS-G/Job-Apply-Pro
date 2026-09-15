@@ -7,6 +7,7 @@ import type {
   FieldAutomationPermission,
   AnswerLibraryInput,
   BackendRuntimeStatus,
+  BrowserEngine,
   CalendarMutationCreate,
   CandidateDocumentImportInput,
   DesktopNotificationDestination,
@@ -74,6 +75,14 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("discovery:greenhouse-import", input),
     listBrowserSessions: (workflowId?: string) =>
       ipcRenderer.invoke("workbench:list-browser-sessions", workflowId),
+    listBrowserProfiles: () =>
+      ipcRenderer.invoke("workbench:list-browser-profiles"),
+    retireBrowserProfile: (engine: BrowserEngine, profileName: string) =>
+      ipcRenderer.invoke(
+        "workbench:retire-browser-profile",
+        engine,
+        profileName,
+      ),
     reconcileBrowserField: (operationId: string, sessionId: string) =>
       ipcRenderer.invoke(
         "workbench:reconcile-browser-field",

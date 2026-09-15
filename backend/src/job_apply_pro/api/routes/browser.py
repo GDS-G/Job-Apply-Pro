@@ -13,9 +13,14 @@ from job_apply_pro.config import get_settings
 from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionResult,
+    BrowserEngine,
     BrowserFieldReconciliationApproval,
     BrowserFieldReconciliationPreview,
     BrowserFieldReconciliationResult,
+    BrowserProfileRetirementApproval,
+    BrowserProfileRetirementPreview,
+    BrowserProfileRetirementResult,
+    BrowserProfileSnapshot,
     BrowserSessionCreate,
     BrowserSessionSnapshot,
     BrowserSessionState,
@@ -113,6 +118,10 @@ BrowserReconciliationId = Annotated[
     str,
     Path(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"),
 ]
+BrowserProfileName = Annotated[
+    str,
+    Path(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$"),
+]
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -152,6 +161,49 @@ def list_browser_sessions(
     workflow_id: Annotated[str | None, Query(max_length=100)] = None,
 ) -> list[BrowserSessionSnapshot]:
     return service.list_sessions(workflow_id)
+
+
+@router.get("/profiles", response_model=list[BrowserProfileSnapshot])
+def list_browser_profiles(
+    service: BrowserServiceDependency,
+) -> list[BrowserProfileSnapshot]:
+    return service.list_profiles()
+
+
+@router.post(
+    "/profiles/{engine}/{profile_name}/retirement/preview",
+    response_model=BrowserProfileRetirementPreview,
+)
+def preview_browser_profile_retirement(
+    engine: BrowserEngine,
+    profile_name: BrowserProfileName,
+    service: BrowserServiceDependency,
+) -> BrowserProfileRetirementPreview:
+    try:
+        return service.preview_profile_retirement(engine, profile_name)
+    except (LookupError, BrowserPolicyError, BrowserSessionStateError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/profiles/{engine}/{profile_name}/retirement/approve",
+    response_model=BrowserProfileRetirementResult,
+)
+def approve_browser_profile_retirement(
+    engine: BrowserEngine,
+    profile_name: BrowserProfileName,
+    approval: BrowserProfileRetirementApproval,
+    service: BrowserServiceDependency,
+) -> BrowserProfileRetirementResult:
+    if approval.engine is not engine or approval.profile_name != profile_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Browser profile retirement approval does not match the route",
+        )
+    try:
+        return service.retire_profile(approval)
+    except (LookupError, BrowserPolicyError, BrowserSessionStateError) as error:
+        raise _http_error(error) from error
 
 
 @router.get("/sessions/{session_id}", response_model=BrowserSessionSnapshot)

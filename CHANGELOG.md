@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.74.0-alpha.1] - Unreleased
+
+### Reviewed Portal Profile Retirement
+
+- Inventory historical browser profiles as available, active, retired, or inconsistent without exposing local paths, cookie contents, tokens, or credentials.
+- Add a backend-derived retirement preview whose fingerprint binds the exact engine/name/origins, durable sessions, and bounded local inventory metadata.
+- Require a cancel-default native Electron confirmation and fixed backend approval phrase; the renderer cannot provide a path, fingerprint, inventory, or claimed result.
+- Serialize browser profile creation and lifecycle transitions with retirement across request-scoped services.
+- Reject active, case-aliased, conflicting, missing, reparse-point, unsupported, stale, or concurrently changed retirement targets before destructive cleanup.
+- Atomically isolate the exact derived profile directory, reverify it, remove only that quarantine, retain all durable session evidence, and block silent reuse of a retired name.
+- Keep provider logout/revocation, secure media erasure, retention policy, and administrative bulk cleanup out of scope.
+
 ## [0.73.0-alpha.1] - Unreleased
 
 ### Origin-Bound Portal Profiles

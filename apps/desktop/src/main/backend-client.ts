@@ -18,8 +18,12 @@ import type {
   AnswerLibraryInput,
   AnswerLibraryRevision,
   BrowserSessionSnapshot,
+  BrowserEngine,
   BrowserFieldReconciliationPreview,
   BrowserFieldReconciliationResult,
+  BrowserProfileRetirementPreview,
+  BrowserProfileRetirementResult,
+  BrowserProfileSnapshot,
   CandidateClaim,
   CandidateDocumentImportInput,
   CandidateDocumentImportResult,
@@ -244,6 +248,37 @@ export class BackendClient {
       ? `?workflow_id=${encodeURIComponent(workflowId)}`
       : "";
     return this.request(`/browser/sessions${query}`);
+  }
+
+  listBrowserProfiles(): Promise<BrowserProfileSnapshot[]> {
+    return this.request("/browser/profiles");
+  }
+
+  previewBrowserProfileRetirement(
+    engine: BrowserEngine,
+    profileName: string,
+  ): Promise<BrowserProfileRetirementPreview> {
+    return this.request(
+      `/browser/profiles/${encodeURIComponent(engine)}/${encodeURIComponent(profileName)}/retirement/preview`,
+      { method: "POST" },
+    );
+  }
+
+  approveBrowserProfileRetirement(
+    preview: BrowserProfileRetirementPreview,
+  ): Promise<BrowserProfileRetirementResult> {
+    return this.request(
+      `/browser/profiles/${encodeURIComponent(preview.engine)}/${encodeURIComponent(preview.profile_name)}/retirement/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          engine: preview.engine,
+          profile_name: preview.profile_name,
+          expected_review_fingerprint: preview.review_fingerprint,
+          confirmation_phrase: "RETIRE LOCAL BROWSER PROFILE",
+        }),
+      },
+    );
   }
 
   previewBrowserFieldReconciliation(

@@ -9,6 +9,7 @@ import type {
   ApplicationFieldBindingPreviewInput,
   FieldAutomationPermission,
   AnswerLibraryInput,
+  BrowserEngine,
   CandidateDocumentImportInput,
   CandidateProfileCreate,
   ChallengeAnswerCommand,
@@ -99,6 +100,21 @@ function uuid(value: unknown, name: string): string {
     )
   ) {
     throw new TypeError(`${name} must be a UUID.`);
+  }
+  return text;
+}
+
+function browserEngine(value: unknown): BrowserEngine {
+  if (!new Set(["chromium", "chrome", "msedge"]).has(String(value))) {
+    throw new TypeError("Browser profile engine is invalid.");
+  }
+  return value as BrowserEngine;
+}
+
+function browserProfileName(value: unknown): string {
+  const text = requiredText(value, "Browser profile name", 80);
+  if (!/^[A-Za-z0-9_-]+$/.test(text)) {
+    throw new TypeError("Browser profile name is invalid.");
   }
   return text;
 }
@@ -739,6 +755,36 @@ export function registerWorkbenchIpc(
       return supervisor.client.listBrowserSessions(
         requiredText(value, "Workflow id", 100),
       );
+    },
+  );
+  ipcMain.handle("workbench:list-browser-profiles", () =>
+    supervisor.client.listBrowserProfiles(),
+  );
+  ipcMain.handle(
+    "workbench:retire-browser-profile",
+    async (event, engineValue: unknown, profileValue: unknown) => {
+      const engine = browserEngine(engineValue);
+      const profileName = browserProfileName(profileValue);
+      const preview = await supervisor.client.previewBrowserProfileRetirement(
+        engine,
+        profileName,
+      );
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        type: "warning" as const,
+        title: "Retire local browser profile?",
+        message: `Remove local browser data for ${preview.profile_name}?`,
+        detail: `Engine: ${preview.engine}\nOrigins: ${preview.allowed_origins.join(", ")}\nSessions retained: ${preview.session_count}\nFiles: ${preview.file_count}\nDirectories: ${preview.directory_count}\nBytes: ${preview.total_bytes}\nReview fingerprint: ${preview.review_fingerprint}\n\nThis removes browser-managed cookies and local sign-in state. Historical session evidence remains. This cannot be undone.`,
+        buttons: ["Cancel", "Retire local profile"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveBrowserProfileRetirement(preview);
     },
   );
   ipcMain.handle(

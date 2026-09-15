@@ -42,6 +42,8 @@ const bridge: DesktopBridge = {
       throw new Error("Not implemented in this test.");
     },
     listBrowserSessions: async () => [],
+    listBrowserProfiles: async () => [],
+    retireBrowserProfile: async () => null,
     reconcileBrowserField: async () => {
       throw new Error("Not implemented in this test.");
     },

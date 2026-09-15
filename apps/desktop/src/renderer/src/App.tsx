@@ -40,6 +40,7 @@ import type {
   BackendRuntimeStatus,
   BackupManifest,
   BackupSchedule,
+  BrowserProfileSnapshot,
   BrowserSessionSnapshot,
   CandidateDocumentImportInput,
   CandidateKnowledgeSnapshot,
@@ -130,6 +131,9 @@ export function App() {
   const [browserSessions, setBrowserSessions] = useState<
     BrowserSessionSnapshot[]
   >([]);
+  const [browserProfiles, setBrowserProfiles] = useState<
+    BrowserProfileSnapshot[]
+  >([]);
   const [portalRuns, setPortalRuns] = useState<PortalRunSnapshot[]>([]);
   const [supervisedPortalRuns, setSupervisedPortalRuns] = useState<
     SupervisedPortalRunSnapshot[]
@@ -211,6 +215,9 @@ export function App() {
   const [reconciliationMessage, setReconciliationMessage] = useState<
     string | null
   >(null);
+  const [profileLifecycleMessage, setProfileLifecycleMessage] = useState<
+    string | null
+  >(null);
 
   const selected =
     workflows.find((workflow) => workflow.workflow_id === selectedId) ??
@@ -227,6 +234,7 @@ export function App() {
       const [
         items,
         sessions,
+        profiles,
         runs,
         supervisedRuns,
         challenges,
@@ -244,6 +252,7 @@ export function App() {
       ] = await Promise.all([
         window.jobApplyPro.workbench.listWorkflows(),
         window.jobApplyPro.workbench.listBrowserSessions(),
+        window.jobApplyPro.workbench.listBrowserProfiles(),
         window.jobApplyPro.workbench.listPortalRuns(),
         window.jobApplyPro.workbench.listSupervisedPortalRuns(),
         window.jobApplyPro.workbench.listChallengeSessions(),
@@ -261,6 +270,7 @@ export function App() {
       ]);
       setWorkflows(items);
       setBrowserSessions(sessions);
+      setBrowserProfiles(profiles);
       setPortalRuns(runs);
       setSupervisedPortalRuns(supervisedRuns);
       setChallengeSessions(challenges);
@@ -285,6 +295,29 @@ export function App() {
       setError(readableError(caught));
     }
   }, []);
+
+  const retirePortalProfile = useCallback(
+    async (engine: BrowserProfileSnapshot["engine"], profileName: string) => {
+      setBusy(true);
+      setError(null);
+      setProfileLifecycleMessage(null);
+      try {
+        const result = await window.jobApplyPro.workbench.retireBrowserProfile(
+          engine,
+          profileName,
+        );
+        if (result) {
+          await refreshWorkflows();
+          setProfileLifecycleMessage(result.notice);
+        }
+      } catch (caught) {
+        setError(readableError(caught));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshWorkflows],
+  );
 
   const startProviderAuthorization = useCallback(
     async (provider: IntegrationProvider) => {
@@ -1579,9 +1612,16 @@ export function App() {
         allowedOrigins: string[];
         lastUsedAt: string;
         reusable: boolean;
+        lifecycleState: BrowserProfileSnapshot["state"] | "UNKNOWN";
         signature: string;
       }
     >();
+    const lifecycle = new Map(
+      browserProfiles.map((profile) => [
+        `${profile.engine}:${profile.profile_name.toLowerCase()}`,
+        profile,
+      ]),
+    );
     for (const run of supervisedPortalRuns) {
       const session = sessions.get(run.browser_session_id);
       if (!session) continue;
@@ -1606,14 +1646,15 @@ export function App() {
         portal: run.portal,
         allowedOrigins: origins,
         lastUsedAt: run.updated_at,
-        reusable: true,
+        reusable: lifecycle.get(key)?.state === "AVAILABLE",
+        lifecycleState: lifecycle.get(key)?.state ?? "UNKNOWN",
         signature,
       });
     }
     return [...profiles.values()]
       .sort((left, right) => right.lastUsedAt.localeCompare(left.lastUsedAt))
       .slice(0, 12);
-  }, [browserSessions, supervisedPortalRuns]);
+  }, [browserProfiles, browserSessions, supervisedPortalRuns]);
   const latestSupervisedRun =
     supervisedPortalRuns.find(
       (run) => run.workflow_id === selected?.workflow_id,
@@ -1749,12 +1790,14 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Origin-Bound Portal Profiles v0.73.0-alpha.1</strong>
+              <strong>
+                Reviewed Portal Profile Retirement v0.74.0-alpha.1
+              </strong>
               <p>
-                Persistent supervised-browser profiles are now bound to one
-                exact origin set and surfaced for safe reuse. Login remains a
-                visible user action; passwords and security codes are not
-                stored.
+                Persistent portal data can now be retired only after an exact
+                backend preview and cancel-default native confirmation.
+                Historical evidence remains; passwords and security codes are
+                never stored.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3827,29 +3870,58 @@ export function App() {
               </div>
             </div>
             {savedPortalProfiles.length ? (
-              <div
-                className="adapter-health"
-                aria-label="Saved supervised portal profiles"
-                role="region"
-              >
-                {savedPortalProfiles.map((profile) => (
-                  <div
-                    className="adapter-health__item"
-                    key={`${profile.engine}:${profile.profileName.toLowerCase()}`}
-                  >
-                    <div>
-                      <strong>{profile.profileName}</strong>
-                      <small>
-                        {profile.portal.replaceAll("_", " ")} · {profile.engine}
-                      </small>
+              <>
+                {profileLifecycleMessage ? (
+                  <p className="inline-status">{profileLifecycleMessage}</p>
+                ) : null}
+                <div
+                  className="adapter-health"
+                  aria-label="Saved supervised portal profiles"
+                  role="region"
+                >
+                  {savedPortalProfiles.map((profile) => (
+                    <div
+                      className="adapter-health__item"
+                      key={`${profile.engine}:${profile.profileName.toLowerCase()}`}
+                    >
+                      <div>
+                        <strong>{profile.profileName}</strong>
+                        <small>
+                          {profile.portal.replaceAll("_", " ")} ·{" "}
+                          {profile.engine}
+                        </small>
+                      </div>
+                      <span
+                        className={`status-pill ${profile.reusable ? "status-pill--safe" : "status-pill--warning"}`}
+                      >
+                        {profile.lifecycleState === "AVAILABLE"
+                          ? "Origin bound"
+                          : profile.lifecycleState === "ACTIVE"
+                            ? "Active"
+                            : profile.lifecycleState === "RETIRED"
+                              ? "Retired"
+                              : "New name required"}
+                      </span>
+                      <small>{profile.allowedOrigins.join(", ")}</small>
+                      {profile.lifecycleState === "AVAILABLE" ? (
+                        <button
+                          className="button button--danger"
+                          disabled={busy}
+                          onClick={() =>
+                            void retirePortalProfile(
+                              profile.engine,
+                              profile.profileName,
+                            )
+                          }
+                          type="button"
+                        >
+                          Retire local profile data
+                        </button>
+                      ) : null}
                     </div>
-                    <span className="status-pill status-pill--safe">
-                      {profile.reusable ? "Origin bound" : "New name required"}
-                    </span>
-                    <small>{profile.allowedOrigins.join(", ")}</small>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             ) : null}
             <div
               className="adapter-health"

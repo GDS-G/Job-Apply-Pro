@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import stat
+from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
 from shutil import rmtree
+from threading import RLock
 from typing import Never, Protocol
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -13,11 +19,17 @@ from job_apply_pro.domain.browser import (
     BrowserActionDisposition,
     BrowserActionKind,
     BrowserActionResult,
+    BrowserEngine,
     BrowserFieldReconciliationApproval,
     BrowserFieldReconciliationPreview,
     BrowserFieldReconciliationResult,
     BrowserObservation,
     BrowserPermission,
+    BrowserProfileRetirementApproval,
+    BrowserProfileRetirementPreview,
+    BrowserProfileRetirementResult,
+    BrowserProfileSnapshot,
+    BrowserProfileState,
     BrowserSessionCreate,
     BrowserSessionRecord,
     BrowserSessionSnapshot,
@@ -80,6 +92,25 @@ _RECONCILABLE_FIELD_VERIFICATIONS = {
     VerificationKind.CHECKED_EQUALS,
 }
 _FIELD_ACTION_INTENT = "Populate one explicitly approved application field"
+_ACTIVE_PROFILE_STATES = {
+    BrowserSessionState.STARTING,
+    BrowserSessionState.ACTIVE,
+    BrowserSessionState.USER_TAKEOVER,
+}
+_PROFILE_INVENTORY_LIMIT = 200_000
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_PROFILE_LIFECYCLE_LOCK = RLock()
+
+
+def _serialize_profile_lifecycle[**P, R](
+    function: Callable[P, R],
+) -> Callable[P, R]:
+    @wraps(function)
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+        with _PROFILE_LIFECYCLE_LOCK:
+            return function(*args, **kwargs)
+
+    return wrapped
 
 
 class BrowserWorkerProtocol(Protocol):
@@ -112,6 +143,62 @@ def _public_snapshot(record: BrowserSessionRecord) -> BrowserSessionSnapshot:
     return BrowserSessionSnapshot.model_validate(record.model_dump())
 
 
+def _is_reparse_point(path: Path) -> bool:
+    details = path.lstat()
+    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & _REPARSE_POINT)
+
+
+def _profile_inventory(profile_dir: Path) -> tuple[list[tuple[str, str, int, int]], int]:
+    if not profile_dir.is_dir() or _is_reparse_point(profile_dir):
+        raise BrowserPolicyError(
+            "Browser profile storage is missing or unsafe; use a new profile name"
+        )
+    entries: list[tuple[str, str, int, int]] = []
+    total_bytes = 0
+
+    def walk(directory: Path, relative: Path) -> None:
+        nonlocal total_bytes
+        for entry in sorted(os.scandir(directory), key=lambda value: value.name.casefold()):
+            path = Path(entry.path)
+            details = entry.stat(follow_symlinks=False)
+            child_relative = relative / entry.name
+            if entry.is_symlink() or bool(
+                getattr(details, "st_file_attributes", 0) & _REPARSE_POINT
+            ):
+                raise BrowserPolicyError(
+                    "Browser profile storage contains a reparse point; manual review is required"
+                )
+            if stat.S_ISDIR(details.st_mode):
+                kind = "directory"
+                size = 0
+                modified_ns = 0
+            elif stat.S_ISREG(details.st_mode):
+                kind = "file"
+                size = details.st_size
+                modified_ns = details.st_mtime_ns
+                total_bytes += size
+            else:
+                raise BrowserPolicyError(
+                    "Browser profile storage contains an unsupported filesystem entry"
+                )
+            entries.append((child_relative.as_posix(), kind, size, modified_ns))
+            if len(entries) > _PROFILE_INVENTORY_LIMIT:
+                raise BrowserPolicyError(
+                    "Browser profile inventory is too large for reviewed retirement"
+                )
+            if kind == "directory":
+                walk(path, child_relative)
+
+    entries.append((".", "directory", 0, 0))
+    walk(profile_dir, Path())
+    return entries, total_bytes
+
+
+def _inventory_fingerprint(entries: list[tuple[str, str, int, int]]) -> str:
+    payload = json.dumps(entries, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 class BrowserRuntimeService:
     def __init__(
         self,
@@ -138,6 +225,7 @@ class BrowserRuntimeService:
         self._default_headless = default_headless
         self._automation_enabled = automation_enabled
 
+    @_serialize_profile_lifecycle
     def create_session(self, command: BrowserSessionCreate) -> BrowserSessionSnapshot:
         if self._workbench.get_snapshot(command.workflow_id) is None:
             raise LookupError(f"Workflow {command.workflow_id} was not found")
@@ -152,6 +240,10 @@ class BrowserRuntimeService:
             raise BrowserPolicyError(
                 "External browser origins remain disabled; use a loopback fixture URL"
             )
+        engine_root = self._browser_data_dir / command.engine.value
+        profile_dir = engine_root / command.profile_name
+        if os.path.lexists(engine_root) and _is_reparse_point(engine_root):
+            raise BrowserPolicyError("Browser engine storage is a reparse point")
         profile_history = [
             existing
             for existing in self._repository.list_snapshots()
@@ -159,11 +251,7 @@ class BrowserRuntimeService:
             and existing.engine is command.engine
         ]
         for existing in profile_history:
-            if existing.state in {
-                BrowserSessionState.STARTING,
-                BrowserSessionState.ACTIVE,
-                BrowserSessionState.USER_TAKEOVER,
-            }:
+            if existing.state in _ACTIVE_PROFILE_STATES:
                 raise BrowserSessionStateError(
                     f"Browser profile {command.profile_name} is already in use"
                 )
@@ -183,11 +271,18 @@ class BrowserRuntimeService:
                 "Browser profile is already bound to another exact origin set; "
                 "use a new profile name"
             )
+        if profile_history and (not profile_dir.is_dir() or _is_reparse_point(profile_dir)):
+            raise BrowserPolicyError(
+                "Browser profile storage was retired, removed, or made unsafe; "
+                "use a new profile name"
+            )
+        if not profile_history and os.path.lexists(profile_dir):
+            raise BrowserPolicyError(
+                "Untracked browser profile storage already exists; use a new profile name"
+            )
         session_id = str(uuid4())
         now = utc_now()
-        profile_dir = (
-            self._browser_data_dir / command.engine.value / command.profile_name
-        ).resolve()
+        profile_dir = profile_dir.resolve()
         artifact_dir = (self._browser_artifact_dir / session_id).resolve()
         profile_dir.mkdir(parents=True, exist_ok=True)
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -240,6 +335,157 @@ class BrowserRuntimeService:
 
     def list_sessions(self, workflow_id: str | None = None) -> list[BrowserSessionSnapshot]:
         return self._repository.list_snapshots(workflow_id)
+
+    @_serialize_profile_lifecycle
+    def list_profiles(self) -> list[BrowserProfileSnapshot]:
+        grouped: dict[tuple[BrowserEngine, str], list[BrowserSessionSnapshot]] = {}
+        for snapshot in self._repository.list_snapshots():
+            grouped.setdefault((snapshot.engine, snapshot.profile_name.casefold()), []).append(
+                snapshot
+            )
+        profiles: list[BrowserProfileSnapshot] = []
+        for (engine, _), history in grouped.items():
+            latest = max(history, key=lambda item: item.updated_at)
+            spellings = {item.profile_name for item in history}
+            origin_sets = {tuple(sorted(item.allowed_origins)) for item in history}
+            engine_root = self._browser_data_dir / engine.value
+            profile_dir = engine_root / latest.profile_name
+            storage_unsafe = (os.path.lexists(engine_root) and _is_reparse_point(engine_root)) or (
+                os.path.lexists(profile_dir) and _is_reparse_point(profile_dir)
+            )
+            if len(spellings) > 1 or len(origin_sets) > 1 or storage_unsafe:
+                profile_state = BrowserProfileState.INCONSISTENT
+            elif any(item.state in _ACTIVE_PROFILE_STATES for item in history):
+                profile_state = BrowserProfileState.ACTIVE
+            elif not profile_dir.is_dir():
+                profile_state = BrowserProfileState.RETIRED
+            else:
+                profile_state = BrowserProfileState.AVAILABLE
+            profiles.append(
+                BrowserProfileSnapshot(
+                    engine=engine,
+                    profile_name=latest.profile_name,
+                    state=profile_state,
+                    allowed_origins=sorted(latest.allowed_origins),
+                    session_count=len(history),
+                    last_used_at=latest.updated_at,
+                )
+            )
+        return sorted(profiles, key=lambda item: item.last_used_at, reverse=True)
+
+    @_serialize_profile_lifecycle
+    def preview_profile_retirement(
+        self, engine: BrowserEngine, profile_name: str
+    ) -> BrowserProfileRetirementPreview:
+        history = [
+            snapshot
+            for snapshot in self._repository.list_snapshots()
+            if snapshot.engine is engine
+            and snapshot.profile_name.casefold() == profile_name.casefold()
+        ]
+        if not history:
+            raise LookupError(f"Browser profile {profile_name} was not found")
+        if any(snapshot.profile_name != profile_name for snapshot in history):
+            raise BrowserPolicyError(
+                "Browser profile names are case-insensitive; use the exact saved spelling"
+            )
+        if any(snapshot.state in _ACTIVE_PROFILE_STATES for snapshot in history):
+            raise BrowserSessionStateError(f"Browser profile {profile_name} is still active")
+        origin_sets = {tuple(sorted(snapshot.allowed_origins)) for snapshot in history}
+        if len(origin_sets) != 1:
+            raise BrowserPolicyError(
+                "Browser profile history is inconsistent; manual review is required"
+            )
+        engine_root = self._browser_data_dir / engine.value
+        if not engine_root.is_dir() or _is_reparse_point(engine_root):
+            raise BrowserPolicyError(
+                "Browser engine storage is missing or unsafe; manual review is required"
+            )
+        profile_dir = engine_root / profile_name
+        inventory, total_bytes = _profile_inventory(profile_dir)
+        inventory_fingerprint = _inventory_fingerprint(inventory)
+        latest = max(history, key=lambda item: item.updated_at)
+        file_count = sum(1 for _, kind, _, _ in inventory if kind == "file")
+        directory_count = sum(1 for _, kind, _, _ in inventory if kind == "directory")
+        evidence = {
+            "action": "RETIRE_LOCAL_BROWSER_PROFILE",
+            "engine": engine.value,
+            "profile_name": profile_name,
+            "allowed_origins": list(next(iter(origin_sets))),
+            "sessions": [
+                {
+                    "id": snapshot.id,
+                    "state": snapshot.state.value,
+                    "updated_at": snapshot.updated_at.isoformat(),
+                }
+                for snapshot in sorted(history, key=lambda item: item.id)
+            ],
+            "inventory_fingerprint": inventory_fingerprint,
+            "file_count": file_count,
+            "directory_count": directory_count,
+            "total_bytes": total_bytes,
+        }
+        review_fingerprint = hashlib.sha256(
+            json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return BrowserProfileRetirementPreview(
+            engine=engine,
+            profile_name=profile_name,
+            state=BrowserProfileState.AVAILABLE,
+            allowed_origins=list(next(iter(origin_sets))),
+            session_count=len(history),
+            last_used_at=latest.updated_at,
+            file_count=file_count,
+            directory_count=directory_count,
+            total_bytes=total_bytes,
+            review_fingerprint=review_fingerprint,
+            notice=(
+                "Retirement removes only this local browser profile directory. "
+                "Historical session evidence remains and the name cannot be silently reused."
+            ),
+        )
+
+    @_serialize_profile_lifecycle
+    def retire_profile(
+        self, approval: BrowserProfileRetirementApproval
+    ) -> BrowserProfileRetirementResult:
+        preview = self.preview_profile_retirement(approval.engine, approval.profile_name)
+        if preview.review_fingerprint != approval.expected_review_fingerprint:
+            raise BrowserSessionStateError(
+                "Browser profile retirement preview is stale; review it again"
+            )
+        profile_dir = self._browser_data_dir / approval.engine.value / approval.profile_name
+        if _is_reparse_point(profile_dir.parent):
+            raise BrowserSessionStateError(
+                "Browser engine storage changed during retirement; review it again"
+            )
+        inventory, _ = _profile_inventory(profile_dir)
+        expected_inventory = _inventory_fingerprint(inventory)
+        quarantine = profile_dir.parent / f".retiring-{uuid4()}"
+        profile_dir.rename(quarantine)
+        try:
+            quarantined_inventory, _ = _profile_inventory(quarantine)
+            if _inventory_fingerprint(quarantined_inventory) != expected_inventory:
+                quarantine.rename(profile_dir)
+                raise BrowserSessionStateError(
+                    "Browser profile changed during retirement; review it again"
+                )
+            rmtree(quarantine)
+        except BrowserSessionStateError:
+            raise
+        except Exception as error:
+            raise BrowserSessionStateError(
+                "Browser profile was isolated but cleanup did not finish; manual review is required"
+            ) from error
+        return BrowserProfileRetirementResult(
+            engine=approval.engine,
+            profile_name=approval.profile_name,
+            removed=True,
+            retired_at=utc_now(),
+            notice=(
+                "Local browser profile data was removed. Historical session evidence was retained."
+            ),
+        )
 
     def observe(self, session_id: str) -> BrowserSessionSnapshot:
         record = self._active_record(session_id, allow_takeover=True)
@@ -445,12 +691,14 @@ class BrowserRuntimeService:
             )
         return action_result
 
+    @_serialize_profile_lifecycle
     def takeover(self, session_id: str) -> BrowserSessionSnapshot:
         self._active_record(session_id)
         return _public_snapshot(
             self._repository.set_state(session_id, BrowserSessionState.USER_TAKEOVER)
         )
 
+    @_serialize_profile_lifecycle
     def resume(self, session_id: str) -> BrowserSessionSnapshot:
         record = self._record(session_id)
         if record.state is not BrowserSessionState.USER_TAKEOVER:
@@ -465,6 +713,7 @@ class BrowserRuntimeService:
         self._save_checkpoint(saved, observation, pending_action=None)
         return _public_snapshot(saved)
 
+    @_serialize_profile_lifecycle
     def restart(self, session_id: str) -> BrowserSessionSnapshot:
         self._active_record(session_id, allow_takeover=True)
         self._ensure_no_unresolved_effect(session_id)
@@ -477,6 +726,7 @@ class BrowserRuntimeService:
         self._save_checkpoint(saved, observation, pending_action=None)
         return _public_snapshot(saved)
 
+    @_serialize_profile_lifecycle
     def stop(self, session_id: str) -> BrowserSessionSnapshot:
         record = self._active_record(session_id, allow_takeover=True)
         try:

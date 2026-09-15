@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   BrowserFieldReconciliationPreview,
   BrowserFieldReconciliationResult,
+  BrowserProfileRetirementPreview,
+  BrowserProfileRetirementResult,
 } from "@job-apply-pro/contracts";
 
 import { BackendClient } from "./backend-client.js";
@@ -58,6 +60,26 @@ const result: BrowserFieldReconciliationResult = {
   reconciled_at: "2026-09-15T18:00:00+00:00",
   notice:
     "The verified field outcome was recorded without repeating the action.",
+};
+const retirementPreview: BrowserProfileRetirementPreview = {
+  engine: "msedge",
+  profile_name: "workday-tenant-a",
+  state: "AVAILABLE",
+  allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
+  session_count: 2,
+  last_used_at: "2026-09-15T18:00:00+00:00",
+  file_count: 12,
+  directory_count: 4,
+  total_bytes: 4096,
+  review_fingerprint: "b".repeat(64),
+  notice: "Review local browser profile retirement.",
+};
+const retirementResult: BrowserProfileRetirementResult = {
+  engine: "msedge",
+  profile_name: "workday-tenant-a",
+  removed: true,
+  retired_at: "2026-09-15T18:05:00+00:00",
+  notice: "Local browser profile data was removed.",
 };
 
 afterEach(() => {
@@ -119,6 +141,52 @@ describe("browser field reconciliation backend client", () => {
       },
     );
   });
+
+  it("lists and reviews browser profiles through authenticated routes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json([retirementPreview]))
+      .mockResolvedValueOnce(Response.json(retirementPreview));
+
+    await expect(client.listBrowserProfiles()).resolves.toEqual([
+      retirementPreview,
+    ]);
+    await expect(
+      client.previewBrowserProfileRetirement("msedge", "workday-tenant-a"),
+    ).resolves.toEqual(retirementPreview);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://127.0.0.1:8765/browser/profiles",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "http://127.0.0.1:8765/browser/profiles/msedge/workday-tenant-a/retirement/preview",
+    );
+  });
+
+  it("approves profile retirement only with the backend preview", async () => {
+    fetchMock.mockResolvedValue(Response.json(retirementResult));
+
+    await expect(
+      client.approveBrowserProfileRetirement(retirementPreview),
+    ).resolves.toEqual(retirementResult);
+
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      "http://127.0.0.1:8765/browser/profiles/msedge/workday-tenant-a/retirement/approve",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          engine: "msedge",
+          profile_name: "workday-tenant-a",
+          expected_review_fingerprint: "b".repeat(64),
+          confirmation_phrase: "RETIRE LOCAL BROWSER PROFILE",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Job-Apply-Pro-Token": "test-api-token",
+        },
+        signal: expect.any(AbortSignal),
+      },
+    );
+  });
 });
 
 describe("browser field reconciliation IPC boundary", () => {
@@ -127,6 +195,11 @@ describe("browser field reconciliation IPC boundary", () => {
       vi.fn<BackendClient["previewBrowserFieldReconciliation"]>(),
     approveBrowserFieldReconciliation:
       vi.fn<BackendClient["approveBrowserFieldReconciliation"]>(),
+    listBrowserProfiles: vi.fn<BackendClient["listBrowserProfiles"]>(),
+    previewBrowserProfileRetirement:
+      vi.fn<BackendClient["previewBrowserProfileRetirement"]>(),
+    approveBrowserProfileRetirement:
+      vi.fn<BackendClient["approveBrowserProfileRetirement"]>(),
   };
   const supervisor = { client } as unknown as BackendSupervisor;
   const updates = {} as UpdateManager;
@@ -147,6 +220,9 @@ describe("browser field reconciliation IPC boundary", () => {
     showMessageBox.mockResolvedValue({ response: 0 });
     client.previewBrowserFieldReconciliation.mockResolvedValue(preview);
     client.approveBrowserFieldReconciliation.mockResolvedValue(result);
+    client.listBrowserProfiles.mockResolvedValue([retirementPreview]);
+    client.previewBrowserProfileRetirement.mockResolvedValue(retirementPreview);
+    client.approveBrowserProfileRetirement.mockResolvedValue(retirementResult);
     registerWorkbenchIpc(supervisor, updates, notifications);
   });
 
@@ -190,5 +266,54 @@ describe("browser field reconciliation IPC boundary", () => {
     expect(
       client.approveBrowserFieldReconciliation,
     ).toHaveBeenCalledExactlyOnceWith(preview);
+  });
+
+  it("validates profile retirement input before preview or dialog", async () => {
+    const listener = handlers.get("workbench:retire-browser-profile");
+    if (!listener) throw new Error("Profile retirement IPC was not registered");
+
+    await expect(
+      listener({ sender } as IpcMainInvokeEvent, "firefox", "profile"),
+    ).rejects.toThrow("Browser profile engine is invalid.");
+    await expect(
+      listener({ sender } as IpcMainInvokeEvent, "msedge", "../profile"),
+    ).rejects.toThrow("Browser profile name is invalid.");
+
+    expect(client.previewBrowserProfileRetirement).not.toHaveBeenCalled();
+    expect(showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it("keeps profile data when the cancel-default warning is canceled", async () => {
+    const listener = handlers.get("workbench:retire-browser-profile");
+    if (!listener) throw new Error("Profile retirement IPC was not registered");
+
+    await expect(
+      listener({ sender } as IpcMainInvokeEvent, "msedge", "workday-tenant-a"),
+    ).resolves.toBeNull();
+
+    expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+      buttons: ["Cancel", "Retire local profile"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    expect(client.approveBrowserProfileRetirement).not.toHaveBeenCalled();
+  });
+
+  it("retires only the immutable preview after explicit native approval", async () => {
+    const listener = handlers.get("workbench:retire-browser-profile");
+    if (!listener) throw new Error("Profile retirement IPC was not registered");
+    showMessageBox.mockResolvedValue({ response: 1 });
+
+    await expect(
+      listener({ sender } as IpcMainInvokeEvent, "msedge", "workday-tenant-a"),
+    ).resolves.toEqual(retirementResult);
+
+    expect(
+      client.previewBrowserProfileRetirement,
+    ).toHaveBeenCalledExactlyOnceWith("msedge", "workday-tenant-a");
+    expect(
+      client.approveBrowserProfileRetirement,
+    ).toHaveBeenCalledExactlyOnceWith(retirementPreview);
   });
 });
