@@ -1169,20 +1169,41 @@ export function registerWorkbenchIpc(
   );
   ipcMain.handle(
     "portals:submit-supervised",
-    async (event, runIdValue: unknown, fingerprintValue: unknown) => {
+    async (
+      event,
+      runIdValue: unknown,
+      fingerprintValue: unknown,
+      greenhouseFingerprintValue: unknown,
+    ) => {
       const runId = requiredText(runIdValue, "Supervised portal run id", 100);
       const fingerprint = requiredText(
         fingerprintValue,
         "Review fingerprint",
         200,
       );
+      const greenhouseFingerprint =
+        greenhouseFingerprintValue == null
+          ? null
+          : requiredText(
+              greenhouseFingerprintValue,
+              "Greenhouse form review fingerprint",
+              64,
+            );
+      if (
+        greenhouseFingerprint !== null &&
+        !/^[a-f0-9]{64}$/.test(greenhouseFingerprint)
+      )
+        throw new TypeError("Greenhouse form review fingerprint is invalid.");
       const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
       const options = {
         type: "warning" as const,
         title: "Submit this exact application?",
         message: "This will activate the one reviewed final-submit control.",
         detail:
-          "Job Apply Pro will refuse if the page fingerprint changed, the control is ambiguous, or local submission policy is disabled.",
+          "Job Apply Pro will refuse if the page fingerprint changed, the control is ambiguous, or local submission policy is disabled." +
+          (greenhouseFingerprint
+            ? " Greenhouse also requires the current form review and exactly one provider-classified final-submit control. Success still requires identifier-backed confirmation."
+            : ""),
         buttons: ["Cancel", "Submit exact application"],
         defaultId: 0,
         cancelId: 0,
@@ -1192,7 +1213,11 @@ export function registerWorkbenchIpc(
         ? await dialog.showMessageBox(owner, options)
         : await dialog.showMessageBox(options);
       if (confirmation.response !== 1) return null;
-      return supervisor.client.submitSupervisedPortal(runId, fingerprint);
+      return supervisor.client.submitSupervisedPortal(
+        runId,
+        fingerprint,
+        greenhouseFingerprint,
+      );
     },
   );
   ipcMain.handle("portals:stop-supervised", (_event, runIdValue: unknown) =>

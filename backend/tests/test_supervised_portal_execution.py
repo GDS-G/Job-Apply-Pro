@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, ValidationError
 from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.browser import (
@@ -270,6 +270,16 @@ def test_supervised_run_captures_manual_steps_and_exact_final_submission(
                 confirmation_phrase="SUBMIT APPLICATION",
             ),
         )
+    with pytest.raises(SupervisedPortalPolicyError, match="another portal"):
+        service.submit(
+            ready.id,
+            SupervisedPortalSubmissionApproval(
+                review_fingerprint=ready.page_fingerprint,
+                greenhouse_form_review_fingerprint="a" * 64,
+                confirmation_phrase="SUBMIT APPLICATION",
+            ),
+        )
+    assert browser.executed == []
 
     completed = service.submit(
         ready.id,
@@ -482,6 +492,249 @@ def test_reviewed_greenhouse_capture_exposes_current_form_contract(
     assert captured.greenhouse_form.review_field_count == 1
     assert captured.greenhouse_form.navigation_control_key == "next"
     assert not captured.greenhouse_form.ready_to_advance
+
+
+def test_reviewed_greenhouse_submission_requires_current_contract_and_identifier(
+    session: Session,
+) -> None:
+    review = _observation(
+        page_type="SUBMISSION_REVIEW",
+        fingerprint="greenhouse-review",
+        visible_text="Greenhouse review application Submit application",
+        url="https://boards.greenhouse.io/example/jobs/1#review",
+        controls=[
+            {
+                "index": 0,
+                "control_key": "submit",
+                "tag": "button",
+                "type": "submit",
+                "text": "Submit application",
+                "visible": True,
+            }
+        ],
+    )
+    confirmation = _observation(
+        page_type="CONFIRMATION",
+        fingerprint="greenhouse-confirmation",
+        visible_text="Greenhouse application received confirmation: GH-TEST-1",
+        url="https://boards.greenhouse.io/example/jobs/1/confirmation",
+    )
+    browser = _Browser(
+        review,
+        action_observations=[confirmation],
+        expected_start_prefix="https://boards.greenhouse.io/",
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        browser,
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=True,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    run = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl(str(review.url)),
+            profile_name="greenhouse-fixture",
+        ),
+        "f" * 64,
+    )
+    assert run.state is SupervisedPortalRunState.READY_TO_SUBMIT
+    assert run.greenhouse_form is not None
+    assert run.greenhouse_form.controls[0].action is GreenhouseFormAction.FINAL_SUBMISSION_GATE
+
+    with pytest.raises(SupervisedPortalPolicyError, match="current form review"):
+        service.submit(
+            run.id,
+            SupervisedPortalSubmissionApproval(
+                review_fingerprint=run.page_fingerprint,
+                confirmation_phrase="SUBMIT APPLICATION",
+            ),
+        )
+    with pytest.raises(SupervisedPortalStateError, match="form review changed"):
+        service.submit(
+            run.id,
+            SupervisedPortalSubmissionApproval(
+                review_fingerprint=run.page_fingerprint,
+                greenhouse_form_review_fingerprint="0" * 64,
+                confirmation_phrase="SUBMIT APPLICATION",
+            ),
+        )
+    assert browser.executed == []
+
+    completed = service.submit(
+        run.id,
+        SupervisedPortalSubmissionApproval(
+            review_fingerprint=run.page_fingerprint,
+            greenhouse_form_review_fingerprint=run.greenhouse_form.review_fingerprint,
+            confirmation_phrase="SUBMIT APPLICATION",
+        ),
+    )
+    assert completed.state is SupervisedPortalRunState.SUBMISSION_CONFIRMED
+    assert completed.disposition is SupervisedPortalDisposition.CONFIRMATION_VERIFIED
+    assert completed.evidence[-1].verified
+    assert len(browser.executed) == 1
+    assert browser.executed[0].locator == review.controls[0].locator
+    assert browser.executed[0].preconditions[0].kind.value == "LOCATOR_VISIBLE"
+
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        SupervisedPortalSubmissionApproval.model_validate(
+            {
+                "review_fingerprint": run.page_fingerprint,
+                "greenhouse_form_review_fingerprint": "a" * 64,
+                "confirmation_phrase": "SUBMIT APPLICATION",
+                "url": "https://untrusted.invalid",
+            }
+        )
+
+
+def test_reviewed_greenhouse_submission_rejects_ambiguous_contract(
+    session: Session,
+) -> None:
+    review = _observation(
+        page_type="SUBMISSION_REVIEW",
+        fingerprint="greenhouse-ambiguous-review",
+        visible_text="Greenhouse review application Submit application",
+        url="https://boards.greenhouse.io/example/jobs/1#review",
+        controls=[
+            {
+                "index": index,
+                "control_key": f"submit-{index}",
+                "tag": "button",
+                "type": "submit",
+                "text": "Submit application",
+                "visible": True,
+            }
+            for index in range(2)
+        ],
+    )
+    browser = _Browser(review, expected_start_prefix="https://boards.greenhouse.io/")
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        browser,
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=True,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    run = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl(str(review.url)),
+            profile_name="greenhouse-fixture",
+        ),
+        "1" * 64,
+    )
+    assert run.greenhouse_form is not None
+    with pytest.raises(SupervisedPortalPolicyError, match="exactly one"):
+        service.submit(
+            run.id,
+            SupervisedPortalSubmissionApproval(
+                review_fingerprint=run.page_fingerprint,
+                greenhouse_form_review_fingerprint=run.greenhouse_form.review_fingerprint,
+                confirmation_phrase="SUBMIT APPLICATION",
+            ),
+        )
+    assert browser.executed == []
+
+
+@pytest.mark.parametrize(
+    ("confirmation_url", "confirmation_text"),
+    [
+        (
+            "https://boards.greenhouse.io/example/jobs/1/confirmation",
+            "Greenhouse application received",
+        ),
+        (
+            "https://job-boards.greenhouse.io/example/jobs/1/confirmation",
+            "Greenhouse application received confirmation: GH-FOREIGN-1",
+        ),
+    ],
+    ids=["identifier-missing", "origin-changed"],
+)
+def test_reviewed_greenhouse_submission_preserves_uncertainty_after_click(
+    session: Session,
+    confirmation_url: str,
+    confirmation_text: str,
+) -> None:
+    review = _observation(
+        page_type="SUBMISSION_REVIEW",
+        fingerprint="greenhouse-uncertain-review",
+        visible_text="Greenhouse review application Submit application",
+        url="https://boards.greenhouse.io/example/jobs/1#review",
+        controls=[
+            {
+                "index": 0,
+                "control_key": "submit",
+                "tag": "button",
+                "type": "submit",
+                "text": "Submit application",
+                "visible": True,
+            }
+        ],
+    )
+    confirmation = _observation(
+        page_type="CONFIRMATION",
+        fingerprint="greenhouse-uncertain-confirmation",
+        visible_text=confirmation_text,
+        url=confirmation_url,
+    )
+    browser = _Browser(
+        review,
+        action_observations=[confirmation],
+        expected_start_prefix="https://boards.greenhouse.io/",
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        browser,
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=True,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    run = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl(str(review.url)),
+            profile_name="greenhouse-fixture",
+        ),
+        "2" * 64,
+    )
+    assert run.greenhouse_form is not None
+
+    uncertain = service.submit(
+        run.id,
+        SupervisedPortalSubmissionApproval(
+            review_fingerprint=run.page_fingerprint,
+            greenhouse_form_review_fingerprint=run.greenhouse_form.review_fingerprint,
+            confirmation_phrase="SUBMIT APPLICATION",
+        ),
+    )
+
+    assert uncertain.state is SupervisedPortalRunState.SUBMISSION_UNCERTAIN
+    assert uncertain.disposition is SupervisedPortalDisposition.CONFIRMATION_UNCERTAIN
+    assert uncertain.intervention_reasons == [PortalInterventionReason.USER_TAKEOVER]
+    assert not uncertain.evidence[-1].verified
+    assert browser.state is BrowserSessionState.USER_TAKEOVER
+    assert len(browser.executed) == 1
+    with pytest.raises(SupervisedPortalStateError, match="not ready"):
+        service.submit(
+            run.id,
+            SupervisedPortalSubmissionApproval(
+                review_fingerprint=uncertain.page_fingerprint,
+                greenhouse_form_review_fingerprint=(
+                    uncertain.greenhouse_form.review_fingerprint
+                    if uncertain.greenhouse_form is not None
+                    else "0" * 64
+                ),
+                confirmation_phrase="SUBMIT APPLICATION",
+            ),
+        )
+    assert len(browser.executed) == 1
 
 
 def test_reviewed_greenhouse_upload_uses_exact_document_and_postcondition(

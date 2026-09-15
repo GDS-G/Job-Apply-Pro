@@ -206,8 +206,17 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
         runId,
         priorPageFingerprint,
       ),
-    submitSupervisedPortal: (runId: string, reviewFingerprint: string) =>
-      ipcRenderer.invoke("portals:submit-supervised", runId, reviewFingerprint),
+    submitSupervisedPortal: (
+      runId: string,
+      reviewFingerprint: string,
+      greenhouseFormReviewFingerprint?: string | null,
+    ) =>
+      ipcRenderer.invoke(
+        "portals:submit-supervised",
+        runId,
+        reviewFingerprint,
+        greenhouseFormReviewFingerprint ?? null,
+      ),
     stopSupervisedPortal: (runId: string) =>
       ipcRenderer.invoke("portals:stop-supervised", runId),
     listChallengeSessions: (workflowId?: string) =>

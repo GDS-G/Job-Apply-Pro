@@ -1418,6 +1418,9 @@ export function App() {
       const updated = await window.jobApplyPro.workbench.submitSupervisedPortal(
         run.id,
         run.page_fingerprint,
+        run.portal === "GREENHOUSE"
+          ? (run.greenhouse_form?.review_fingerprint ?? null)
+          : null,
       );
       if (updated) {
         setSupervisedPortalRuns((current) =>
@@ -1665,13 +1668,14 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Reviewed Greenhouse Native Fields v0.68.0-alpha.1</strong>
+              <strong>
+                Reviewed Greenhouse Final Submission v0.69.0-alpha.1
+              </strong>
               <p>
-                One exact reviewed Greenhouse native field can now compose with
-                the current form contract, selected-resume upload, and ready
-                one-stage navigation. Every value action remains separately
-                confirmed; custom widgets, legal controls, and final submission
-                require manual or later governed paths.
+                One exact current Greenhouse final-submit control can now use
+                the separate default-off native review and identifier-backed
+                confirmation boundary. Navigation, fields, upload, manual
+                controls, and submission remain independently authorized.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3613,7 +3617,12 @@ export function App() {
                         >
                           <RefreshCw size={14} /> Capture current step
                         </button>
-                        {latestSupervisedRun.state === "READY_TO_SUBMIT" ? (
+                        {latestSupervisedRun.state === "READY_TO_SUBMIT" &&
+                        (latestSupervisedRun.portal !== "GREENHOUSE" ||
+                          latestSupervisedRun.greenhouse_form?.controls.filter(
+                            (control) =>
+                              control.action === "FINAL_SUBMISSION_GATE",
+                          ).length === 1) ? (
                           <button
                             className="button button--primary"
                             disabled={busy}

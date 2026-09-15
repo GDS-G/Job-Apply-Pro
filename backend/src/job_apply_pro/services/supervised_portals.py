@@ -27,6 +27,7 @@ from job_apply_pro.domain.browser import (
 )
 from job_apply_pro.domain.greenhouse_form import (
     GreenhouseFormAction,
+    GreenhouseFormStage,
     GreenhousePostconditionEvidence,
 )
 from job_apply_pro.domain.knowledge import CandidateDocumentVersionRecord
@@ -414,13 +415,38 @@ class SupervisedPortalService:
             )
         try:
             self._require_allowed_observation(run.allowed_origins, observation.origin)
-            action = self._submission_action(observation.controls)
+            exact_greenhouse_control_key = None
+            if run.portal is PortalKind.GREENHOUSE:
+                if approval.greenhouse_form_review_fingerprint is None:
+                    raise SupervisedPortalPolicyError(
+                        "Greenhouse final submission requires the current form review"
+                    )
+                exact_greenhouse_control_key = self._greenhouse_submission_control(
+                    observation,
+                    approval.greenhouse_form_review_fingerprint,
+                ).control_key
+            elif approval.greenhouse_form_review_fingerprint is not None:
+                raise SupervisedPortalPolicyError(
+                    "Greenhouse form review is invalid for another portal"
+                )
+            action = self._submission_action(
+                observation.controls,
+                exact_control_key=exact_greenhouse_control_key,
+            )
             result = self._browser.execute_action(run.browser_session_id, action)
         except Exception:
             self._browser.takeover(run.browser_session_id)
             raise
         after = result.observation
-        match, state, disposition, reasons = self._classify(run.portal, after)
+        try:
+            self._require_allowed_observation(run.allowed_origins, after.origin)
+        except SupervisedPortalPolicyError:
+            match = None
+            state = SupervisedPortalRunState.SUBMISSION_UNCERTAIN
+            disposition = SupervisedPortalDisposition.CONFIRMATION_UNCERTAIN
+            reasons = [PortalInterventionReason.USER_TAKEOVER]
+        else:
+            match, state, disposition, reasons = self._classify(run.portal, after)
         if not result.verified or state is not SupervisedPortalRunState.SUBMISSION_CONFIRMED:
             state = SupervisedPortalRunState.SUBMISSION_UNCERTAIN
             disposition = SupervisedPortalDisposition.CONFIRMATION_UNCERTAIN
@@ -451,6 +477,41 @@ class SupervisedPortalService:
             verified=result.verified and state is SupervisedPortalRunState.SUBMISSION_CONFIRMED,
         )
         return self.get(run_id)
+
+    def _greenhouse_submission_control(
+        self,
+        observation: BrowserObservation,
+        form_review_fingerprint: str,
+    ) -> BrowserObservedControl:
+        try:
+            assessment = self._greenhouse_forms.assess(observation)
+        except GreenhouseFormContractError as error:
+            raise SupervisedPortalStateError(
+                "Current page is not a recognized Greenhouse submission review"
+            ) from error
+        if assessment.review_fingerprint != form_review_fingerprint:
+            raise SupervisedPortalStateError(
+                "Greenhouse form review changed; capture and review again"
+            )
+        contracts = [
+            item
+            for item in assessment.controls
+            if item.action is GreenhouseFormAction.FINAL_SUBMISSION_GATE
+        ]
+        if assessment.stage is not GreenhouseFormStage.REVIEW or len(contracts) != 1:
+            raise SupervisedPortalPolicyError(
+                "Greenhouse final submission requires exactly one reviewed submit control"
+            )
+        observed = [
+            item
+            for item in observation.controls
+            if item.control_key == contracts[0].control_key and item.locator is not None
+        ]
+        if len(observed) != 1:
+            raise SupervisedPortalPolicyError(
+                "The reviewed Greenhouse submit control is missing, ambiguous, or unlocatable"
+            )
+        return observed[0]
 
     def stop(self, run_id: str) -> SupervisedPortalRunSnapshot:
         run = self._active(run_id)
@@ -707,9 +768,37 @@ class SupervisedPortalService:
         return match.group(1) if match else None
 
     @staticmethod
-    def _submission_action(controls: Iterable[BrowserObservedControl]) -> BrowserAction:
+    def _submission_action(
+        controls: Iterable[BrowserObservedControl],
+        *,
+        exact_control_key: str | None = None,
+    ) -> BrowserAction:
+        observed_controls = list(controls)
+        if exact_control_key is not None:
+            exact = [
+                control
+                for control in observed_controls
+                if control.control_key == exact_control_key and control.locator is not None
+            ]
+            if len(exact) != 1:
+                raise SupervisedPortalPolicyError(
+                    "Final submission requires the exact reviewed submit control"
+                )
+            return BrowserAction(
+                kind=BrowserActionKind.CLICK,
+                locator=exact[0].locator,
+                preconditions=[
+                    BrowserVerification(
+                        kind=VerificationKind.LOCATOR_VISIBLE,
+                        locator=exact[0].locator,
+                    )
+                ],
+                intended_result="Submit the exact reviewed application",
+                permission=BrowserPermission.ELEVATED,
+                confirmation=ConfirmationState.CONFIRMED,
+            )
         candidates: list[str] = []
-        for control in controls:
+        for control in observed_controls:
             tag = control.tag.casefold()
             control_type = control.input_type.casefold()
             if tag != "button" and control_type != "submit":

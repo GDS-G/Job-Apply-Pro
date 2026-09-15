@@ -348,6 +348,75 @@ describe("App", () => {
     );
   });
 
+  it("submits a Greenhouse review only with the current provider contract", async () => {
+    const run: SupervisedPortalRunSnapshot = {
+      id: "greenhouse-submit-run",
+      portal: "GREENHOUSE",
+      workflow_id: discoveredWorkflow.workflow_id,
+      browser_session_id: "greenhouse-submit-browser",
+      state: "READY_TO_SUBMIT",
+      current_url: "https://job-boards.greenhouse.io/synthetic/jobs/100#review",
+      allowed_origins: ["https://job-boards.greenhouse.io"],
+      page_fingerprint: "greenhouse-submit-page",
+      disposition: "FINAL_CONFIRMATION_REQUIRED",
+      intervention_reasons: ["FINAL_SUBMISSION"],
+      evidence: [],
+      observed_controls: [],
+      greenhouse_form: {
+        policy_version: "greenhouse-form-execution-contract/1",
+        page_fingerprint: "greenhouse-submit-page",
+        page_type: "SUBMISSION_REVIEW",
+        stage: "REVIEW",
+        required_control_count: 0,
+        satisfied_required_count: 0,
+        review_field_count: 0,
+        upload_review_count: 0,
+        manual_intervention_count: 0,
+        navigation_control_key: null,
+        navigation_label: null,
+        ready_to_advance: false,
+        controls: [
+          {
+            control_key: "submit",
+            label: "Submit application",
+            control_kind: "BUTTON",
+            required: false,
+            blocking: true,
+            action: "FINAL_SUBMISSION_GATE",
+            postcondition: "IDENTIFIER_BACKED_CONFIRMATION",
+            reason: "Sanitized fixture",
+          },
+        ],
+        limitations: ["Sanitized replay support is not live compatibility."],
+        review_fingerprint: "d".repeat(64),
+      },
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    };
+    vi.spyOn(window.jobApplyPro.workbench, "listWorkflows").mockResolvedValue([
+      discoveredWorkflow,
+    ]);
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "listSupervisedPortalRuns",
+    ).mockResolvedValue([run]);
+    const submit = vi
+      .spyOn(window.jobApplyPro.workbench, "submitSupervisedPortal")
+      .mockResolvedValue(null);
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review & submit exact page" }),
+    );
+    await waitFor(() =>
+      expect(submit).toHaveBeenCalledExactlyOnceWith(
+        run.id,
+        run.page_fingerprint,
+        run.greenhouse_form?.review_fingerprint,
+      ),
+    );
+  });
+
   it("keeps portal and candidate details scoped to the selected workflow", async () => {
     const secondWorkflow: WorkflowRunSnapshot = {
       ...discoveredWorkflow,
@@ -435,7 +504,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Reviewed Greenhouse Native Fields v0.68.0-alpha.1"),
+      screen.getByText("Reviewed Greenhouse Final Submission v0.69.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

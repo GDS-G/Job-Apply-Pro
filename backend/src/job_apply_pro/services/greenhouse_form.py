@@ -131,7 +131,12 @@ class GreenhouseFormContractService:
             for control in observation.controls
             if control.visible
             and not control.disabled
+            and not control.busy
+            and not control.inert
+            and not control.accessibility_hidden
             and control.kind is BrowserControlKind.BUTTON
+            and control.repeat_count == 1
+            and control.locator is not None
             and _SUBMIT_LABEL.fullmatch(_label(control))
         ]
 

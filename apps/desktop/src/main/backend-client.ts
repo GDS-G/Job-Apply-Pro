@@ -618,6 +618,7 @@ export class BackendClient {
   submitSupervisedPortal(
     runId: string,
     reviewFingerprint: string,
+    greenhouseFormReviewFingerprint: string | null = null,
   ): Promise<SupervisedPortalRunSnapshot> {
     return this.request(
       `/portals/supervised/runs/${encodeURIComponent(runId)}/submit`,
@@ -625,6 +626,7 @@ export class BackendClient {
         method: "POST",
         body: JSON.stringify({
           review_fingerprint: reviewFingerprint,
+          greenhouse_form_review_fingerprint: greenhouseFormReviewFingerprint,
           confirmation_phrase: "SUBMIT APPLICATION",
         }),
       },

@@ -137,6 +137,31 @@ def test_sanitized_greenhouse_form_corpus_exercises_every_stage_and_boundary() -
     assert review.controls[0].action is GreenhouseFormAction.FINAL_SUBMISSION_GATE
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("visible", False),
+        ("disabled", True),
+        ("busy", True),
+        ("inert", True),
+        ("accessibility_hidden", True),
+        ("repeat_count", 2),
+        ("locator", None),
+    ],
+    ids=["hidden", "disabled", "busy", "inert", "accessibility-hidden", "repeated", "unlocatable"],
+)
+def test_final_submit_contract_refuses_unsafe_controls(field: str, value: object) -> None:
+    service = GreenhouseFormContractService()
+    observation = _observation(_cases()["submission-review"])
+    unsafe = observation.controls[0].model_copy(update={field: value})
+
+    assessment = service.assess(observation.model_copy(update={"controls": [unsafe]}))
+
+    assert not any(
+        item.action is GreenhouseFormAction.FINAL_SUBMISSION_GATE for item in assessment.controls
+    )
+
+
 def test_navigation_postcondition_requires_current_ready_review_and_later_stage() -> None:
     service = GreenhouseFormContractService()
     cases = _cases()

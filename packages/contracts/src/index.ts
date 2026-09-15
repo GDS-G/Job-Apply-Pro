@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Greenhouse Native Fields",
-  version: "0.68.0-alpha.1",
+  name: "Reviewed Greenhouse Final Submission",
+  version: "0.69.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -2153,6 +2153,7 @@ export interface DesktopBridge {
     submitSupervisedPortal(
       runId: string,
       reviewFingerprint: string,
+      greenhouseFormReviewFingerprint?: string | null,
     ): Promise<SupervisedPortalRunSnapshot | null>;
     stopSupervisedPortal(runId: string): Promise<SupervisedPortalRunSnapshot>;
     listChallengeSessions(

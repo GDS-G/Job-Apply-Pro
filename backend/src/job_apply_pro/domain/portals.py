@@ -256,9 +256,10 @@ class SupervisedPortalCapture(BaseModel):
 
 
 class SupervisedPortalSubmissionApproval(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     review_fingerprint: str = Field(min_length=1, max_length=200)
+    greenhouse_form_review_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     confirmation_phrase: str = Field(min_length=1, max_length=40)
 
 
