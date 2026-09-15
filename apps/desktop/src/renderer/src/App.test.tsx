@@ -669,7 +669,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Interrupted Forward Restore Resume v0.72.0-alpha.1"),
+      screen.getByText("Origin-Bound Portal Profiles v0.73.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),
@@ -741,6 +741,67 @@ describe("App", () => {
     expect(
       screen.getByLabelText(/allow external AI processing/i),
     ).not.toBeChecked();
+  });
+
+  it("shows reusable portal profiles without claiming to store login credentials", async () => {
+    const api = window.jobApplyPro.workbench;
+    const sessionId = "7193b158-26dd-4abc-9f25-bd45f0e67382";
+    vi.spyOn(api, "listWorkflows").mockResolvedValue([discoveredWorkflow]);
+    vi.spyOn(api, "listBrowserSessions").mockResolvedValue([
+      {
+        id: sessionId,
+        workflow_id: discoveredWorkflow.workflow_id,
+        engine: "msedge",
+        profile_name: "workday-tenant-a",
+        state: "STOPPED",
+        current_url: "https://tenant.wd5.myworkdayjobs.com/jobs",
+        allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
+        observation: null,
+        action_count: 0,
+        trace_path: null,
+        created_at: discoveredWorkflow.updated_at,
+        updated_at: discoveredWorkflow.updated_at,
+      },
+    ]);
+    vi.spyOn(api, "listSupervisedPortalRuns").mockResolvedValue([
+      {
+        id: "workday-run",
+        portal: "WORKDAY",
+        workflow_id: discoveredWorkflow.workflow_id,
+        browser_session_id: sessionId,
+        state: "STOPPED",
+        current_url: "https://tenant.wd5.myworkdayjobs.com/jobs",
+        allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
+        page_fingerprint: "workday-stopped",
+        current_match: null,
+        disposition: "STOPPED",
+        intervention_reasons: [],
+        evidence: [],
+        observed_controls: [],
+        greenhouse_form: null,
+        trace_path: "C:/fixture/workday-trace.zip",
+        created_at: discoveredWorkflow.updated_at,
+        updated_at: discoveredWorkflow.updated_at,
+      } satisfies SupervisedPortalRunSnapshot,
+    ]);
+
+    render(<App />);
+
+    const saved = await screen.findByRole("region", {
+      name: "Saved supervised portal profiles",
+    });
+    expect(saved).toHaveTextContent("workday-tenant-a");
+    expect(saved).toHaveTextContent("WORKDAY · msedge");
+    expect(saved).toHaveTextContent("Origin bound");
+    expect(saved).toHaveTextContent("https://tenant.wd5.myworkdayjobs.com");
+    expect(
+      document.querySelector(
+        'datalist#saved-portal-profile-names option[value="workday-tenant-a"]',
+      ),
+    ).not.toBeNull();
+    expect(
+      screen.getByText(/never stores or auto-fills the portal password/i),
+    ).toBeInTheDocument();
   });
 
   it("offers reviewed field reconciliation only for an eligible takeover session", async () => {

@@ -145,26 +145,44 @@ class BrowserRuntimeService:
         start_origin = _origin(start_url)
         allowed_origins = {start_origin}
         allowed_origins.update(_origin(value) for value in command.allowed_origins)
+        normalized_origins = sorted(allowed_origins)
         if not self._automation_enabled and not all(
             _is_loopback(origin) for origin in allowed_origins
         ):
             raise BrowserPolicyError(
                 "External browser origins remain disabled; use a loopback fixture URL"
             )
-        for existing in self._repository.list_snapshots():
-            if (
-                existing.profile_name == command.profile_name
-                and existing.engine is command.engine
-                and existing.state
-                in {
-                    BrowserSessionState.STARTING,
-                    BrowserSessionState.ACTIVE,
-                    BrowserSessionState.USER_TAKEOVER,
-                }
-            ):
+        profile_history = [
+            existing
+            for existing in self._repository.list_snapshots()
+            if existing.profile_name.casefold() == command.profile_name.casefold()
+            and existing.engine is command.engine
+        ]
+        for existing in profile_history:
+            if existing.state in {
+                BrowserSessionState.STARTING,
+                BrowserSessionState.ACTIVE,
+                BrowserSessionState.USER_TAKEOVER,
+            }:
                 raise BrowserSessionStateError(
                     f"Browser profile {command.profile_name} is already in use"
                 )
+        if any(existing.profile_name != command.profile_name for existing in profile_history):
+            raise BrowserPolicyError(
+                "Browser profile names are case-insensitive; reuse the exact saved spelling"
+            )
+        historical_origin_sets = {
+            tuple(sorted(existing.allowed_origins)) for existing in profile_history
+        }
+        if len(historical_origin_sets) > 1:
+            raise BrowserPolicyError(
+                "Browser profile has conflicting historical origin bindings; use a new profile name"
+            )
+        if historical_origin_sets and tuple(normalized_origins) not in historical_origin_sets:
+            raise BrowserPolicyError(
+                "Browser profile is already bound to another exact origin set; "
+                "use a new profile name"
+            )
         session_id = str(uuid4())
         now = utc_now()
         profile_dir = (
@@ -180,7 +198,7 @@ class BrowserRuntimeService:
             profile_name=command.profile_name,
             state=BrowserSessionState.STARTING,
             current_url=start_url,
-            allowed_origins=sorted(allowed_origins),
+            allowed_origins=normalized_origins,
             observation=None,
             action_count=0,
             trace_path=None,
@@ -202,7 +220,7 @@ class BrowserRuntimeService:
                     "artifact_dir": str(artifact_dir),
                     "start_url": start_url,
                     "current_url": start_url,
-                    "allowed_origins": sorted(allowed_origins),
+                    "allowed_origins": normalized_origins,
                     "headless": record.headless,
                 },
             )

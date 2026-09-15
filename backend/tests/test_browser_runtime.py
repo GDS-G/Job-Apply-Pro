@@ -458,6 +458,67 @@ def test_browser_runtime_rejects_external_origins_when_production_is_locked(
         worker.close()
 
 
+def test_persistent_profile_reuse_is_bound_to_exact_origins_and_spelling(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/start"),
+                    profile_name="workday-tenant-a",
+                )
+            )
+            service.stop(started.id)
+
+            reused = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/experience"),
+                    profile_name="workday-tenant-a",
+                )
+            )
+            service.stop(reused.id)
+            session_count = len(service.list_sessions(workflow_id))
+
+            with pytest.raises(BrowserPolicyError, match="case-insensitive"):
+                service.create_session(
+                    BrowserSessionCreate(
+                        workflow_id=workflow_id,
+                        start_url=AnyHttpUrl(f"{origin}/start"),
+                        profile_name="WORKDAY-TENANT-A",
+                    )
+                )
+            with pytest.raises(BrowserPolicyError, match="another exact origin set"):
+                service.create_session(
+                    BrowserSessionCreate(
+                        workflow_id=workflow_id,
+                        start_url=AnyHttpUrl(f"{origin}/start"),
+                        profile_name="workday-tenant-a",
+                        allowed_origins=[origin.replace("127.0.0.1", "localhost")],
+                    )
+                )
+            assert len(service.list_sessions(workflow_id)) == session_count
+        with (
+            _fixture_site() as another_origin,
+            pytest.raises(BrowserPolicyError, match="another exact origin set"),
+        ):
+            service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{another_origin}/start"),
+                    profile_name="workday-tenant-a",
+                )
+            )
+        assert len(service.list_sessions(workflow_id)) == session_count
+    finally:
+        worker.close()
+
+
 def test_radio_group_observation_has_exact_option_locators(
     session: Session, tmp_path: Path
 ) -> None:

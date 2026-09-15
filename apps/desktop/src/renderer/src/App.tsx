@@ -1566,6 +1566,54 @@ export function App() {
 
   const latestPortalRun =
     portalRuns.find((run) => run.workflow_id === selected?.workflow_id) ?? null;
+  const savedPortalProfiles = useMemo(() => {
+    const sessions = new Map(
+      browserSessions.map((session) => [session.id, session]),
+    );
+    const profiles = new Map<
+      string,
+      {
+        profileName: string;
+        engine: BrowserSessionSnapshot["engine"];
+        portal: PortalKind;
+        allowedOrigins: string[];
+        lastUsedAt: string;
+        reusable: boolean;
+        signature: string;
+      }
+    >();
+    for (const run of supervisedPortalRuns) {
+      const session = sessions.get(run.browser_session_id);
+      if (!session) continue;
+      const origins = [...session.allowed_origins].sort();
+      const key = `${session.engine}:${session.profile_name.toLowerCase()}`;
+      const signature = JSON.stringify([
+        session.profile_name,
+        run.portal,
+        origins,
+      ]);
+      const existing = profiles.get(key);
+      if (existing) {
+        if (existing.signature !== signature) existing.reusable = false;
+        if (run.updated_at > existing.lastUsedAt) {
+          existing.lastUsedAt = run.updated_at;
+        }
+        continue;
+      }
+      profiles.set(key, {
+        profileName: session.profile_name,
+        engine: session.engine,
+        portal: run.portal,
+        allowedOrigins: origins,
+        lastUsedAt: run.updated_at,
+        reusable: true,
+        signature,
+      });
+    }
+    return [...profiles.values()]
+      .sort((left, right) => right.lastUsedAt.localeCompare(left.lastUsedAt))
+      .slice(0, 12);
+  }, [browserSessions, supervisedPortalRuns]);
   const latestSupervisedRun =
     supervisedPortalRuns.find(
       (run) => run.workflow_id === selected?.workflow_id,
@@ -1701,13 +1749,12 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>
-                Interrupted Forward Restore Resume v0.72.0-alpha.1
-              </strong>
+              <strong>Origin-Bound Portal Profiles v0.73.0-alpha.1</strong>
               <p>
-                An interrupted restore can now be explicitly rolled back or
-                resumed from its authenticated sealed images. Recovery remains
-                user-selected, fail-closed, and separate from normal startup.
+                Persistent supervised-browser profiles are now bound to one
+                exact origin set and surfaced for safe reuse. Login remains a
+                visible user action; passwords and security codes are not
+                stored.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3534,11 +3581,32 @@ export function App() {
                   Persistent browser profile
                   <input
                     name="profile_name"
-                    defaultValue="supervised-profile"
+                    list="saved-portal-profile-names"
+                    placeholder="workday-tenant-a"
                     pattern="[A-Za-z0-9_-]+"
                     required
                     maxLength={80}
                   />
+                  <datalist id="saved-portal-profile-names">
+                    {savedPortalProfiles
+                      .filter(
+                        (profile) =>
+                          profile.engine === "msedge" &&
+                          profile.portal !== "GREENHOUSE" &&
+                          profile.reusable,
+                      )
+                      .map((profile) => (
+                        <option
+                          key={`${profile.engine}:${profile.profileName}`}
+                          label={`${profile.portal.replaceAll("_", " ")} · ${profile.allowedOrigins.join(", ")}`}
+                          value={profile.profileName}
+                        />
+                      ))}
+                  </datalist>
+                  <small>
+                    Reuse a saved name only for its same portal and exact origin
+                    set. Use a new name for another tenant or account.
+                  </small>
                 </label>
                 <label>
                   Additional exact origins (optional)
@@ -3555,6 +3623,11 @@ export function App() {
                 >
                   <Play size={16} /> Start supervised browser
                 </button>
+                <small>
+                  Sign in directly in the visible browser. The persistent
+                  profile may retain browser cookies; Job Apply Pro never stores
+                  or auto-fills the portal password or security code.
+                </small>
               </form>
               <div className="portal-status">
                 {latestSupervisedRun ? (
@@ -3753,6 +3826,31 @@ export function App() {
                 )}
               </div>
             </div>
+            {savedPortalProfiles.length ? (
+              <div
+                className="adapter-health"
+                aria-label="Saved supervised portal profiles"
+                role="region"
+              >
+                {savedPortalProfiles.map((profile) => (
+                  <div
+                    className="adapter-health__item"
+                    key={`${profile.engine}:${profile.profileName.toLowerCase()}`}
+                  >
+                    <div>
+                      <strong>{profile.profileName}</strong>
+                      <small>
+                        {profile.portal.replaceAll("_", " ")} · {profile.engine}
+                      </small>
+                    </div>
+                    <span className="status-pill status-pill--safe">
+                      {profile.reusable ? "Origin bound" : "New name required"}
+                    </span>
+                    <small>{profile.allowedOrigins.join(", ")}</small>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div
               className="adapter-health"
               aria-label="Portal adapter health"

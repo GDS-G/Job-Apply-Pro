@@ -2,6 +2,17 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.73.0-alpha.1] - Unreleased
+
+### Origin-Bound Portal Profiles
+
+- Bind every engine/profile identity to one exact normalized origin set across all durable browser-session history before allocating another session or calling the browser worker.
+- Treat Windows profile names case-insensitively while requiring the exact saved spelling, preventing differently cased aliases from sharing one profile directory.
+- Reject active reuse, conflicting legacy histories, and origin-set changes with a fail-closed instruction to choose a new profile name; permit exact reuse on a different path of the same origin.
+- Surface recent supervised portal profile names, engines, portal kinds, and exact origins from existing authenticated run/session responses without adding a credential store or schema migration.
+- Offer only consistent non-Greenhouse Edge profiles in the generic supervised form and explain that another tenant/account requires another name.
+- Keep sign-in, MFA, CAPTCHA, terms, legal attestations, signatures, and assessments as visible user actions; store no password, security code, token, cookie, or asserted login status.
+
 ## [0.72.0-alpha.1] - Unreleased
 
 ### Interrupted Forward Restore Resume
