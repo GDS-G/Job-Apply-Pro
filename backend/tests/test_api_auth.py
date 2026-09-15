@@ -16,6 +16,13 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert client.get("/api/v1/runtime/status").status_code == 401
         assert client.get("/api/v1/browser/sessions").status_code == 401
         assert client.get("/api/v1/browser/profiles").status_code == 401
+        assert (
+            client.post(
+                "/api/v1/browser/profiles/msedge/profile/cleanups/"
+                "d1c5770b-22b0-4e97-81ee-722f9d9ad947/preview"
+            ).status_code
+            == 401
+        )
         assert client.get("/api/v1/knowledge/profiles/profile-1/snapshot").status_code == 401
         assert client.get("/api/v1/ai/status").status_code == 401
         assert client.get("/api/v1/portals/runs").status_code == 401
@@ -51,7 +58,7 @@ def test_configured_local_api_token_protects_privileged_routes(
         assert response.status_code == 200
         assert response.json() == {
             "status": "ready",
-            "version": "0.74.0-alpha.1",
+            "version": "0.75.0-alpha.1",
             "automation_enabled": False,
             "browser_runtime_available": True,
             "candidate_knowledge_available": True,

@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Reviewed Portal Profile Retirement"
+    BUILD_NAME = "Reviewed Profile Quarantine Recovery"
 
     def __init__(
         self,

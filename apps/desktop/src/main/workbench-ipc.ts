@@ -788,6 +788,40 @@ export function registerWorkbenchIpc(
     },
   );
   ipcMain.handle(
+    "workbench:cleanup-browser-profile",
+    async (
+      event,
+      engineValue: unknown,
+      profileValue: unknown,
+      cleanupValue: unknown,
+    ) => {
+      const engine = browserEngine(engineValue);
+      const profileName = browserProfileName(profileValue);
+      const cleanupId = uuid(cleanupValue, "Browser profile cleanup id");
+      const preview = await supervisor.client.previewBrowserProfileCleanup(
+        engine,
+        profileName,
+        cleanupId,
+      );
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        type: "warning" as const,
+        title: "Finish isolated profile cleanup?",
+        message: `Remove isolated local browser data for ${preview.profile_name}?`,
+        detail: `Engine: ${preview.engine}\nOrigins: ${preview.allowed_origins.join(", ")}\nSessions retained: ${preview.session_count}\nFiles remaining: ${preview.file_count}\nDirectories remaining: ${preview.directory_count}\nBytes remaining: ${preview.total_bytes}\nReview fingerprint: ${preview.review_fingerprint}\n\nThis retries cleanup only for data already isolated by a failed retirement. Historical session evidence remains. This cannot be undone.`,
+        buttons: ["Cancel", "Remove isolated data"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveBrowserProfileCleanup(preview);
+    },
+  );
+  ipcMain.handle(
     "workbench:reconcile-browser-field",
     async (event, operationValue: unknown, sessionValue: unknown) => {
       const operationId = uuid(operationValue, "External effect id");

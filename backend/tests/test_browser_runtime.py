@@ -4,6 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from shutil import rmtree as remove_tree
 from shutil import which
 from threading import Thread
 from typing import cast
@@ -18,6 +19,7 @@ from job_apply_pro.domain.browser import (
     BrowserActionKind,
     BrowserControlKind,
     BrowserEngine,
+    BrowserProfileCleanupApproval,
     BrowserProfileRetirementApproval,
     BrowserProfileState,
     BrowserSessionCreate,
@@ -591,7 +593,7 @@ def test_reviewed_profile_retirement_preserves_history_and_blocks_reuse(
         worker.close()
 
 
-def test_profile_retirement_cleanup_failure_keeps_name_retired(
+def test_profile_retirement_cleanup_failure_is_reviewable_and_recoverable(
     session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workflow_id = _create_workflow(session)
@@ -626,8 +628,11 @@ def test_profile_retirement_cleanup_failure_keeps_name_retired(
                 )
 
             assert not profile_dir.exists()
-            assert len(list(profile_dir.parent.glob(".retiring-*"))) == 1
-            assert service.list_profiles()[0].state is BrowserProfileState.RETIRED
+            quarantines = list(profile_dir.parent.glob(".retiring-*"))
+            assert len(quarantines) == 1
+            profile = service.list_profiles()[0]
+            assert profile.state is BrowserProfileState.CLEANUP_PENDING
+            assert profile.pending_cleanup_id is not None
             with pytest.raises(BrowserPolicyError, match="retired"):
                 service.create_session(
                     BrowserSessionCreate(
@@ -636,6 +641,80 @@ def test_profile_retirement_cleanup_failure_keeps_name_retired(
                         profile_name=profile_name,
                     )
                 )
+
+            duplicate = profile_dir.parent / (
+                f".retiring-{profile_name}-a38addb4-38e3-4fe0-a601-e2812e554717"
+            )
+            duplicate.mkdir()
+            assert service.list_profiles()[0].state is BrowserProfileState.INCONSISTENT
+            with pytest.raises(BrowserPolicyError, match="missing or inconsistent"):
+                service.preview_profile_cleanup(
+                    BrowserEngine.CHROMIUM,
+                    profile_name,
+                    profile.pending_cleanup_id,
+                )
+            remove_tree(duplicate)
+
+            malformed = profile_dir.parent / f".retiring-{profile_name}-not-a-uuid"
+            malformed.mkdir()
+            assert service.list_profiles()[0].state is BrowserProfileState.INCONSISTENT
+            with pytest.raises(BrowserPolicyError, match="missing or inconsistent"):
+                service.preview_profile_cleanup(
+                    BrowserEngine.CHROMIUM,
+                    profile_name,
+                    profile.pending_cleanup_id,
+                )
+            remove_tree(malformed)
+
+            profile_dir.mkdir()
+            assert service.list_profiles()[0].state is BrowserProfileState.INCONSISTENT
+            with pytest.raises(BrowserSessionStateError, match="no longer isolated"):
+                service.preview_profile_cleanup(
+                    BrowserEngine.CHROMIUM,
+                    profile_name,
+                    profile.pending_cleanup_id,
+                )
+            profile_dir.rmdir()
+
+            cleanup_preview = service.preview_profile_cleanup(
+                BrowserEngine.CHROMIUM,
+                profile_name,
+                profile.pending_cleanup_id,
+            )
+            marker = quarantines[0] / "cleanup-review-marker"
+            marker.write_text("changed after cleanup preview", encoding="utf-8")
+            monkeypatch.setattr("job_apply_pro.services.browser_runtime.rmtree", remove_tree)
+            with pytest.raises(BrowserSessionStateError, match="stale"):
+                service.cleanup_profile_quarantine(
+                    BrowserProfileCleanupApproval(
+                        engine=BrowserEngine.CHROMIUM,
+                        profile_name=profile_name,
+                        cleanup_id=profile.pending_cleanup_id,
+                        expected_review_fingerprint=cleanup_preview.review_fingerprint,
+                        confirmation_phrase="REMOVE ISOLATED PROFILE DATA",
+                    )
+                )
+
+            current = service.preview_profile_cleanup(
+                BrowserEngine.CHROMIUM,
+                profile_name,
+                profile.pending_cleanup_id,
+            )
+            result = service.cleanup_profile_quarantine(
+                BrowserProfileCleanupApproval(
+                    engine=BrowserEngine.CHROMIUM,
+                    profile_name=profile_name,
+                    cleanup_id=profile.pending_cleanup_id,
+                    expected_review_fingerprint=current.review_fingerprint,
+                    confirmation_phrase="REMOVE ISOLATED PROFILE DATA",
+                )
+            )
+            assert result.removed is True
+            assert result.cleanup_id == profile.pending_cleanup_id
+            assert not quarantines[0].exists()
+            retired = service.list_profiles()[0]
+            assert retired.state is BrowserProfileState.RETIRED
+            assert retired.pending_cleanup_id is None
     finally:
         worker.close()
 

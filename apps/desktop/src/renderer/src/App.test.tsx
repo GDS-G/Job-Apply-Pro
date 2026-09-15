@@ -669,7 +669,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Reviewed Portal Profile Retirement v0.74.0-alpha.1"),
+      screen.getByText("Reviewed Profile Quarantine Recovery v0.75.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),
@@ -771,6 +771,7 @@ describe("App", () => {
         allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
         session_count: 1,
         last_used_at: discoveredWorkflow.updated_at,
+        pending_cleanup_id: null,
       },
     ]);
     vi.spyOn(api, "listSupervisedPortalRuns").mockResolvedValue([
@@ -833,6 +834,98 @@ describe("App", () => {
     );
     expect(
       await screen.findByText("Local browser profile data was removed."),
+    ).toBeInTheDocument();
+  });
+
+  it("offers native-reviewed recovery for an isolated profile cleanup", async () => {
+    const api = window.jobApplyPro.workbench;
+    const sessionId = "75ce83a8-5a39-40de-ad09-e619285609b4";
+    const cleanupId = "d1c5770b-22b0-4e97-81ee-722f9d9ad947";
+    vi.spyOn(api, "listWorkflows").mockResolvedValue([discoveredWorkflow]);
+    vi.spyOn(api, "listBrowserSessions").mockResolvedValue([
+      {
+        id: sessionId,
+        workflow_id: discoveredWorkflow.workflow_id,
+        engine: "msedge",
+        profile_name: "workday-cleanup-pending",
+        state: "STOPPED",
+        current_url: "https://tenant.wd5.myworkdayjobs.com/jobs",
+        allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
+        observation: null,
+        action_count: 0,
+        trace_path: null,
+        created_at: discoveredWorkflow.updated_at,
+        updated_at: discoveredWorkflow.updated_at,
+      },
+    ]);
+    vi.spyOn(api, "listBrowserProfiles").mockResolvedValue([
+      {
+        engine: "msedge",
+        profile_name: "workday-cleanup-pending",
+        state: "CLEANUP_PENDING",
+        allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
+        session_count: 1,
+        last_used_at: discoveredWorkflow.updated_at,
+        pending_cleanup_id: cleanupId,
+      },
+    ]);
+    vi.spyOn(api, "listSupervisedPortalRuns").mockResolvedValue([
+      {
+        id: "workday-cleanup-run",
+        portal: "WORKDAY",
+        workflow_id: discoveredWorkflow.workflow_id,
+        browser_session_id: sessionId,
+        state: "STOPPED",
+        current_url: "https://tenant.wd5.myworkdayjobs.com/jobs",
+        allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
+        page_fingerprint: "workday-cleanup-stopped",
+        current_match: null,
+        disposition: "STOPPED",
+        intervention_reasons: [],
+        evidence: [],
+        observed_controls: [],
+        greenhouse_form: null,
+        trace_path: "C:/fixture/workday-cleanup-trace.zip",
+        created_at: discoveredWorkflow.updated_at,
+        updated_at: discoveredWorkflow.updated_at,
+      } satisfies SupervisedPortalRunSnapshot,
+    ]);
+    const finishCleanup = vi
+      .spyOn(api, "cleanupBrowserProfile")
+      .mockResolvedValue({
+        engine: "msedge",
+        profile_name: "workday-cleanup-pending",
+        cleanup_id: cleanupId,
+        removed: true,
+        cleaned_at: discoveredWorkflow.updated_at,
+        notice: "Isolated local browser profile data was removed.",
+      });
+
+    render(<App />);
+
+    const saved = await screen.findByRole("region", {
+      name: "Saved supervised portal profiles",
+    });
+    expect(saved).toHaveTextContent("Cleanup pending");
+    expect(
+      screen.queryByRole("button", { name: "Retire local profile data" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Finish isolated profile cleanup",
+      }),
+    );
+    await waitFor(() =>
+      expect(finishCleanup).toHaveBeenCalledExactlyOnceWith(
+        "msedge",
+        "workday-cleanup-pending",
+        cleanupId,
+      ),
+    );
+    expect(
+      await screen.findByText(
+        "Isolated local browser profile data was removed.",
+      ),
     ).toBeInTheDocument();
   });
 

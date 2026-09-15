@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.75.0-alpha.1] - Unreleased
+
+### Reviewed Profile Quarantine Recovery
+
+- Name future failed-retirement quarantines with an exact profile identity plus an opaque UUID so they can be rediscovered after restart without exposing a path.
+- Add `CLEANUP_PENDING` profile state and a sanitized pending-cleanup identifier while keeping active, retired, available, and inconsistent states distinct.
+- Bind recovery preview to exact engine/name/origins, every durable session state and timestamp, the cleanup UUID, and a fresh bounded ordinary-file inventory.
+- Require a cancel-default native Electron warning and fixed backend approval phrase before retrying isolated cleanup.
+- Reject restored canonical storage, duplicate or aliased quarantine names, unsafe/reparse-backed entries, malformed identifiers, stale inventory, and route/body mismatch.
+- Preserve all durable browser session, effect, and checkpoint evidence and keep the historical profile name unavailable after cleanup.
+- Keep anonymous v0.74 quarantine recovery, provider logout/revocation, forensic secure erasure, automatic retention, and bulk cleanup out of scope.
+
 ## [0.74.0-alpha.1] - Unreleased
 
 ### Reviewed Portal Profile Retirement

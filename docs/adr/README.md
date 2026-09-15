@@ -106,3 +106,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0082: Interrupted forward restore resume](0082-interrupted-forward-restore-resume.md)
 - [ADR-0083: Origin-bound portal profiles](0083-origin-bound-portal-profiles.md)
 - [ADR-0084: Reviewed portal profile retirement](0084-reviewed-portal-profile-retirement.md)
+- [ADR-0085: Reviewed profile quarantine recovery](0085-reviewed-profile-quarantine-recovery.md)

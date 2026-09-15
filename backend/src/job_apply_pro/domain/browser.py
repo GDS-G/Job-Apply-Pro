@@ -28,6 +28,7 @@ class BrowserSessionState(StrEnum):
 class BrowserProfileState(StrEnum):
     AVAILABLE = "AVAILABLE"
     ACTIVE = "ACTIVE"
+    CLEANUP_PENDING = "CLEANUP_PENDING"
     RETIRED = "RETIRED"
     INCONSISTENT = "INCONSISTENT"
 
@@ -563,6 +564,7 @@ class BrowserProfileSnapshot(BaseModel):
     allowed_origins: list[str] = Field(max_length=20)
     session_count: int = Field(ge=1)
     last_used_at: datetime
+    pending_cleanup_id: str | None = Field(default=None, pattern=_UUID_PATTERN)
 
 
 class BrowserProfileRetirementPreview(BrowserProfileSnapshot):
@@ -591,6 +593,38 @@ class BrowserProfileRetirementResult(BaseModel):
     profile_name: str
     removed: Literal[True]
     retired_at: datetime
+    notice: str = Field(min_length=1, max_length=500)
+
+
+class BrowserProfileCleanupPreview(BrowserProfileSnapshot):
+    model_config = ConfigDict(frozen=True)
+
+    cleanup_id: str = Field(pattern=_UUID_PATTERN)
+    file_count: int = Field(ge=0)
+    directory_count: int = Field(ge=1)
+    total_bytes: int = Field(ge=0)
+    review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    notice: str = Field(min_length=1, max_length=500)
+
+
+class BrowserProfileCleanupApproval(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    engine: BrowserEngine
+    profile_name: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    cleanup_id: str = Field(pattern=_UUID_PATTERN)
+    expected_review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmation_phrase: Literal["REMOVE ISOLATED PROFILE DATA"]
+
+
+class BrowserProfileCleanupResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    engine: BrowserEngine
+    profile_name: str
+    cleanup_id: str = Field(pattern=_UUID_PATTERN)
+    removed: Literal[True]
+    cleaned_at: datetime
     notice: str = Field(min_length=1, max_length=500)
 
 

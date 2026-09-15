@@ -17,6 +17,9 @@ from job_apply_pro.domain.browser import (
     BrowserFieldReconciliationApproval,
     BrowserFieldReconciliationPreview,
     BrowserFieldReconciliationResult,
+    BrowserProfileCleanupApproval,
+    BrowserProfileCleanupPreview,
+    BrowserProfileCleanupResult,
     BrowserProfileRetirementApproval,
     BrowserProfileRetirementPreview,
     BrowserProfileRetirementResult,
@@ -47,6 +50,10 @@ router = APIRouter(prefix="/browser", tags=["browser"])
 SessionDependency = Annotated[Session, Depends(get_session)]
 CipherDependency = Annotated[SensitiveDataCipher, Depends(get_cipher)]
 _worker = BrowserWorkerClient()
+CleanupId = Annotated[
+    str,
+    Path(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"),
+]
 
 
 def shutdown_browser_worker() -> None:
@@ -202,6 +209,48 @@ def approve_browser_profile_retirement(
         )
     try:
         return service.retire_profile(approval)
+    except (LookupError, BrowserPolicyError, BrowserSessionStateError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/profiles/{engine}/{profile_name}/cleanups/{cleanup_id}/preview",
+    response_model=BrowserProfileCleanupPreview,
+)
+def preview_browser_profile_cleanup(
+    engine: BrowserEngine,
+    profile_name: BrowserProfileName,
+    cleanup_id: CleanupId,
+    service: BrowserServiceDependency,
+) -> BrowserProfileCleanupPreview:
+    try:
+        return service.preview_profile_cleanup(engine, profile_name, cleanup_id)
+    except (LookupError, BrowserPolicyError, BrowserSessionStateError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/profiles/{engine}/{profile_name}/cleanups/{cleanup_id}/approve",
+    response_model=BrowserProfileCleanupResult,
+)
+def approve_browser_profile_cleanup(
+    engine: BrowserEngine,
+    profile_name: BrowserProfileName,
+    cleanup_id: CleanupId,
+    approval: BrowserProfileCleanupApproval,
+    service: BrowserServiceDependency,
+) -> BrowserProfileCleanupResult:
+    if (
+        approval.engine is not engine
+        or approval.profile_name != profile_name
+        or approval.cleanup_id != cleanup_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Browser profile cleanup approval does not match the route",
+        )
+    try:
+        return service.cleanup_profile_quarantine(approval)
     except (LookupError, BrowserPolicyError, BrowserSessionStateError) as error:
         raise _http_error(error) from error
 

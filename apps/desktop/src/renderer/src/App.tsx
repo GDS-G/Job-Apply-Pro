@@ -319,6 +319,34 @@ export function App() {
     [refreshWorkflows],
   );
 
+  const cleanupPortalProfile = useCallback(
+    async (
+      engine: BrowserProfileSnapshot["engine"],
+      profileName: string,
+      cleanupId: string,
+    ) => {
+      setBusy(true);
+      setError(null);
+      setProfileLifecycleMessage(null);
+      try {
+        const result = await window.jobApplyPro.workbench.cleanupBrowserProfile(
+          engine,
+          profileName,
+          cleanupId,
+        );
+        if (result) {
+          await refreshWorkflows();
+          setProfileLifecycleMessage(result.notice);
+        }
+      } catch (caught) {
+        setError(readableError(caught));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshWorkflows],
+  );
+
   const startProviderAuthorization = useCallback(
     async (provider: IntegrationProvider) => {
       setBusy(true);
@@ -1613,6 +1641,7 @@ export function App() {
         lastUsedAt: string;
         reusable: boolean;
         lifecycleState: BrowserProfileSnapshot["state"] | "UNKNOWN";
+        pendingCleanupId: string | null;
         signature: string;
       }
     >();
@@ -1648,6 +1677,7 @@ export function App() {
         lastUsedAt: run.updated_at,
         reusable: lifecycle.get(key)?.state === "AVAILABLE",
         lifecycleState: lifecycle.get(key)?.state ?? "UNKNOWN",
+        pendingCleanupId: lifecycle.get(key)?.pending_cleanup_id ?? null,
         signature,
       });
     }
@@ -1791,7 +1821,7 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Portal Profile Retirement v0.74.0-alpha.1
+                Reviewed Profile Quarantine Recovery v0.75.0-alpha.1
               </strong>
               <p>
                 Persistent portal data can now be retired only after an exact
@@ -3898,9 +3928,11 @@ export function App() {
                           ? "Origin bound"
                           : profile.lifecycleState === "ACTIVE"
                             ? "Active"
-                            : profile.lifecycleState === "RETIRED"
-                              ? "Retired"
-                              : "New name required"}
+                            : profile.lifecycleState === "CLEANUP_PENDING"
+                              ? "Cleanup pending"
+                              : profile.lifecycleState === "RETIRED"
+                                ? "Retired"
+                                : "New name required"}
                       </span>
                       <small>{profile.allowedOrigins.join(", ")}</small>
                       {profile.lifecycleState === "AVAILABLE" ? (
@@ -3916,6 +3948,23 @@ export function App() {
                           type="button"
                         >
                           Retire local profile data
+                        </button>
+                      ) : null}
+                      {profile.lifecycleState === "CLEANUP_PENDING" &&
+                      profile.pendingCleanupId ? (
+                        <button
+                          className="button button--danger"
+                          disabled={busy}
+                          onClick={() =>
+                            void cleanupPortalProfile(
+                              profile.engine,
+                              profile.profileName,
+                              profile.pendingCleanupId!,
+                            )
+                          }
+                          type="button"
+                        >
+                          Finish isolated profile cleanup
                         </button>
                       ) : null}
                     </div>

@@ -83,6 +83,17 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
         engine,
         profileName,
       ),
+    cleanupBrowserProfile: (
+      engine: BrowserEngine,
+      profileName: string,
+      cleanupId: string,
+    ) =>
+      ipcRenderer.invoke(
+        "workbench:cleanup-browser-profile",
+        engine,
+        profileName,
+        cleanupId,
+      ),
     reconcileBrowserField: (operationId: string, sessionId: string) =>
       ipcRenderer.invoke(
         "workbench:reconcile-browser-field",

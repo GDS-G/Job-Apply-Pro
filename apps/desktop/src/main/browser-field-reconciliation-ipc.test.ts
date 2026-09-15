@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   BrowserFieldReconciliationPreview,
   BrowserFieldReconciliationResult,
+  BrowserProfileCleanupPreview,
+  BrowserProfileCleanupResult,
   BrowserProfileRetirementPreview,
   BrowserProfileRetirementResult,
 } from "@job-apply-pro/contracts";
@@ -39,6 +41,7 @@ vi.mock("electron", () => ({
 const operationId = "64a4cc96-07d1-4a0e-8000-a74811a13c0e";
 const attemptId = "19c70be6-ea1b-4c71-b668-d359f7ce4b06";
 const sessionId = "5fdf419a-0771-4d75-99d2-c76ba2f89719";
+const cleanupId = "d1c5770b-22b0-4e97-81ee-722f9d9ad947";
 const preview: BrowserFieldReconciliationPreview = {
   operation_id: operationId,
   attempt_id: attemptId,
@@ -68,6 +71,7 @@ const retirementPreview: BrowserProfileRetirementPreview = {
   allowed_origins: ["https://tenant.wd5.myworkdayjobs.com"],
   session_count: 2,
   last_used_at: "2026-09-15T18:00:00+00:00",
+  pending_cleanup_id: null,
   file_count: 12,
   directory_count: 4,
   total_bytes: 4096,
@@ -80,6 +84,25 @@ const retirementResult: BrowserProfileRetirementResult = {
   removed: true,
   retired_at: "2026-09-15T18:05:00+00:00",
   notice: "Local browser profile data was removed.",
+};
+const cleanupPreview: BrowserProfileCleanupPreview = {
+  ...retirementPreview,
+  state: "CLEANUP_PENDING",
+  pending_cleanup_id: cleanupId,
+  cleanup_id: cleanupId,
+  file_count: 7,
+  directory_count: 3,
+  total_bytes: 2048,
+  review_fingerprint: "c".repeat(64),
+  notice: "Review isolated browser profile cleanup.",
+};
+const cleanupResult: BrowserProfileCleanupResult = {
+  engine: "msedge",
+  profile_name: "workday-tenant-a",
+  cleanup_id: cleanupId,
+  removed: true,
+  cleaned_at: "2026-09-15T18:06:00+00:00",
+  notice: "Isolated local browser profile data was removed.",
 };
 
 afterEach(() => {
@@ -187,6 +210,40 @@ describe("browser field reconciliation backend client", () => {
       },
     );
   });
+
+  it("previews and approves only the exact isolated profile cleanup", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json(cleanupPreview))
+      .mockResolvedValueOnce(Response.json(cleanupResult));
+
+    await expect(
+      client.previewBrowserProfileCleanup(
+        "msedge",
+        "workday-tenant-a",
+        cleanupId,
+      ),
+    ).resolves.toEqual(cleanupPreview);
+    await expect(
+      client.approveBrowserProfileCleanup(cleanupPreview),
+    ).resolves.toEqual(cleanupResult);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `http://127.0.0.1:8765/browser/profiles/msedge/workday-tenant-a/cleanups/${cleanupId}/preview`,
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      `http://127.0.0.1:8765/browser/profiles/msedge/workday-tenant-a/cleanups/${cleanupId}/approve`,
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        engine: "msedge",
+        profile_name: "workday-tenant-a",
+        cleanup_id: cleanupId,
+        expected_review_fingerprint: "c".repeat(64),
+        confirmation_phrase: "REMOVE ISOLATED PROFILE DATA",
+      }),
+    });
+  });
 });
 
 describe("browser field reconciliation IPC boundary", () => {
@@ -200,6 +257,10 @@ describe("browser field reconciliation IPC boundary", () => {
       vi.fn<BackendClient["previewBrowserProfileRetirement"]>(),
     approveBrowserProfileRetirement:
       vi.fn<BackendClient["approveBrowserProfileRetirement"]>(),
+    previewBrowserProfileCleanup:
+      vi.fn<BackendClient["previewBrowserProfileCleanup"]>(),
+    approveBrowserProfileCleanup:
+      vi.fn<BackendClient["approveBrowserProfileCleanup"]>(),
   };
   const supervisor = { client } as unknown as BackendSupervisor;
   const updates = {} as UpdateManager;
@@ -223,6 +284,8 @@ describe("browser field reconciliation IPC boundary", () => {
     client.listBrowserProfiles.mockResolvedValue([retirementPreview]);
     client.previewBrowserProfileRetirement.mockResolvedValue(retirementPreview);
     client.approveBrowserProfileRetirement.mockResolvedValue(retirementResult);
+    client.previewBrowserProfileCleanup.mockResolvedValue(cleanupPreview);
+    client.approveBrowserProfileCleanup.mockResolvedValue(cleanupResult);
     registerWorkbenchIpc(supervisor, updates, notifications);
   });
 
@@ -315,5 +378,60 @@ describe("browser field reconciliation IPC boundary", () => {
     expect(
       client.approveBrowserProfileRetirement,
     ).toHaveBeenCalledExactlyOnceWith(retirementPreview);
+  });
+
+  it("validates cleanup identity and defaults the cleanup warning to cancel", async () => {
+    const listener = handlers.get("workbench:cleanup-browser-profile");
+    if (!listener) throw new Error("Profile cleanup IPC was not registered");
+
+    await expect(
+      listener(
+        { sender } as IpcMainInvokeEvent,
+        "msedge",
+        "workday-tenant-a",
+        "not-a-uuid",
+      ),
+    ).rejects.toThrow("Browser profile cleanup id must be a UUID.");
+    expect(client.previewBrowserProfileCleanup).not.toHaveBeenCalled();
+    expect(showMessageBox).not.toHaveBeenCalled();
+
+    await expect(
+      listener(
+        { sender } as IpcMainInvokeEvent,
+        "msedge",
+        "workday-tenant-a",
+        cleanupId,
+      ),
+    ).resolves.toBeNull();
+    expect(client.previewBrowserProfileCleanup).toHaveBeenCalledExactlyOnceWith(
+      "msedge",
+      "workday-tenant-a",
+      cleanupId,
+    );
+    expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+      buttons: ["Cancel", "Remove isolated data"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    expect(client.approveBrowserProfileCleanup).not.toHaveBeenCalled();
+  });
+
+  it("removes only the immutable isolated cleanup after native approval", async () => {
+    const listener = handlers.get("workbench:cleanup-browser-profile");
+    if (!listener) throw new Error("Profile cleanup IPC was not registered");
+    showMessageBox.mockResolvedValue({ response: 1 });
+
+    await expect(
+      listener(
+        { sender } as IpcMainInvokeEvent,
+        "msedge",
+        "workday-tenant-a",
+        cleanupId,
+      ),
+    ).resolves.toEqual(cleanupResult);
+    expect(client.approveBrowserProfileCleanup).toHaveBeenCalledExactlyOnceWith(
+      cleanupPreview,
+    );
   });
 });

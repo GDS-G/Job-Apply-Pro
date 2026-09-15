@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -25,6 +26,9 @@ from job_apply_pro.domain.browser import (
     BrowserFieldReconciliationResult,
     BrowserObservation,
     BrowserPermission,
+    BrowserProfileCleanupApproval,
+    BrowserProfileCleanupPreview,
+    BrowserProfileCleanupResult,
     BrowserProfileRetirementApproval,
     BrowserProfileRetirementPreview,
     BrowserProfileRetirementResult,
@@ -100,6 +104,10 @@ _ACTIVE_PROFILE_STATES = {
 _PROFILE_INVENTORY_LIMIT = 200_000
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _PROFILE_LIFECYCLE_LOCK = RLock()
+_CLEANUP_ID_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+_PROFILE_QUARANTINE_PATTERN = re.compile(
+    rf"^\.retiring-(?P<profile>[A-Za-z0-9_-]{{1,80}})-(?P<cleanup>{_CLEANUP_ID_PATTERN})$"
+)
 
 
 def _serialize_profile_lifecycle[**P, R](
@@ -197,6 +205,46 @@ def _profile_inventory(profile_dir: Path) -> tuple[list[tuple[str, str, int, int
 def _inventory_fingerprint(entries: list[tuple[str, str, int, int]]) -> str:
     payload = json.dumps(entries, ensure_ascii=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _profile_quarantine_path(engine_root: Path, profile_name: str, cleanup_id: str) -> Path:
+    return engine_root / f".retiring-{profile_name}-{cleanup_id}"
+
+
+def _profile_quarantines(
+    engine_root: Path, profile_name: str
+) -> tuple[list[tuple[str, Path]], bool]:
+    if not os.path.lexists(engine_root):
+        return [], False
+    if not engine_root.is_dir() or _is_reparse_point(engine_root):
+        return [], True
+    discovered: list[tuple[str, Path]] = []
+    unsafe = False
+    scanned = 0
+    expected_prefix = f".retiring-{profile_name}-".casefold()
+    for entry in os.scandir(engine_root):
+        scanned += 1
+        if scanned > _PROFILE_INVENTORY_LIMIT:
+            return discovered, True
+        match = _PROFILE_QUARANTINE_PATTERN.fullmatch(entry.name)
+        if match is None:
+            if entry.name.casefold().startswith(expected_prefix):
+                unsafe = True
+            continue
+        if match.group("profile").casefold() != profile_name.casefold():
+            continue
+        path = Path(entry.path)
+        details = entry.stat(follow_symlinks=False)
+        if (
+            match.group("profile") != profile_name
+            or entry.is_symlink()
+            or bool(getattr(details, "st_file_attributes", 0) & _REPARSE_POINT)
+            or not stat.S_ISDIR(details.st_mode)
+        ):
+            unsafe = True
+            continue
+        discovered.append((match.group("cleanup"), path))
+    return sorted(discovered), unsafe
 
 
 class BrowserRuntimeService:
@@ -350,13 +398,27 @@ class BrowserRuntimeService:
             origin_sets = {tuple(sorted(item.allowed_origins)) for item in history}
             engine_root = self._browser_data_dir / engine.value
             profile_dir = engine_root / latest.profile_name
-            storage_unsafe = (os.path.lexists(engine_root) and _is_reparse_point(engine_root)) or (
-                os.path.lexists(profile_dir) and _is_reparse_point(profile_dir)
+            quarantines, quarantine_unsafe = _profile_quarantines(engine_root, latest.profile_name)
+            storage_unsafe = (
+                (os.path.lexists(engine_root) and _is_reparse_point(engine_root))
+                or (
+                    os.path.lexists(profile_dir)
+                    and (not profile_dir.is_dir() or _is_reparse_point(profile_dir))
+                )
+                or quarantine_unsafe
             )
-            if len(spellings) > 1 or len(origin_sets) > 1 or storage_unsafe:
+            if (
+                len(spellings) > 1
+                or len(origin_sets) > 1
+                or storage_unsafe
+                or len(quarantines) > 1
+                or (profile_dir.is_dir() and bool(quarantines))
+            ):
                 profile_state = BrowserProfileState.INCONSISTENT
             elif any(item.state in _ACTIVE_PROFILE_STATES for item in history):
                 profile_state = BrowserProfileState.ACTIVE
+            elif quarantines:
+                profile_state = BrowserProfileState.CLEANUP_PENDING
             elif not profile_dir.is_dir():
                 profile_state = BrowserProfileState.RETIRED
             else:
@@ -369,6 +431,11 @@ class BrowserRuntimeService:
                     allowed_origins=sorted(latest.allowed_origins),
                     session_count=len(history),
                     last_used_at=latest.updated_at,
+                    pending_cleanup_id=(
+                        quarantines[0][0]
+                        if profile_state is BrowserProfileState.CLEANUP_PENDING
+                        else None
+                    ),
                 )
             )
         return sorted(profiles, key=lambda item: item.last_used_at, reverse=True)
@@ -461,7 +528,8 @@ class BrowserRuntimeService:
             )
         inventory, _ = _profile_inventory(profile_dir)
         expected_inventory = _inventory_fingerprint(inventory)
-        quarantine = profile_dir.parent / f".retiring-{uuid4()}"
+        cleanup_id = str(uuid4())
+        quarantine = _profile_quarantine_path(profile_dir.parent, approval.profile_name, cleanup_id)
         profile_dir.rename(quarantine)
         try:
             quarantined_inventory, _ = _profile_inventory(quarantine)
@@ -484,6 +552,134 @@ class BrowserRuntimeService:
             retired_at=utc_now(),
             notice=(
                 "Local browser profile data was removed. Historical session evidence was retained."
+            ),
+        )
+
+    @_serialize_profile_lifecycle
+    def preview_profile_cleanup(
+        self, engine: BrowserEngine, profile_name: str, cleanup_id: str
+    ) -> BrowserProfileCleanupPreview:
+        history = [
+            snapshot
+            for snapshot in self._repository.list_snapshots()
+            if snapshot.engine is engine
+            and snapshot.profile_name.casefold() == profile_name.casefold()
+        ]
+        if not history:
+            raise LookupError(f"Browser profile {profile_name} was not found")
+        if any(snapshot.profile_name != profile_name for snapshot in history):
+            raise BrowserPolicyError(
+                "Browser profile names are case-insensitive; use the exact saved spelling"
+            )
+        if any(snapshot.state in _ACTIVE_PROFILE_STATES for snapshot in history):
+            raise BrowserSessionStateError(f"Browser profile {profile_name} is still active")
+        origin_sets = {tuple(sorted(snapshot.allowed_origins)) for snapshot in history}
+        if len(origin_sets) != 1:
+            raise BrowserPolicyError(
+                "Browser profile history is inconsistent; manual review is required"
+            )
+        engine_root = self._browser_data_dir / engine.value
+        if not engine_root.is_dir() or _is_reparse_point(engine_root):
+            raise BrowserPolicyError(
+                "Browser engine storage is missing or unsafe; manual review is required"
+            )
+        profile_dir = engine_root / profile_name
+        if os.path.lexists(profile_dir):
+            raise BrowserSessionStateError(
+                "Browser profile storage is no longer isolated; manual review is required"
+            )
+        quarantines, unsafe = _profile_quarantines(engine_root, profile_name)
+        if unsafe or len(quarantines) != 1 or quarantines[0][0] != cleanup_id:
+            raise BrowserPolicyError(
+                "Browser profile cleanup evidence is missing or inconsistent; "
+                "manual review is required"
+            )
+        quarantine = quarantines[0][1]
+        inventory, total_bytes = _profile_inventory(quarantine)
+        inventory_fingerprint = _inventory_fingerprint(inventory)
+        latest = max(history, key=lambda item: item.updated_at)
+        file_count = sum(1 for _, kind, _, _ in inventory if kind == "file")
+        directory_count = sum(1 for _, kind, _, _ in inventory if kind == "directory")
+        evidence = {
+            "action": "REMOVE_ISOLATED_BROWSER_PROFILE_DATA",
+            "engine": engine.value,
+            "profile_name": profile_name,
+            "cleanup_id": cleanup_id,
+            "allowed_origins": list(next(iter(origin_sets))),
+            "sessions": [
+                {
+                    "id": snapshot.id,
+                    "state": snapshot.state.value,
+                    "updated_at": snapshot.updated_at.isoformat(),
+                }
+                for snapshot in sorted(history, key=lambda item: item.id)
+            ],
+            "inventory_fingerprint": inventory_fingerprint,
+            "file_count": file_count,
+            "directory_count": directory_count,
+            "total_bytes": total_bytes,
+        }
+        review_fingerprint = hashlib.sha256(
+            json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return BrowserProfileCleanupPreview(
+            engine=engine,
+            profile_name=profile_name,
+            state=BrowserProfileState.CLEANUP_PENDING,
+            allowed_origins=list(next(iter(origin_sets))),
+            session_count=len(history),
+            last_used_at=latest.updated_at,
+            pending_cleanup_id=cleanup_id,
+            cleanup_id=cleanup_id,
+            file_count=file_count,
+            directory_count=directory_count,
+            total_bytes=total_bytes,
+            review_fingerprint=review_fingerprint,
+            notice=(
+                "Cleanup removes only the isolated local browser data left by a failed "
+                "retirement. Historical session evidence remains."
+            ),
+        )
+
+    @_serialize_profile_lifecycle
+    def cleanup_profile_quarantine(
+        self, approval: BrowserProfileCleanupApproval
+    ) -> BrowserProfileCleanupResult:
+        preview = self.preview_profile_cleanup(
+            approval.engine, approval.profile_name, approval.cleanup_id
+        )
+        if preview.review_fingerprint != approval.expected_review_fingerprint:
+            raise BrowserSessionStateError(
+                "Browser profile cleanup preview is stale; review it again"
+            )
+        engine_root = self._browser_data_dir / approval.engine.value
+        if _is_reparse_point(engine_root):
+            raise BrowserSessionStateError(
+                "Browser engine storage changed during cleanup; review it again"
+            )
+        quarantine = _profile_quarantine_path(
+            engine_root, approval.profile_name, approval.cleanup_id
+        )
+        try:
+            rmtree(quarantine)
+        except Exception as error:
+            if os.path.lexists(quarantine):
+                raise BrowserSessionStateError(
+                    "Isolated browser profile cleanup did not finish; review it again"
+                ) from error
+        if os.path.lexists(quarantine):
+            raise BrowserSessionStateError(
+                "Isolated browser profile cleanup did not finish; review it again"
+            )
+        return BrowserProfileCleanupResult(
+            engine=approval.engine,
+            profile_name=approval.profile_name,
+            cleanup_id=approval.cleanup_id,
+            removed=True,
+            cleaned_at=utc_now(),
+            notice=(
+                "Isolated local browser profile data was removed. Historical session "
+                "evidence was retained."
             ),
         )
 

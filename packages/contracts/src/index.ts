@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Portal Profile Retirement",
-  version: "0.74.0-alpha.1",
+  name: "Reviewed Profile Quarantine Recovery",
+  version: "0.75.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -336,7 +336,7 @@ export type BrowserEngine = "chromium" | "chrome" | "msedge";
 export type BrowserSessionState =
   "STARTING" | "ACTIVE" | "USER_TAKEOVER" | "STOPPED" | "FAILED";
 export type BrowserProfileState =
-  "AVAILABLE" | "ACTIVE" | "RETIRED" | "INCONSISTENT";
+  "AVAILABLE" | "ACTIVE" | "CLEANUP_PENDING" | "RETIRED" | "INCONSISTENT";
 export type BrowserActionKind =
   | "NAVIGATE"
   | "CLICK"
@@ -486,6 +486,7 @@ export interface BrowserProfileSnapshot {
   allowed_origins: string[];
   session_count: number;
   last_used_at: string;
+  pending_cleanup_id: string | null;
 }
 
 export interface BrowserProfileRetirementPreview extends BrowserProfileSnapshot {
@@ -501,6 +502,24 @@ export interface BrowserProfileRetirementResult {
   profile_name: string;
   removed: true;
   retired_at: string;
+  notice: string;
+}
+
+export interface BrowserProfileCleanupPreview extends BrowserProfileSnapshot {
+  cleanup_id: string;
+  file_count: number;
+  directory_count: number;
+  total_bytes: number;
+  review_fingerprint: string;
+  notice: string;
+}
+
+export interface BrowserProfileCleanupResult {
+  engine: BrowserEngine;
+  profile_name: string;
+  cleanup_id: string;
+  removed: true;
+  cleaned_at: string;
   notice: string;
 }
 
@@ -2122,6 +2141,11 @@ export interface DesktopBridge {
       engine: BrowserEngine,
       profileName: string,
     ): Promise<BrowserProfileRetirementResult | null>;
+    cleanupBrowserProfile(
+      engine: BrowserEngine,
+      profileName: string,
+      cleanupId: string,
+    ): Promise<BrowserProfileCleanupResult | null>;
     reconcileBrowserField(
       operationId: string,
       sessionId: string,

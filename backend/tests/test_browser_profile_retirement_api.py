@@ -9,6 +9,8 @@ from job_apply_pro.api.routes.browser import get_browser_service
 from job_apply_pro.config import get_settings
 from job_apply_pro.domain.browser import (
     BrowserEngine,
+    BrowserProfileCleanupPreview,
+    BrowserProfileCleanupResult,
     BrowserProfileRetirementPreview,
     BrowserProfileRetirementResult,
     BrowserProfileSnapshot,
@@ -18,6 +20,7 @@ from job_apply_pro.main import create_app
 from job_apply_pro.services.browser_runtime import BrowserRuntimeService
 
 _PROFILE_NAME = "workday-tenant-a"
+_CLEANUP_ID = "d1c5770b-22b0-4e97-81ee-722f9d9ad947"
 _UPDATED_AT = datetime(2026, 9, 15, 18, tzinfo=UTC)
 
 
@@ -61,6 +64,25 @@ def _preview() -> BrowserProfileRetirementPreview:
         total_bytes=4096,
         review_fingerprint="b" * 64,
         notice="Review local browser profile retirement.",
+    )
+
+
+def _cleanup_preview() -> BrowserProfileCleanupPreview:
+    return BrowserProfileCleanupPreview(
+        **_profile()
+        .model_copy(
+            update={
+                "state": BrowserProfileState.CLEANUP_PENDING,
+                "pending_cleanup_id": _CLEANUP_ID,
+            }
+        )
+        .model_dump(),
+        cleanup_id=_CLEANUP_ID,
+        file_count=7,
+        directory_count=3,
+        total_bytes=2048,
+        review_fingerprint="c" * 64,
+        notice="Review isolated browser profile cleanup.",
     )
 
 
@@ -140,3 +162,69 @@ def test_profile_retirement_api_rejects_malformed_profile_name(
         "detail": "Request validation failed; check required fields and supported values"
     }
     service.preview_profile_retirement.assert_not_called()
+
+
+def test_profile_cleanup_api_previews_and_approves_exact_quarantine(
+    retirement_api: tuple[TestClient, Mock],
+) -> None:
+    client, service = retirement_api
+    preview = _cleanup_preview()
+    result = BrowserProfileCleanupResult(
+        engine=BrowserEngine.EDGE,
+        profile_name=_PROFILE_NAME,
+        cleanup_id=_CLEANUP_ID,
+        removed=True,
+        cleaned_at=_UPDATED_AT,
+        notice="Isolated local browser profile data was removed.",
+    )
+    service.preview_profile_cleanup.return_value = preview
+    service.cleanup_profile_quarantine.return_value = result
+    path = f"/api/v1/browser/profiles/msedge/{_PROFILE_NAME}/cleanups/{_CLEANUP_ID}"
+
+    reviewed = client.post(f"{path}/preview")
+    assert reviewed.status_code == 200
+    assert reviewed.json() == preview.model_dump(mode="json")
+    service.preview_profile_cleanup.assert_called_once_with(
+        BrowserEngine.EDGE, _PROFILE_NAME, _CLEANUP_ID
+    )
+
+    approved = client.post(
+        f"{path}/approve",
+        json={
+            "engine": "msedge",
+            "profile_name": _PROFILE_NAME,
+            "cleanup_id": _CLEANUP_ID,
+            "expected_review_fingerprint": preview.review_fingerprint,
+            "confirmation_phrase": "REMOVE ISOLATED PROFILE DATA",
+        },
+    )
+    assert approved.status_code == 200
+    assert approved.json() == result.model_dump(mode="json")
+    approval = service.cleanup_profile_quarantine.call_args.args[0]
+    assert approval.cleanup_id == _CLEANUP_ID
+    assert approval.expected_review_fingerprint == preview.review_fingerprint
+
+
+def test_profile_cleanup_api_rejects_route_mismatch_and_malformed_id(
+    retirement_api: tuple[TestClient, Mock],
+) -> None:
+    client, service = retirement_api
+    mismatched = client.post(
+        f"/api/v1/browser/profiles/msedge/{_PROFILE_NAME}/cleanups/{_CLEANUP_ID}/approve",
+        json={
+            "engine": "msedge",
+            "profile_name": _PROFILE_NAME,
+            "cleanup_id": "a38addb4-38e3-4fe0-a601-e2812e554717",
+            "expected_review_fingerprint": "c" * 64,
+            "confirmation_phrase": "REMOVE ISOLATED PROFILE DATA",
+        },
+    )
+    assert mismatched.status_code == 422
+    assert mismatched.json() == {
+        "detail": "Browser profile cleanup approval does not match the route"
+    }
+    malformed = client.post(
+        f"/api/v1/browser/profiles/msedge/{_PROFILE_NAME}/cleanups/not-a-uuid/preview"
+    )
+    assert malformed.status_code == 422
+    service.cleanup_profile_quarantine.assert_not_called()

@@ -21,6 +21,8 @@ import type {
   BrowserEngine,
   BrowserFieldReconciliationPreview,
   BrowserFieldReconciliationResult,
+  BrowserProfileCleanupPreview,
+  BrowserProfileCleanupResult,
   BrowserProfileRetirementPreview,
   BrowserProfileRetirementResult,
   BrowserProfileSnapshot,
@@ -276,6 +278,35 @@ export class BackendClient {
           profile_name: preview.profile_name,
           expected_review_fingerprint: preview.review_fingerprint,
           confirmation_phrase: "RETIRE LOCAL BROWSER PROFILE",
+        }),
+      },
+    );
+  }
+
+  previewBrowserProfileCleanup(
+    engine: BrowserEngine,
+    profileName: string,
+    cleanupId: string,
+  ): Promise<BrowserProfileCleanupPreview> {
+    return this.request(
+      `/browser/profiles/${encodeURIComponent(engine)}/${encodeURIComponent(profileName)}/cleanups/${encodeURIComponent(cleanupId)}/preview`,
+      { method: "POST" },
+    );
+  }
+
+  approveBrowserProfileCleanup(
+    preview: BrowserProfileCleanupPreview,
+  ): Promise<BrowserProfileCleanupResult> {
+    return this.request(
+      `/browser/profiles/${encodeURIComponent(preview.engine)}/${encodeURIComponent(preview.profile_name)}/cleanups/${encodeURIComponent(preview.cleanup_id)}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          engine: preview.engine,
+          profile_name: preview.profile_name,
+          cleanup_id: preview.cleanup_id,
+          expected_review_fingerprint: preview.review_fingerprint,
+          confirmation_phrase: "REMOVE ISOLATED PROFILE DATA",
         }),
       },
     );
