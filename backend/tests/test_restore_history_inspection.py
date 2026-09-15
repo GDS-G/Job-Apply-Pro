@@ -579,6 +579,53 @@ def test_restore_authenticates_kind_specific_reviewed_reconciliation_payload(
     )
 
 
+def _exact_url_navigation_payload() -> dict[str, object]:
+    return {
+        "action_kind": "NAVIGATE",
+        "navigation_scope": "EXACT_URL",
+        "postcondition": "URL_EQUALS",
+        "request_fingerprint": "a" * 64,
+        "source_origin": "https://careers.example.com",
+        "source_page_type": "JOB_DETAIL",
+        "source_url": "https://careers.example.com/jobs/123",
+        "target_origin": "https://apply.example.com",
+        "target_url": "https://apply.example.com/applications/123",
+    }
+
+
+def test_restore_authenticates_exact_url_navigation_reconciliation_payload() -> None:
+    guard._authenticate_external_effect_reconciliation(
+        {"kind": "BROWSER_NAVIGATION_CONFIRMED"},
+        _exact_url_navigation_payload(),
+        "a" * 64,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("action_kind", "CLICK"),
+        ("navigation_scope", "GENERIC_CLICK"),
+        ("postcondition", "URL_CONTAINS"),
+        ("source_origin", "https://other.example.com"),
+        ("source_url", "https://user:secret@careers.example.com/jobs/123"),
+        ("target_origin", "https://other.example.com"),
+        ("target_url", "javascript:alert(1)"),
+        ("source_page_type", ""),
+        ("request_fingerprint", "e" * 64),
+    ],
+)
+def test_restore_refuses_changed_exact_url_navigation_meaning(field: str, value: object) -> None:
+    payload = _exact_url_navigation_payload()
+    payload[field] = value
+    with pytest.raises(inspection.RestoreHistoryError, match=inspection.UNAVAILABLE):
+        guard._authenticate_external_effect_reconciliation(
+            {"kind": "BROWSER_NAVIGATION_CONFIRMED"},
+            payload,
+            "a" * 64,
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

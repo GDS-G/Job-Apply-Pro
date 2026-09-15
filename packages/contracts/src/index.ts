@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Browser Submission Reconciliation",
-  version: "0.78.0-alpha.1",
+  name: "Reviewed Browser Exact URL Reconciliation",
+  version: "0.79.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -550,6 +550,7 @@ export interface BrowserNavigationReconciliationPreview {
   operation_id: string;
   attempt_id: string;
   session_id: string;
+  navigation_scope: "GREENHOUSE_STAGE" | "EXACT_URL";
   source_page_type: string;
   result_page_type: string;
   result_page_fingerprint: string;
@@ -561,6 +562,7 @@ export interface BrowserNavigationReconciliationResult {
   operation_id: string;
   attempt_id: string;
   session_id: string;
+  navigation_scope: "GREENHOUSE_STAGE" | "EXACT_URL";
   source_page_type: string;
   result_page_type: string;
   result_page_fingerprint: string;

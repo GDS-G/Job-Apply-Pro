@@ -138,8 +138,8 @@ class ReferenceAtsAdapter:
             url=url,
             intended_result=f"Navigate to {result_path}",
             verification=BrowserVerification(
-                kind=VerificationKind.URL_CONTAINS,
-                value=result_path,
+                kind=VerificationKind.URL_EQUALS,
+                value=str(url),
             ),
         )
 

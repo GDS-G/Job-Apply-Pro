@@ -670,7 +670,7 @@ describe("App", () => {
 
     expect(
       screen.getByText(
-        "Reviewed Browser Submission Reconciliation v0.78.0-alpha.1",
+        "Reviewed Browser Exact URL Reconciliation v0.79.0-alpha.1",
       ),
     ).toBeInTheDocument();
     expect(
@@ -1056,6 +1056,7 @@ describe("App", () => {
         operation_id: operationId,
         attempt_id: attemptId,
         session_id: sessionId,
+        navigation_scope: "GREENHOUSE_STAGE",
         source_page_type: "APPLICATION_FORM",
         result_page_type: "DOCUMENT_UPLOAD",
         result_page_fingerprint: "greenhouse-documents-v2",
@@ -1067,7 +1068,7 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(
       await screen.findByRole("button", {
-        name: /verify current form stage/i,
+        name: /verify navigation outcome/i,
       }),
     );
 

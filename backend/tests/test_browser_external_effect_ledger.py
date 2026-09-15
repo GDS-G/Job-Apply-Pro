@@ -272,6 +272,36 @@ def _navigation_action() -> BrowserAction:
     )
 
 
+def _exact_url_navigation_action(
+    target_url: str = "http://127.0.0.1/results",
+) -> BrowserAction:
+    return BrowserAction(
+        kind=BrowserActionKind.NAVIGATE,
+        url=target_url,
+        intended_result="Navigate to the reviewed results page",
+        verification=BrowserVerification(
+            kind=VerificationKind.URL_EQUALS,
+            value=target_url,
+        ),
+    )
+
+
+def _exact_url_navigation_result(
+    *,
+    target_url: str = "http://127.0.0.1/results",
+    page_fingerprint: str = "fixture-results-v2",
+) -> BrowserObservation:
+    return _observation().model_copy(
+        update={
+            "sequence": 2,
+            "url": target_url,
+            "page_type": "RESULTS",
+            "page_fingerprint": page_fingerprint,
+            "previous_action": BrowserActionKind.NAVIGATE.value,
+        }
+    )
+
+
 def _greenhouse_upload_observation(
     *,
     page_fingerprint: str,
@@ -810,6 +840,179 @@ def test_navigation_reconciliation_approval_rechecks_current_stage(
 
     assert effects.has_unresolved_subject("browser_session", session_id)
     assert worker.methods == ["execute", "observe", "observe"]
+
+
+def test_uncertain_exact_url_navigation_reconciles_without_replay(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _exact_url_navigation_action())
+    operation = effects.list_public()[0]
+    assert operation.reconciliation_available
+    assert operation.reconciliation_kind == "BROWSER_NAVIGATION_CONFIRMED"
+    prepared = effects.get(operation.id)
+    assert prepared is not None
+    assert prepared.reconciliation is not None
+    payload = effects.browser_navigation_reconciliation_payload(prepared.reconciliation)
+    assert payload == {
+        "action_kind": "NAVIGATE",
+        "navigation_scope": "EXACT_URL",
+        "postcondition": "URL_EQUALS",
+        "request_fingerprint": prepared.operation.request_fingerprint,
+        "source_origin": "http://127.0.0.1",
+        "source_page_type": "FORM",
+        "source_url": "http://127.0.0.1/form",
+        "target_origin": "http://127.0.0.1",
+        "target_url": "http://127.0.0.1/results",
+    }
+
+    worker.result = _exact_url_navigation_result().model_dump(mode="json")
+    preview = service.preview_navigation_reconciliation(session_id, operation.id)
+    result = service.approve_navigation_reconciliation(
+        session_id,
+        BrowserNavigationReconciliationApproval(
+            operation_id=operation.id,
+            expected_review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="RECONCILE REVIEWED NAVIGATION",
+        ),
+    )
+
+    assert preview.navigation_scope == "EXACT_URL"
+    assert preview.source_page_type == "FORM"
+    assert preview.result_page_type == "RESULTS"
+    assert result.navigation_scope == "EXACT_URL"
+    assert result.result_page_fingerprint == "fixture-results-v2"
+    assert worker.methods == ["execute", "observe", "observe"]
+    assert not effects.has_unresolved_subject("browser_session", session_id)
+    record = effects.get(operation.id)
+    assert record is not None
+    assert record.operation.status is ExternalEffectStatus.UNCERTAIN
+
+
+@pytest.mark.parametrize(
+    ("result", "message"),
+    [
+        (
+            _exact_url_navigation_result(target_url="http://127.0.0.1/other"),
+            "exact reviewed navigation target",
+        ),
+        (
+            _exact_url_navigation_result(page_fingerprint="fixture-page-v1"),
+            "exact reviewed navigation target",
+        ),
+        (
+            _exact_url_navigation_result().model_copy(update={"previous_action": "CLICK"}),
+            "exact reviewed navigation target",
+        ),
+    ],
+)
+def test_exact_url_navigation_reconciliation_refuses_inexact_evidence(
+    session: Session,
+    tmp_path: Path,
+    result: BrowserObservation,
+    message: str,
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _exact_url_navigation_action())
+    operation = effects.list_public()[0]
+    worker.result = result.model_dump(mode="json")
+
+    with pytest.raises(BrowserSessionStateError, match=message):
+        service.preview_navigation_reconciliation(session_id, operation.id)
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe"]
+
+
+def test_exact_url_navigation_approval_rechecks_current_page(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _exact_url_navigation_action())
+    operation = effects.list_public()[0]
+    worker.result = _exact_url_navigation_result().model_dump(mode="json")
+    preview = service.preview_navigation_reconciliation(session_id, operation.id)
+    worker.result = _exact_url_navigation_result(page_fingerprint="fixture-results-v3").model_dump(
+        mode="json"
+    )
+
+    with pytest.raises(BrowserSessionStateError, match="changed after review"):
+        service.approve_navigation_reconciliation(
+            session_id,
+            BrowserNavigationReconciliationApproval(
+                operation_id=operation.id,
+                expected_review_fingerprint=preview.review_fingerprint,
+                confirmation_phrase="RECONCILE REVIEWED NAVIGATION",
+            ),
+        )
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe", "observe"]
+
+
+def test_inexact_url_navigation_has_no_reconciliation_authority(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    action = _exact_url_navigation_action().model_copy(
+        update={
+            "verification": BrowserVerification(
+                kind=VerificationKind.URL_CONTAINS,
+                value="/results",
+            )
+        }
+    )
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, action)
+    operation = effects.list_public()[0]
+
+    assert not operation.reconciliation_available
+    with pytest.raises(BrowserSessionStateError, match="not an available"):
+        service.preview_navigation_reconciliation(session_id, operation.id)
+    assert worker.methods == ["execute"]
+
+
+def test_exact_url_navigation_refuses_target_already_current(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("must not dispatch"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+
+    with pytest.raises(BrowserPolicyError, match="outside the reconciliation contract"):
+        service.execute_action(
+            session_id,
+            _exact_url_navigation_action("http://127.0.0.1/form"),
+        )
+
+    assert effects.list_public() == []
+    assert worker.methods == []
 
 
 def test_uncertain_upload_is_reconciled_only_by_exact_new_filename(

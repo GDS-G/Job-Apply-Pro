@@ -654,6 +654,9 @@ def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
             ExternalEffectReconciliationKind.BROWSER_UPLOAD_CONFIRMED: (
                 "browser-upload-reconciliation-v1"
             ),
+            ExternalEffectReconciliationKind.BROWSER_SUBMISSION_CONFIRMED: (
+                "browser-submission-reconciliation-v1"
+            ),
         }
         if (
             reconciled_operation is None
@@ -679,6 +682,7 @@ def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
                 in {
                     ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED,
                     ExternalEffectReconciliationKind.BROWSER_UPLOAD_CONFIRMED,
+                    ExternalEffectReconciliationKind.BROWSER_SUBMISSION_CONFIRMED,
                 }
                 and reconciliation.source_page_fingerprint == reconciliation.result_page_fingerprint
             )

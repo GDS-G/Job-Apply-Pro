@@ -1,6 +1,12 @@
 # Windows release and rollback runbook
 
-## v0.78 candidate-specific checks
+## v0.79 candidate-specific checks
+
+For Reviewed Browser Exact URL Reconciliation `v0.79.0-alpha.1`, freeze one candidate and verify only a standard direct `NAVIGATE` with a different explicit allowlisted HTTP(S) target and exact `URL_EQUALS` postcondition receives encrypted pre-dispatch reconciliation intent. Inject worker-response loss and require preview plus approval to independently prove the exact target URL/origin, changed page fingerprint, bounded result page type and worker-maintained `previous_action = NAVIGATE`. Inject `URL_CONTAINS`, redirect/inexact URL, already-current target, wrong/foreign origin, unchanged fingerprint, missing/wrong prior action, stale approval, mixed/tampered restore payload, replaced attempt, unavailable worker, arbitrary link click and older action. Every case must remain consumed and unresolved without navigation replay. Verify the original operation/action/attempt stay `UNCERTAIN`, only reconciliation terminalizes, the session stays in takeover, full URLs remain outside the public preview, the Cancel-default native dialog distinguishes `EXACT_URL` from `GREENHOUSE_STAGE`, and the renderer exposes only the generic review control for a matching session. Re-run historical Greenhouse field/stage/upload/submission reconciliation, Reference ATS navigation, authenticated restore, package smokes and both delivered protocols. Never enable a production portal or transfer v0.78 evidence. Signed, physical, update/rollback and authorized live-portal checks remain separate release-owner gates.
+
+Exact source/package evidence must be taken from the final corresponding v0.79 checkpoints in the readiness audit; do not reuse an intermediate run or any v0.78 artifact.
+
+## Historical v0.78 candidate-specific checks
 
 For Reviewed Browser Submission Reconciliation `v0.78.0-alpha.1`, freeze one candidate and verify exact Greenhouse final-submit intent is encrypted before dispatch, response-loss handling never replays the click, and preview plus approval independently prove the same origin, changed page fingerprint, recognized confirmation page/capability, required confirmation text and one bounded provider identifier. Verify the original operation and only attempt remain `UNCERTAIN`, only the separate reconciliation terminalizes, saved/public/renderer output exposes no raw identifier, and the desktop performs the existing read-only supervised capture only while the confirmation remains current so the run records `SUBMISSION_CONFIRMED` and stops. Inject absent/duplicate/malformed identifiers, missing confirmation signals, wrong/foreign origins, unchanged pages, stale approvals, unsupported adapter semantics, replaced attempts, unavailable workers and post-reconciliation capture failure. Require safe recoverability without submit replay. Verify authenticated API/client/IPC identity, Cancel-default native review, kind-specific renderer control, exact restore authentication and regression safety for field/navigation/upload reconciliation. Package and protocol checks must run against both built and installer-delivered copies. Never enable production Greenhouse or transfer v0.77 evidence. Signed, physical, update/rollback and authorized live-portal checks remain separate release-owner gates.
 
@@ -158,7 +164,7 @@ Forward database restore preserves current rows and their dependency closure acr
 
 ## Signed publication
 
-1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.78.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
+1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.79.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
 2. The workflow tests, builds, requires the certificate, signs the NSIS installer, generates an SPDX JSON SBOM, verifies Authenticode, creates SHA-256 checksums and dependency inventories, and only then publishes a prerelease.
 3. Download the published installer on a clean supported Windows workstation. Verify `Get-AuthenticodeSignature` reports `Valid`, the subject is the expected publisher, and the SHA-256 value matches `SHA256SUMS.txt`.
 4. Install, launch, perform the smoke workflow, and confirm the update metadata resolves to the same signed artifact.

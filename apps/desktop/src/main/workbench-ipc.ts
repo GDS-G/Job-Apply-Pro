@@ -859,11 +859,14 @@ export function registerWorkbenchIpc(
           sessionId,
         );
       const owner = BrowserWindow.fromWebContents(event.sender);
+      const exactUrl = preview.navigation_scope === "EXACT_URL";
       const options = {
         type: "warning" as const,
         title: "Record reviewed navigation outcome?",
-        message: "A recognized later Greenhouse form stage is visible now.",
-        detail: `From: ${preview.source_page_type}\nTo: ${preview.result_page_type}\nSession: ${preview.session_id}\nResult page fingerprint: ${preview.result_page_fingerprint}\nReview fingerprint: ${preview.review_fingerprint}\n\nThis records that the prior uncertain navigation reached a later reviewed form stage. It does not click, retry, upload, or submit.`,
+        message: exactUrl
+          ? "The exact reviewed URL target is visible now."
+          : "A recognized later Greenhouse form stage is visible now.",
+        detail: `Scope: ${preview.navigation_scope}\nFrom: ${preview.source_page_type}\nTo: ${preview.result_page_type}\nSession: ${preview.session_id}\nResult page fingerprint: ${preview.result_page_fingerprint}\nReview fingerprint: ${preview.review_fingerprint}\n\n${exactUrl ? "This records that the prior uncertain direct navigation reached its exact URL target." : "This records that the prior uncertain navigation reached a later reviewed form stage."} It does not click, retry, navigate, upload, or submit.`,
         buttons: ["Cancel", "Record navigation outcome"],
         defaultId: 0,
         cancelId: 0,

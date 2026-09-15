@@ -373,6 +373,8 @@ class BrowserWorker:
             return True
         if rule.kind is VerificationKind.URL_CONTAINS:
             return bool(rule.value and rule.value in page.url)
+        if rule.kind is VerificationKind.URL_EQUALS:
+            return rule.value is not None and page.url == rule.value
         if rule.kind is VerificationKind.TITLE_CONTAINS:
             return bool(rule.value and rule.value in page.title())
         if rule.kind is VerificationKind.TEXT_VISIBLE:

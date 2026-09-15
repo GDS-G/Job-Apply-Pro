@@ -155,6 +155,25 @@ def _origin(value: object) -> bool:
     )
 
 
+def _url_origin(value: object, *, maximum: int) -> str | None:
+    if not _bounded_text(value, maximum):
+        return None
+    assert isinstance(value, str)
+    try:
+        parsed = urlsplit(value)
+        port = f":{parsed.port}" if parsed.port else ""
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    return f"{parsed.scheme}://{parsed.hostname.casefold()}{port}"
+
+
 def _authenticate_external_effect_reconciliation(
     row: Mapping[str, object], payload: dict[str, object], request_fingerprint: object
 ) -> None:
@@ -192,6 +211,17 @@ def _authenticate_external_effect_reconciliation(
         "source_page_type",
         "source_stage",
     }
+    exact_url_navigation_keys = {
+        "action_kind",
+        "navigation_scope",
+        "postcondition",
+        "request_fingerprint",
+        "source_origin",
+        "source_page_type",
+        "source_url",
+        "target_origin",
+        "target_url",
+    }
     upload_keys = navigation_keys | {
         "expected_file_bytes",
         "expected_file_name",
@@ -210,6 +240,31 @@ def _authenticate_external_effect_reconciliation(
     }.get(kind)
     if expected_keys is None:
         raise RestoreHistoryError(UNAVAILABLE)
+    if (
+        kind is ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED
+        and set(payload) == exact_url_navigation_keys
+    ):
+        try:
+            action_kind = BrowserActionKind(str(payload["action_kind"]))
+        except (KeyError, ValueError):
+            raise RestoreHistoryError(UNAVAILABLE) from None
+        source_url = payload.get("source_url")
+        target_url = payload.get("target_url")
+        exact_source_origin = _url_origin(source_url, maximum=2_000)
+        exact_target_origin = _url_origin(target_url, maximum=500)
+        if (
+            action_kind is not BrowserActionKind.NAVIGATE
+            or payload.get("navigation_scope") != "EXACT_URL"
+            or payload.get("postcondition") != VerificationKind.URL_EQUALS.value
+            or not _bounded_text(payload.get("source_page_type"), 100)
+            or exact_source_origin is None
+            or exact_target_origin is None
+            or payload.get("source_origin") != exact_source_origin
+            or payload.get("target_origin") != exact_target_origin
+            or source_url == target_url
+        ):
+            raise RestoreHistoryError(UNAVAILABLE)
+        return
     try:
         action_kind = BrowserActionKind(str(payload["action_kind"]))
         locator_value = payload["locator"]

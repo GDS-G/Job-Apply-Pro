@@ -109,3 +109,5 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0085: Reviewed profile quarantine recovery](0085-reviewed-profile-quarantine-recovery.md)
 - [ADR-0086: Reviewed browser navigation reconciliation](0086-reviewed-browser-navigation-reconciliation.md)
 - [ADR-0087: Reviewed browser upload reconciliation](0087-reviewed-browser-upload-reconciliation.md)
+- [ADR-0088: Reviewed browser submission reconciliation](0088-reviewed-browser-submission-reconciliation.md)
+- [ADR-0089: Reviewed browser exact URL reconciliation](0089-reviewed-browser-exact-url-reconciliation.md)

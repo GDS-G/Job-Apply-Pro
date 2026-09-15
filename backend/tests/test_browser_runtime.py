@@ -463,6 +463,43 @@ def test_browser_runtime_rejects_external_origins_when_production_is_locked(
         worker.close()
 
 
+def test_browser_runtime_verifies_direct_navigation_by_exact_url(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/start"),
+                    profile_name="exact-url-navigation",
+                )
+            )
+            target_url = f"{origin}/experience"
+            result = service.execute_action(
+                started.id,
+                BrowserAction(
+                    kind=BrowserActionKind.NAVIGATE,
+                    url=target_url,
+                    intended_result="Navigate to exact experience URL",
+                    verification=BrowserVerification(
+                        kind=VerificationKind.URL_EQUALS,
+                        value=target_url,
+                    ),
+                ),
+            )
+
+            assert result.verified
+            assert result.observation.url == target_url
+            assert result.observation.previous_action == BrowserActionKind.NAVIGATE.value
+            service.stop(started.id)
+    finally:
+        worker.close()
+
+
 def test_persistent_profile_reuse_is_bound_to_exact_origins_and_spelling(
     session: Session, tmp_path: Path
 ) -> None:

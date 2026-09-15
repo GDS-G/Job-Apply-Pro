@@ -1129,6 +1129,7 @@ class BrowserRuntimeService:
             operation_id=preview.operation_id,
             attempt_id=preview.attempt_id,
             session_id=session_id,
+            navigation_scope=preview.navigation_scope,
             source_page_type=preview.source_page_type,
             result_page_type=preview.result_page_type,
             result_page_fingerprint=observation.page_fingerprint,
@@ -1137,8 +1138,12 @@ class BrowserRuntimeService:
             ),
             reconciled_at=reconciliation.reconciled_at,
             notice=(
-                "A recognized later Greenhouse form stage was observed and recorded. "
-                "The original uncertain navigation remains immutable and was not retried."
+                (
+                    "A recognized later Greenhouse form stage was observed and recorded. "
+                    if preview.navigation_scope == "GREENHOUSE_STAGE"
+                    else "The exact reviewed URL target was observed and recorded. "
+                )
+                + "The original uncertain navigation remains immutable and was not retried."
             ),
         )
 
@@ -1813,6 +1818,125 @@ class BrowserRuntimeService:
             raise BrowserReconciliationUnprovenError(
                 "Encrypted browser navigation reconciliation intent is invalid"
             ) from None
+        exact_url_keys = {
+            "action_kind",
+            "navigation_scope",
+            "postcondition",
+            "request_fingerprint",
+            "source_origin",
+            "source_page_type",
+            "source_url",
+            "target_origin",
+            "target_url",
+        }
+        if set(payload) == exact_url_keys:
+            try:
+                action_kind = BrowserActionKind(str(payload["action_kind"]))
+                navigation_scope = str(payload["navigation_scope"])
+                postcondition = str(payload["postcondition"])
+                source_origin = str(payload["source_origin"])
+                source_page_type = str(payload["source_page_type"])
+                source_url = str(payload["source_url"])
+                target_origin = str(payload["target_origin"])
+                target_url = str(payload["target_url"])
+                source_url_origin = _origin(source_url)
+                target_url_origin = _origin(target_url)
+            except (BrowserPolicyError, TypeError, ValueError):
+                raise BrowserReconciliationUnprovenError(
+                    "Encrypted browser navigation reconciliation intent is invalid"
+                ) from None
+            expected_verification = BrowserVerification(
+                kind=VerificationKind.URL_EQUALS,
+                value=target_url,
+            )
+            if (
+                action_kind is not BrowserActionKind.NAVIGATE
+                or navigation_scope != "EXACT_URL"
+                or postcondition != VerificationKind.URL_EQUALS.value
+                or action.kind is not action_kind
+                or action.url is None
+                or str(action.url) != target_url
+                or action.verification != expected_verification
+                or action.preconditions
+                or action.locator is not None
+                or action.coordinates is not None
+                or action.value is not None
+                or action.file_path is not None
+                or action.permission is not BrowserPermission.STANDARD
+                or action.confirmation is not ConfirmationState.NOT_REQUIRED
+                or action.sensitive_value
+                or action_result.verified
+                or action_result.error is None
+                or attempt.target_code != BrowserActionKind.NAVIGATE.value
+                or payload["request_fingerprint"] != effect.operation.request_fingerprint
+                or not source_page_type
+                or len(source_page_type) > 100
+                or source_url_origin != source_origin
+                or target_url_origin != target_origin
+                or source_url == target_url
+                or len(source_url) > 2_000
+                or len(target_url) > 500
+            ):
+                raise BrowserReconciliationUnprovenError(
+                    "Uncertain browser action is outside the exact URL navigation contract"
+                )
+            try:
+                observation = BrowserObservation.model_validate(
+                    self._worker.call("observe", {"session_id": session_id}, timeout_seconds=75)
+                )
+                self._validate_live_observation(session, observation)
+            except (TypeError, ValueError, BrowserPolicyError):
+                raise BrowserReconciliationUnprovenError(
+                    "Current page does not prove the exact reviewed navigation target"
+                ) from None
+            if (
+                observation.origin != target_origin
+                or observation.url != target_url
+                or observation.page_fingerprint == intent.source_page_fingerprint
+                or observation.previous_action != BrowserActionKind.NAVIGATE.value
+                or not observation.page_type
+                or len(observation.page_type) > 100
+            ):
+                raise BrowserReconciliationUnprovenError(
+                    "Current page does not prove the exact reviewed navigation target"
+                )
+            exact_evidence: dict[str, object] = {
+                "policy_version": (ExternalEffectService.NAVIGATION_RECONCILIATION_POLICY_VERSION),
+                "operation_id": effect.operation.id,
+                "attempt_id": attempt.id,
+                "session_id": session_id,
+                "action_kind": action_kind.value,
+                "navigation_scope": navigation_scope,
+                "postcondition": postcondition,
+                "request_fingerprint": effect.operation.request_fingerprint,
+                "source_page_fingerprint": intent.source_page_fingerprint,
+                "source_page_type": source_page_type,
+                "source_origin": source_origin,
+                "source_url": source_url,
+                "result_page_fingerprint": observation.page_fingerprint,
+                "result_page_type": observation.page_type,
+                "target_origin": target_origin,
+                "target_url": target_url,
+            }
+            review_fingerprint = self._external_effects.request_fingerprint(exact_evidence)
+            return (
+                BrowserNavigationReconciliationPreview(
+                    operation_id=effect.operation.id,
+                    attempt_id=attempt.id,
+                    session_id=session_id,
+                    navigation_scope="EXACT_URL",
+                    source_page_type=source_page_type,
+                    result_page_type=observation.page_type,
+                    result_page_fingerprint=observation.page_fingerprint,
+                    review_fingerprint=review_fingerprint,
+                    notice=(
+                        "The exact reviewed URL target is currently observed after one direct "
+                        "navigation. Approval records reconciliation without navigating again."
+                    ),
+                ),
+                observation,
+                exact_evidence,
+            )
         if set(payload) != {
             "action_kind",
             "control_key",
@@ -1916,6 +2040,7 @@ class BrowserRuntimeService:
                 operation_id=effect.operation.id,
                 attempt_id=attempt.id,
                 session_id=session_id,
+                navigation_scope="GREENHOUSE_STAGE",
                 source_page_type=source_page_type,
                 result_page_type=observation.page_type,
                 result_page_fingerprint=observation.page_fingerprint,
@@ -2115,7 +2240,9 @@ class BrowserRuntimeService:
         action: BrowserAction, observation: BrowserObservation | None
     ) -> dict[str, object] | None:
         if action.intended_result != _GREENHOUSE_NAVIGATION_INTENT:
-            return None
+            return BrowserRuntimeService._exact_url_navigation_reconciliation_intent(
+                action, observation
+            )
         if observation is None:
             raise BrowserPolicyError(
                 "Reviewed Greenhouse navigation requires a current browser observation"
@@ -2175,6 +2302,56 @@ class BrowserRuntimeService:
             "source_origin": observation.origin,
             "source_page_type": observation.page_type,
             "source_stage": assessment.stage.value,
+        }
+
+    @staticmethod
+    def _exact_url_navigation_reconciliation_intent(
+        action: BrowserAction, observation: BrowserObservation | None
+    ) -> dict[str, object] | None:
+        if (
+            action.kind is not BrowserActionKind.NAVIGATE
+            or action.verification.kind is not VerificationKind.URL_EQUALS
+        ):
+            return None
+        if observation is None:
+            raise BrowserPolicyError("Exact URL navigation requires a current browser observation")
+        if action.url is None or action.verification.value is None:
+            raise BrowserPolicyError("Exact URL navigation requires one explicit target URL")
+        target_url = str(action.url)
+        try:
+            source_origin = _origin(observation.url)
+            target_origin = _origin(target_url)
+        except BrowserPolicyError:
+            raise BrowserPolicyError(
+                "Exact URL navigation requires valid source and target URLs"
+            ) from None
+        if (
+            action.verification.value != target_url
+            or action.preconditions
+            or action.locator is not None
+            or action.coordinates is not None
+            or action.value is not None
+            or action.file_path is not None
+            or action.permission is not BrowserPermission.STANDARD
+            or action.confirmation is not ConfirmationState.NOT_REQUIRED
+            or action.sensitive_value
+            or observation.origin != source_origin
+            or not observation.page_type
+            or len(observation.page_type) > 100
+            or len(observation.url) > 2_000
+            or len(target_url) > 500
+            or observation.url == target_url
+        ):
+            raise BrowserPolicyError("Exact URL navigation is outside the reconciliation contract")
+        return {
+            "action_kind": action.kind.value,
+            "navigation_scope": "EXACT_URL",
+            "postcondition": VerificationKind.URL_EQUALS.value,
+            "source_origin": source_origin,
+            "source_page_type": observation.page_type,
+            "source_url": observation.url,
+            "target_origin": target_origin,
+            "target_url": target_url,
         }
 
     def _prove_field_reconciliation(

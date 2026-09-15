@@ -74,6 +74,7 @@ const navigationPreview: BrowserNavigationReconciliationPreview = {
   operation_id: operationId,
   attempt_id: attemptId,
   session_id: sessionId,
+  navigation_scope: "GREENHOUSE_STAGE",
   source_page_type: "APPLICATION_FORM",
   result_page_type: "DOCUMENT_UPLOAD",
   result_page_fingerprint: "greenhouse-documents-v2",
@@ -84,6 +85,7 @@ const navigationResult: BrowserNavigationReconciliationResult = {
   operation_id: operationId,
   attempt_id: attemptId,
   session_id: sessionId,
+  navigation_scope: "GREENHOUSE_STAGE",
   source_page_type: navigationPreview.source_page_type,
   result_page_type: navigationPreview.result_page_type,
   result_page_fingerprint: navigationPreview.result_page_fingerprint,
@@ -547,6 +549,32 @@ describe("browser field reconciliation IPC boundary", () => {
       cancelId: 0,
       noLink: true,
     });
+    expect(
+      client.approveBrowserNavigationReconciliation,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("uses exact-target language for direct URL navigation reconciliation", async () => {
+    client.previewBrowserNavigationReconciliation.mockResolvedValue({
+      ...navigationPreview,
+      navigation_scope: "EXACT_URL",
+      source_page_type: "JOB_DETAIL",
+      result_page_type: "APPLICATION_FORM",
+    });
+
+    await expect(invokeNavigation(operationId, sessionId)).resolves.toBeNull();
+
+    expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+      message: "The exact reviewed URL target is visible now.",
+      defaultId: 0,
+      cancelId: 0,
+    });
+    expect(showMessageBox.mock.calls[0]?.[0]?.detail).toContain(
+      "Scope: EXACT_URL",
+    );
+    expect(showMessageBox.mock.calls[0]?.[0]?.detail).toContain(
+      "does not click, retry, navigate, upload, or submit",
+    );
     expect(
       client.approveBrowserNavigationReconciliation,
     ).not.toHaveBeenCalled();

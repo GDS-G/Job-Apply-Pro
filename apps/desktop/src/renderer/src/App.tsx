@@ -1928,7 +1928,7 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Browser Submission Reconciliation v0.78.0-alpha.1
+                Reviewed Browser Exact URL Reconciliation v0.79.0-alpha.1
               </strong>
               <p>
                 An uncertain exact reviewed Greenhouse final submission can be
@@ -4406,7 +4406,7 @@ export function App() {
                             <ShieldCheck size={15} />
                             {effect.reconciliation_kind ===
                             "BROWSER_NAVIGATION_CONFIRMED"
-                              ? "Verify current form stage"
+                              ? "Verify navigation outcome"
                               : effect.reconciliation_kind ===
                                   "BROWSER_SUBMISSION_CONFIRMED"
                                 ? "Verify confirmed submission"

@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.browser.client import BrowserWorkerClient
+from job_apply_pro.domain.browser import BrowserActionKind, VerificationKind
 from job_apply_pro.domain.candidate import CandidateProfileCreate, ContactDetails
 from job_apply_pro.domain.jobs import JobCreate
 from job_apply_pro.domain.knowledge import ClaimPermittedUse, ClaimReview, DocumentKind
@@ -342,3 +343,14 @@ def test_reference_ats_completes_discovery_to_confirmed_tracking(
 def test_reference_adapter_rejects_non_loopback_discovery() -> None:
     with pytest.raises(PortalContractError, match="loopback"):
         ReferenceAtsAdapter().discover_jobs("https://jobs.example.com", "engineer")
+
+
+def test_reference_adapter_builds_exact_url_navigation() -> None:
+    target_url = AnyHttpUrl("http://127.0.0.1/application/identity")
+
+    action = ReferenceAtsAdapter().navigate(target_url, "/application/identity")
+
+    assert action.kind is BrowserActionKind.NAVIGATE
+    assert action.url == target_url
+    assert action.verification.kind is VerificationKind.URL_EQUALS
+    assert action.verification.value == str(target_url)

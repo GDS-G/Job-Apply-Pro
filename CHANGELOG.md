@@ -2,6 +2,20 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.79.0-alpha.1] - Unreleased
+
+### Reviewed Browser Exact URL Reconciliation
+
+- Add exact `URL_EQUALS` verification and use it for Reference ATS direct navigation instead of path-substring acceptance.
+- Prepare encrypted reconciliation intent only for one standard allowlisted direct navigation whose explicit target differs from the current URL.
+- Bind operation/attempt/request, `EXACT_URL` scope, exact source and target URLs/origins, source page type, source page fingerprint, and exact postcondition before dispatch.
+- Require two fresh read-only observations of the exact target URL/origin, a changed page fingerprint, a bounded page type, and worker-maintained `previous_action = NAVIGATE`.
+- Reject redirects, partial URLs, already-current targets, manual browsing, arbitrary link clicks, stale previews, missing worker provenance, and older actions without intent.
+- Keep original operations/actions/attempts immutable `UNCERTAIN`, terminalize only reconciliation, retain user takeover, and perform no navigation or retry during proof.
+- Add `GREENHOUSE_STAGE` versus `EXACT_URL` preview scope, shared-contract typing, generic Operations wording, and Cancel-default scope-specific native review.
+- Authenticate the disjoint exact-URL payload during forward restore while preserving historical Greenhouse navigation intent; explicitly restore-authenticate v0.78 submission policy closure.
+- Reuse schema `20260915_0030`; production portals, authorized live acceptance, signing, and physical Windows validation remain separate gates.
+
 ## [0.78.0-alpha.1] - Unreleased
 
 ### Reviewed Browser Submission Reconciliation

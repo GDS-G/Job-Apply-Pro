@@ -99,6 +99,7 @@ class ConfirmationState(StrEnum):
 class VerificationKind(StrEnum):
     NONE = "NONE"
     URL_CONTAINS = "URL_CONTAINS"
+    URL_EQUALS = "URL_EQUALS"
     TITLE_CONTAINS = "TITLE_CONTAINS"
     TEXT_VISIBLE = "TEXT_VISIBLE"
     LOCATOR_VISIBLE = "LOCATOR_VISIBLE"
@@ -682,6 +683,7 @@ class BrowserNavigationReconciliationPreview(BaseModel):
     operation_id: str = Field(pattern=_UUID_PATTERN)
     attempt_id: str = Field(pattern=_UUID_PATTERN)
     session_id: str = Field(pattern=_UUID_PATTERN)
+    navigation_scope: Literal["GREENHOUSE_STAGE", "EXACT_URL"]
     source_page_type: str = Field(min_length=1, max_length=100)
     result_page_type: str = Field(min_length=1, max_length=100)
     result_page_fingerprint: str = Field(min_length=1, max_length=200)
@@ -703,6 +705,7 @@ class BrowserNavigationReconciliationResult(BaseModel):
     operation_id: str = Field(pattern=_UUID_PATTERN)
     attempt_id: str = Field(pattern=_UUID_PATTERN)
     session_id: str = Field(pattern=_UUID_PATTERN)
+    navigation_scope: Literal["GREENHOUSE_STAGE", "EXACT_URL"]
     source_page_type: str = Field(min_length=1, max_length=100)
     result_page_type: str = Field(min_length=1, max_length=100)
     result_page_fingerprint: str = Field(min_length=1, max_length=200)

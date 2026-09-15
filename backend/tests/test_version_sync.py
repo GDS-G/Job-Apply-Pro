@@ -19,9 +19,9 @@ def test_release_metadata_is_synchronized() -> None:
     )
     backend = tomllib.loads((root / "backend" / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert version == __version__ == "0.78.0-alpha.1"
+    assert version == __version__ == "0.79.0-alpha.1"
     assert build == {
-        "name": "Reviewed Browser Submission Reconciliation",
+        "name": "Reviewed Browser Exact URL Reconciliation",
         "version": version,
         "channel": "alpha",
         "roadmap_phases": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
