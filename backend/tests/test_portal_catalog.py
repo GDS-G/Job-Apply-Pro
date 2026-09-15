@@ -38,7 +38,19 @@ def test_named_portal_catalog_and_sanitized_replays() -> None:
     }
     assert all(item.strategy is PortalExecutionStrategy.GENERIC_AGENT for item in definitions)
     assert all(not item.production_enabled for item in definitions)
-    assert all(len(item.replay_validated_page_types) == 4 for item in definitions)
+    assert all(
+        len(item.replay_validated_page_types) == (7 if item.kind is PortalKind.GREENHOUSE else 4)
+        for item in definitions
+    )
+    greenhouse = catalog.get(PortalKind.GREENHOUSE)
+    assert greenhouse.adapter_version == "1.0.0"
+    assert set(greenhouse.replay_validated_page_types) >= {
+        "APPLICATION_FORM",
+        "DOCUMENT_UPLOAD",
+        "QUESTIONNAIRE",
+        "SUBMISSION_REVIEW",
+        "CONFIRMATION",
+    }
     assert all(not item.live_validated_page_types for item in definitions)
     expected_fingerprints = {
         "JOB_SEARCH_RESULTS",

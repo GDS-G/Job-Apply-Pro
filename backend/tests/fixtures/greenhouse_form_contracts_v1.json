@@ -1,0 +1,272 @@
+{
+  "version": "greenhouse-form-execution-contract/1",
+  "sanitized": true,
+  "cases": [
+    {
+      "id": "contact-blocked-by-field-and-widget",
+      "page_type": "APPLICATION_FORM",
+      "url": "https://job-boards.greenhouse.io/synthetic/jobs/100#app",
+      "page_fingerprint": "gh-contact-blocked",
+      "validation_errors": [],
+      "upload_status": [],
+      "controls": [
+        {
+          "index": 0,
+          "control_key": "email",
+          "tag": "input",
+          "type": "email",
+          "label": "Email",
+          "label_source": "LABEL",
+          "required": true,
+          "visible": true,
+          "will_validate": true,
+          "constraint_satisfied": false
+        },
+        {
+          "index": 1,
+          "control_key": "location-widget",
+          "tag": "div",
+          "role": "combobox",
+          "label": "Location",
+          "required": true,
+          "visible": true,
+          "widget_popup": "listbox",
+          "widget_searchable": true
+        },
+        {
+          "index": 2,
+          "control_key": "contact-next",
+          "tag": "button",
+          "text": "Next",
+          "visible": true
+        }
+      ],
+      "expected": {
+        "stage": "APPLICATION",
+        "required": 2,
+        "satisfied": 0,
+        "review_fields": 1,
+        "upload_reviews": 0,
+        "manual": 1,
+        "ready": false,
+        "navigation": "contact-next"
+      }
+    },
+    {
+      "id": "contact-ready",
+      "page_type": "APPLICATION_FORM",
+      "url": "https://job-boards.greenhouse.io/synthetic/jobs/100#app",
+      "page_fingerprint": "gh-contact-ready",
+      "validation_errors": [],
+      "upload_status": [],
+      "controls": [
+        {
+          "index": 0,
+          "control_key": "email",
+          "tag": "input",
+          "type": "email",
+          "label": "Email",
+          "label_source": "LABEL",
+          "required": true,
+          "visible": true,
+          "will_validate": true,
+          "constraint_satisfied": true
+        },
+        {
+          "index": 1,
+          "control_key": "contact-next",
+          "tag": "button",
+          "text": "Next",
+          "visible": true
+        }
+      ],
+      "expected": {
+        "stage": "APPLICATION",
+        "required": 1,
+        "satisfied": 1,
+        "review_fields": 0,
+        "upload_reviews": 0,
+        "manual": 0,
+        "ready": true,
+        "navigation": "contact-next"
+      }
+    },
+    {
+      "id": "document-upload-pending",
+      "page_type": "DOCUMENT_UPLOAD",
+      "url": "https://job-boards.greenhouse.io/synthetic/jobs/100#documents",
+      "page_fingerprint": "gh-upload-pending",
+      "validation_errors": [],
+      "upload_status": [],
+      "controls": [
+        {
+          "index": 0,
+          "control_key": "resume",
+          "tag": "input",
+          "type": "file",
+          "label": "Resume",
+          "label_source": "LABEL",
+          "accept": ".pdf,.doc,.docx",
+          "required": true,
+          "visible": true,
+          "will_validate": true,
+          "constraint_satisfied": false
+        },
+        {
+          "index": 1,
+          "control_key": "documents-next",
+          "tag": "button",
+          "text": "Continue",
+          "visible": true
+        }
+      ],
+      "expected": {
+        "stage": "DOCUMENTS",
+        "required": 1,
+        "satisfied": 0,
+        "review_fields": 0,
+        "upload_reviews": 1,
+        "manual": 0,
+        "ready": false,
+        "navigation": "documents-next"
+      }
+    },
+    {
+      "id": "document-upload-ready",
+      "page_type": "DOCUMENT_UPLOAD",
+      "url": "https://job-boards.greenhouse.io/synthetic/jobs/100#documents",
+      "page_fingerprint": "gh-upload-ready",
+      "validation_errors": [],
+      "upload_status": ["candidate-resume.pdf"],
+      "controls": [
+        {
+          "index": 0,
+          "control_key": "resume",
+          "tag": "input",
+          "type": "file",
+          "label": "Resume",
+          "label_source": "LABEL",
+          "accept": ".pdf,.doc,.docx",
+          "required": true,
+          "visible": true,
+          "will_validate": true,
+          "constraint_satisfied": true
+        },
+        {
+          "index": 1,
+          "control_key": "documents-next",
+          "tag": "button",
+          "text": "Continue",
+          "visible": true
+        }
+      ],
+      "expected": {
+        "stage": "DOCUMENTS",
+        "required": 1,
+        "satisfied": 1,
+        "review_fields": 0,
+        "upload_reviews": 0,
+        "manual": 0,
+        "ready": true,
+        "navigation": "documents-next"
+      }
+    },
+    {
+      "id": "questionnaire-optional-custom-widget",
+      "page_type": "QUESTIONNAIRE",
+      "url": "https://job-boards.greenhouse.io/synthetic/jobs/100#questions",
+      "page_fingerprint": "gh-questionnaire-ready",
+      "validation_errors": [],
+      "upload_status": [],
+      "controls": [
+        {
+          "index": 0,
+          "control_key": "authorization",
+          "tag": "select",
+          "label": "Work authorization",
+          "label_source": "LABEL",
+          "required": true,
+          "visible": true,
+          "will_validate": true,
+          "constraint_satisfied": true,
+          "options": ["Yes", "No"]
+        },
+        {
+          "index": 1,
+          "control_key": "referral-widget",
+          "tag": "div",
+          "role": "combobox",
+          "label": "Referral source",
+          "required": false,
+          "visible": true,
+          "widget_popup": "listbox",
+          "widget_searchable": true
+        },
+        {
+          "index": 2,
+          "control_key": "questions-review",
+          "tag": "button",
+          "text": "Review application",
+          "visible": true
+        }
+      ],
+      "expected": {
+        "stage": "QUESTIONNAIRE",
+        "required": 1,
+        "satisfied": 1,
+        "review_fields": 0,
+        "upload_reviews": 0,
+        "manual": 0,
+        "ready": true,
+        "navigation": "questions-review"
+      }
+    },
+    {
+      "id": "submission-review",
+      "page_type": "SUBMISSION_REVIEW",
+      "url": "https://job-boards.greenhouse.io/synthetic/jobs/100#review",
+      "page_fingerprint": "gh-review",
+      "validation_errors": [],
+      "upload_status": ["candidate-resume.pdf"],
+      "controls": [
+        {
+          "index": 0,
+          "control_key": "submit",
+          "tag": "button",
+          "type": "submit",
+          "text": "Submit application",
+          "visible": true
+        }
+      ],
+      "expected": {
+        "stage": "REVIEW",
+        "required": 0,
+        "satisfied": 0,
+        "review_fields": 0,
+        "upload_reviews": 0,
+        "manual": 0,
+        "ready": false,
+        "navigation": null
+      }
+    },
+    {
+      "id": "identifier-backed-confirmation",
+      "page_type": "CONFIRMATION",
+      "url": "https://job-boards.greenhouse.io/synthetic/jobs/100/confirmation",
+      "page_fingerprint": "gh-confirmation",
+      "validation_errors": [],
+      "upload_status": ["candidate-resume.pdf"],
+      "controls": [],
+      "expected": {
+        "stage": "CONFIRMATION",
+        "required": 0,
+        "satisfied": 0,
+        "review_fields": 0,
+        "upload_reviews": 0,
+        "manual": 0,
+        "ready": false,
+        "navigation": null
+      }
+    }
+  ]
+}

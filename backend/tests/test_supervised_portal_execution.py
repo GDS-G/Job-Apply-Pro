@@ -377,3 +377,73 @@ def test_reviewed_greenhouse_start_persists_launch_fingerprint_as_first_evidence
     assert run.evidence[0].before_fingerprint == launch_fingerprint
     assert run.evidence[0].after_fingerprint == observation.page_fingerprint
     assert len(run.evidence[0].action_fingerprint) == 64
+
+
+def test_reviewed_greenhouse_capture_exposes_current_form_contract(
+    session: Session,
+) -> None:
+    detail = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="greenhouse-detail",
+        visible_text="Greenhouse engineering role Apply",
+        url="https://boards.greenhouse.io/example/jobs/1",
+    )
+    form = _observation(
+        page_type="APPLICATION_FORM",
+        fingerprint="greenhouse-contact-form",
+        visible_text="Greenhouse application Submit",
+        url="https://boards.greenhouse.io/example/jobs/1#app",
+        controls=[
+            {
+                "index": 0,
+                "control_key": "email",
+                "tag": "input",
+                "type": "email",
+                "label": "Email",
+                "label_source": "LABEL",
+                "required": True,
+                "visible": True,
+                "will_validate": True,
+                "constraint_satisfied": False,
+            },
+            {
+                "index": 1,
+                "control_key": "next",
+                "tag": "button",
+                "text": "Next",
+                "visible": True,
+            },
+        ],
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        _Browser(
+            detail,
+            resume_observations=[form],
+            expected_start_prefix="https://boards.greenhouse.io/",
+        ),
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=False,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    started = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl("https://boards.greenhouse.io/example/jobs/1"),
+            profile_name="greenhouse-fixture",
+        ),
+        "b" * 64,
+    )
+    assert started.greenhouse_form is None
+
+    captured = service.capture(
+        started.id,
+        SupervisedPortalCapture(prior_page_fingerprint=started.page_fingerprint),
+    )
+    assert captured.greenhouse_form is not None
+    assert captured.greenhouse_form.page_fingerprint == captured.page_fingerprint
+    assert captured.greenhouse_form.review_field_count == 1
+    assert captured.greenhouse_form.navigation_control_key == "next"
+    assert not captured.greenhouse_form.ready_to_advance

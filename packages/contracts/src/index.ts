@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Greenhouse Application Vertical Slice",
-  version: "0.65.0-alpha.1",
+  name: "Greenhouse Form Execution Contracts",
+  version: "0.66.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -644,6 +644,56 @@ export interface SupervisedPortalStepEvidence {
   created_at: string;
 }
 
+export type GreenhouseFormStage =
+  "APPLICATION" | "DOCUMENTS" | "QUESTIONNAIRE" | "REVIEW" | "CONFIRMATION";
+
+export type GreenhouseFormAction =
+  | "OBSERVE_ONLY"
+  | "REVIEW_FIELD"
+  | "REVIEW_DOCUMENT_UPLOAD"
+  | "USER_INTERVENTION"
+  | "REVIEW_NAVIGATION"
+  | "FINAL_SUBMISSION_GATE";
+
+export type GreenhousePostconditionKind =
+  | "VALUE_EQUALS"
+  | "SELECTED_LABEL_EQUALS"
+  | "CHECKED_EQUALS"
+  | "REQUIRED_CONSTRAINT_VALID"
+  | "UPLOAD_FILE_NAME_OBSERVED"
+  | "NEXT_STAGE_OBSERVED"
+  | "USER_VERIFIED"
+  | "IDENTIFIER_BACKED_CONFIRMATION";
+
+export interface GreenhouseControlContract {
+  control_key: string;
+  label: string;
+  control_kind: BrowserControlKind;
+  required: boolean;
+  blocking: boolean;
+  action: GreenhouseFormAction;
+  postcondition: GreenhousePostconditionKind;
+  reason: string;
+}
+
+export interface GreenhouseFormContractAssessment {
+  policy_version: string;
+  page_fingerprint: string;
+  page_type: string;
+  stage: GreenhouseFormStage;
+  required_control_count: number;
+  satisfied_required_count: number;
+  review_field_count: number;
+  upload_review_count: number;
+  manual_intervention_count: number;
+  navigation_control_key?: string | null;
+  navigation_label?: string | null;
+  ready_to_advance: boolean;
+  controls: GreenhouseControlContract[];
+  limitations: string[];
+  review_fingerprint: string;
+}
+
 export interface SupervisedPortalRunSnapshot {
   id: string;
   portal: PortalKind;
@@ -658,6 +708,7 @@ export interface SupervisedPortalRunSnapshot {
   intervention_reasons: PortalInterventionReason[];
   evidence: SupervisedPortalStepEvidence[];
   observed_controls: BrowserObservedControl[];
+  greenhouse_form?: GreenhouseFormContractAssessment | null;
   trace_path?: string | null;
   created_at: string;
   updated_at: string;

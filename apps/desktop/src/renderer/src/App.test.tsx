@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   PortalRunSnapshot,
+  SupervisedPortalRunSnapshot,
   WorkflowControlAction,
   WorkflowRunSnapshot,
 } from "@job-apply-pro/contracts";
@@ -134,6 +135,73 @@ describe("App", () => {
     ).toBeDisabled();
   });
 
+  it("shows the runtime Greenhouse form contract without claiming live compatibility", async () => {
+    const run: SupervisedPortalRunSnapshot = {
+      id: "greenhouse-run",
+      portal: "GREENHOUSE",
+      workflow_id: discoveredWorkflow.workflow_id,
+      browser_session_id: "greenhouse-browser",
+      state: "AWAITING_USER",
+      current_url:
+        "https://job-boards.greenhouse.io/synthetic/jobs/100#documents",
+      allowed_origins: ["https://job-boards.greenhouse.io"],
+      page_fingerprint: "gh-upload-pending",
+      disposition: "USER_ACTION_REQUIRED",
+      intervention_reasons: ["USER_TAKEOVER"],
+      evidence: [],
+      observed_controls: [],
+      greenhouse_form: {
+        policy_version: "greenhouse-form-execution-contract/1",
+        page_fingerprint: "gh-upload-pending",
+        page_type: "DOCUMENT_UPLOAD",
+        stage: "DOCUMENTS",
+        required_control_count: 1,
+        satisfied_required_count: 0,
+        review_field_count: 0,
+        upload_review_count: 1,
+        manual_intervention_count: 0,
+        navigation_control_key: "documents-next",
+        navigation_label: "Continue",
+        ready_to_advance: false,
+        controls: [
+          {
+            control_key: "resume",
+            label: "Resume",
+            control_kind: "FILE_UPLOAD",
+            required: true,
+            blocking: true,
+            action: "REVIEW_DOCUMENT_UPLOAD",
+            postcondition: "UPLOAD_FILE_NAME_OBSERVED",
+            reason: "Sanitized fixture",
+          },
+        ],
+        limitations: ["Sanitized replay support is not live compatibility."],
+        review_fingerprint: "c".repeat(64),
+      },
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    };
+    vi.spyOn(window.jobApplyPro.workbench, "listWorkflows").mockResolvedValue([
+      discoveredWorkflow,
+    ]);
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "listSupervisedPortalRuns",
+    ).mockResolvedValue([run]);
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Greenhouse documents form contract"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/0\/1 required controls satisfied/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/sanitized replay support is not live compatibility/i),
+    ).toBeInTheDocument();
+  });
+
   it("keeps portal and candidate details scoped to the selected workflow", async () => {
     const secondWorkflow: WorkflowRunSnapshot = {
       ...discoveredWorkflow,
@@ -221,7 +289,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Greenhouse Application Vertical Slice v0.65.0-alpha.1"),
+      screen.getByText("Greenhouse Form Execution Contracts v0.66.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

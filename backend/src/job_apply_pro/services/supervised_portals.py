@@ -37,6 +37,10 @@ from job_apply_pro.domain.portals import (
     SupervisedPortalSubmissionApproval,
 )
 from job_apply_pro.portals.catalog import PortalCatalog, PortalCatalogError
+from job_apply_pro.services.greenhouse_form import (
+    GreenhouseFormContractError,
+    GreenhouseFormContractService,
+)
 
 
 class SupervisedPortalError(RuntimeError):
@@ -147,6 +151,7 @@ class SupervisedPortalService:
         self._enabled = enabled
         self._submission_enabled = submission_enabled
         self._allowed_portals = allowed_portals
+        self._greenhouse_forms = GreenhouseFormContractService()
 
     def start(self, command: SupervisedPortalRunCreate) -> SupervisedPortalRunSnapshot:
         if command.portal is PortalKind.GREENHOUSE:
@@ -223,7 +228,7 @@ class SupervisedPortalService:
         saved = self._repository.get(run.id)
         if saved is None:  # pragma: no cover - protected by repository transaction
             raise LookupError(f"Supervised portal run {run.id} was not found")
-        return saved.model_copy(update={"observed_controls": observation.controls})
+        return self._with_runtime_observation(saved, observation)
 
     def capture(self, run_id: str, command: SupervisedPortalCapture) -> SupervisedPortalRunSnapshot:
         run = self._active(run_id)
@@ -268,7 +273,7 @@ class SupervisedPortalService:
             action_kind=None,
             verified=match is not None,
         )
-        return self.get(run_id).model_copy(update={"observed_controls": observation.controls})
+        return self._with_runtime_observation(self.get(run_id), observation)
 
     def submit(
         self, run_id: str, approval: SupervisedPortalSubmissionApproval
@@ -365,12 +370,25 @@ class SupervisedPortalService:
             raise LookupError(f"Supervised portal run {run_id} was not found")
         session = self._browser.get_session(run.browser_session_id)
         observation = session.observation
-        controls = (
-            observation.controls
-            if observation is not None and observation.page_fingerprint == run.page_fingerprint
-            else []
+        if observation is None or observation.page_fingerprint != run.page_fingerprint:
+            return run.model_copy(update={"observed_controls": [], "greenhouse_form": None})
+        return self._with_runtime_observation(run, observation)
+
+    def _with_runtime_observation(
+        self, run: SupervisedPortalRunSnapshot, observation: BrowserObservation
+    ) -> SupervisedPortalRunSnapshot:
+        greenhouse_form = None
+        if run.portal is PortalKind.GREENHOUSE:
+            try:
+                greenhouse_form = self._greenhouse_forms.assess(observation)
+            except GreenhouseFormContractError:
+                greenhouse_form = None
+        return run.model_copy(
+            update={
+                "observed_controls": observation.controls,
+                "greenhouse_form": greenhouse_form,
+            }
         )
-        return run.model_copy(update={"observed_controls": controls})
 
     def list_runs(self) -> list[SupervisedPortalRunSnapshot]:
         return [self.get(run.id) for run in self._repository.list_runs()]

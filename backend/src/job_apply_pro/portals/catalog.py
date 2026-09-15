@@ -50,6 +50,9 @@ def _definition(
     brand: str,
     *,
     board: bool = False,
+    replay_page_types: set[str] | None = None,
+    adapter_version: str = "0.9.0",
+    additional_limitations: list[str] | None = None,
 ) -> PortalAdapterDefinition:
     capabilities = [*_FLOW_CAPABILITIES]
     if board:
@@ -124,14 +127,17 @@ def _definition(
         ),
         support_status=PortalSupportStatus.REPLAY_VALIDATED,
         production_enabled=False,
-        replay_validated_page_types=sorted(_REQUIRED_REPLAY_PAGE_TYPES),
+        replay_validated_page_types=sorted(
+            replay_page_types if replay_page_types is not None else _REQUIRED_REPLAY_PAGE_TYPES
+        ),
         live_validated_page_types=[],
         limitations=[
             "Production execution is disabled",
             "Live fingerprints require supervised validation before enablement",
             "Login, MFA, CAPTCHA, legal fields, and final submission require intervention policy",
+            *(additional_limitations or []),
         ],
-        adapter_version="0.9.0",
+        adapter_version=adapter_version,
     )
 
 
@@ -183,6 +189,21 @@ PORTAL_DEFINITIONS = (
         "Greenhouse",
         ["greenhouse.io", "boards.greenhouse.io"],
         "greenhouse",
+        replay_page_types={
+            "APPLICATION_FORM",
+            "CONFIRMATION",
+            "DOCUMENT_UPLOAD",
+            "JOB_DETAIL",
+            "JOB_SEARCH_RESULTS",
+            "QUESTIONNAIRE",
+            "SUBMISSION_REVIEW",
+        },
+        adapter_version="1.0.0",
+        additional_limitations=[
+            "Sanitized form-contract fixtures do not establish live Greenhouse compatibility",
+            "Document upload and stage navigation require exact post-action evidence",
+            "Custom widgets remain under visible user handling",
+        ],
     ),
     _definition(
         PortalKind.COMPANY_CAREERS,

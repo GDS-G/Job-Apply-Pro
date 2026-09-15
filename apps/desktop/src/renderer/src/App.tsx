@@ -1608,12 +1608,13 @@ export function App() {
             </span>
             <div>
               <strong>
-                Greenhouse Application Vertical Slice v0.65.0-alpha.1
+                Greenhouse Form Execution Contracts v0.66.0-alpha.1
               </strong>
               <p>
-                A saved public Greenhouse posting can now open only after its
-                exact source, evidence, eligibility, and immutable resume are
-                reviewed and revalidated by the backend.
+                Reviewed Greenhouse launches now expose exact form-stage,
+                required-field, upload, custom-widget, navigation, and
+                postcondition guidance without granting browser action
+                authority.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3397,6 +3398,68 @@ export function App() {
                         Manual:{" "}
                         {latestSupervisedRun.intervention_reasons.join(", ")}
                       </small>
+                    ) : null}
+                    {latestSupervisedRun.greenhouse_form ? (
+                      <article className="answer-entry field-binding-preview">
+                        <strong>
+                          Greenhouse{" "}
+                          {latestSupervisedRun.greenhouse_form.stage
+                            .replaceAll("_", " ")
+                            .toLowerCase()}{" "}
+                          form contract
+                        </strong>
+                        <span>
+                          {
+                            latestSupervisedRun.greenhouse_form
+                              .satisfied_required_count
+                          }
+                          /
+                          {
+                            latestSupervisedRun.greenhouse_form
+                              .required_control_count
+                          }{" "}
+                          required controls satisfied ·{" "}
+                          {
+                            latestSupervisedRun.greenhouse_form
+                              .review_field_count
+                          }{" "}
+                          field reviews ·{" "}
+                          {
+                            latestSupervisedRun.greenhouse_form
+                              .upload_review_count
+                          }{" "}
+                          upload reviews ·{" "}
+                          {
+                            latestSupervisedRun.greenhouse_form
+                              .manual_intervention_count
+                          }{" "}
+                          manual
+                        </span>
+                        <small>
+                          {latestSupervisedRun.greenhouse_form.ready_to_advance
+                            ? `Ready for separately reviewed ${latestSupervisedRun.greenhouse_form.navigation_label ?? "navigation"}`
+                            : "Not ready to advance; resolve every required blocking control."}
+                        </small>
+                        {latestSupervisedRun.greenhouse_form.controls.map(
+                          (control) => (
+                            <small key={control.control_key}>
+                              {control.label} ·{" "}
+                              {control.action.replaceAll("_", " ")} ·
+                              postcondition{" "}
+                              {control.postcondition.replaceAll("_", " ")}
+                              {control.blocking ? " · blocking" : ""}
+                            </small>
+                          ),
+                        )}
+                        <small>
+                          Contract review{" "}
+                          {latestSupervisedRun.greenhouse_form.review_fingerprint.slice(
+                            0,
+                            16,
+                          )}
+                          … · sanitized replay support is not live compatibility
+                        </small>
+                      </article>
                     ) : null}
                     {!["STOPPED", "SUBMISSION_CONFIRMED"].includes(
                       latestSupervisedRun.state,
