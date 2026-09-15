@@ -134,11 +134,100 @@ describe("App", () => {
     ).toBeDisabled();
   });
 
+  it("keeps portal and candidate details scoped to the selected workflow", async () => {
+    const secondWorkflow: WorkflowRunSnapshot = {
+      ...discoveredWorkflow,
+      workflow_id: "discovery-2",
+      application_id: "application-2",
+      profile_id: "profile-2",
+      candidate_display_name: "Second synthetic candidate",
+      employer: "Second example employer",
+      title: "Second scoped role",
+    };
+    const secondRun: PortalRunSnapshot = {
+      id: "fixture-run-2",
+      portal: "REFERENCE_ATS",
+      capabilities: [],
+      workflow_id: secondWorkflow.workflow_id,
+      application_id: secondWorkflow.application_id,
+      browser_session_id: "fixture-browser-2",
+      profile_id: secondWorkflow.profile_id,
+      job_id: "fixture-job-2",
+      state: "READY_TO_SUBMIT",
+      portal_origin: "http://127.0.0.1:4173",
+      query: "Synthetic",
+      deduplicated: true,
+      qualification: {
+        score: 1,
+        threshold: 0.5,
+        eligible: true,
+        matched_terms: [],
+        missing_terms: [],
+        evidence_claim_ids: [],
+      },
+      selected_document_version_id: "fixture-version-2",
+      field_mappings: [],
+      review_fingerprint: "b".repeat(64),
+      created_at: secondWorkflow.updated_at,
+      updated_at: secondWorkflow.updated_at,
+    };
+    const api = window.jobApplyPro.workbench;
+    vi.spyOn(api, "listWorkflows").mockResolvedValue([
+      discoveredWorkflow,
+      secondWorkflow,
+    ]);
+    vi.spyOn(api, "listPortalRuns").mockResolvedValue([secondRun]);
+    const getKnowledge = vi
+      .spyOn(api, "getCandidateKnowledge")
+      .mockImplementation(async (profileId) => ({
+        profile_id: profileId,
+        documents: [],
+        claims: [],
+        answers: [],
+      }));
+    const listAnswers = vi.spyOn(api, "listApplicationAnswers");
+    const listBindings = vi.spyOn(api, "listApplicationFieldBindings");
+    const listExecutions = vi.spyOn(api, "listApplicationFieldExecutions");
+
+    render(<App />);
+
+    await screen.findByRole("heading", {
+      name: "Guided application workspace",
+    });
+    expect(screen.queryByText("Fit 100%")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Confirm fixture submission" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Second scoped role/ }));
+
+    await waitFor(() => {
+      expect(getKnowledge).toHaveBeenCalledWith("profile-2");
+      expect(listAnswers).toHaveBeenCalledWith("application-2");
+      expect(listBindings).toHaveBeenCalledWith("application-2");
+      expect(listExecutions).toHaveBeenCalledWith("application-2");
+    });
+    expect(await screen.findByText("Fit 100%")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Confirm fixture submission" }),
+    ).toBeInTheDocument();
+    for (const selector of screen.getAllByLabelText("Target application")) {
+      expect(selector).toHaveValue("application-2");
+    }
+    expect(screen.getByText(/Application application-2/)).toBeInTheDocument();
+  });
+
   it("shows the Workbench safety boundary", async () => {
     render(<App />);
 
     expect(
-      screen.getByText("Durable External-Effect Ledger v0.63.0-alpha.1"),
+      screen.getByText("Guided Application Workspace v0.64.0-alpha.1"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Guided application workspace" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/backend state, allowed actions, review fingerprints/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/production application submission remains disabled/i),

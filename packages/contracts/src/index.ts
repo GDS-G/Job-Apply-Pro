@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Durable External-Effect Ledger",
-  version: "0.63.0-alpha.1",
+  name: "Guided Application Workspace",
+  version: "0.64.0-alpha.1",
   channel: "alpha",
 } as const;
 

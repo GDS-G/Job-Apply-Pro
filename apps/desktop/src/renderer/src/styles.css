@@ -562,6 +562,154 @@ h1 {
   cursor: pointer;
 }
 
+.application-workspace-guide {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.65fr) minmax(0, 1.35fr);
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 18px;
+  scroll-margin-top: 58px;
+}
+
+.application-workspace-guide__summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 7px;
+  overflow-wrap: anywhere;
+}
+
+.application-workspace-guide__summary h2,
+.application-workspace-guide__summary p {
+  margin: 0;
+}
+
+.application-workspace-guide__summary h2 {
+  color: #283247;
+  font-size: 15px;
+}
+
+.application-workspace-guide__summary strong {
+  color: #384257;
+  font-size: 11px;
+}
+
+.application-workspace-guide__summary p,
+.application-workspace-guide__summary small {
+  color: #737d94;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.application-workspace-guide__summary small {
+  padding: 8px 10px;
+  color: #4c5871;
+  background: #f3f5fb;
+  border-radius: 8px;
+}
+
+.application-workspace-guide__steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(115px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px;
+  color: #4d586f;
+  text-align: left;
+  background: #fafbfe;
+  border: 1px solid #e2e6ee;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.workspace-step:hover,
+.workspace-step:focus-visible {
+  background: #f2f4ff;
+  border-color: #abb4eb;
+  outline: none;
+}
+
+.workspace-step > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workspace-step strong {
+  color: #303a50;
+  font-size: 10px;
+}
+
+.workspace-step small {
+  overflow: hidden;
+  color: #7c8598;
+  font-size: 8.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.workspace-step > svg:last-child,
+.workspace-step em {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+
+.workspace-step em {
+  color: #5867da;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workspace-step--suggested {
+  background: #f0f2ff;
+  border-color: #aeb7ec;
+  box-shadow: 0 5px 12px rgb(91 101 201 / 10%);
+}
+
+.application-workspace-guide__warning {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  color: #75551c;
+  text-align: left;
+  background: #fff9e9;
+  border: 1px solid #ead8a6;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.application-workspace-guide__warning span {
+  display: grid;
+  gap: 3px;
+}
+
+.application-workspace-guide__warning strong {
+  font-size: 10px;
+}
+
+.application-workspace-guide__warning small {
+  color: #806632;
+  font-size: 9px;
+}
+
 .provider-sync-status {
   display: flex;
   align-items: center;
@@ -696,6 +844,10 @@ h1 {
 }
 
 #workflow-queue,
+#job-discovery,
+#job-readiness,
+#candidate-evidence,
+#application-portal,
 #challenge-framework,
 #communication-scheduling,
 #operations-recovery {
@@ -1809,6 +1961,12 @@ h1 {
   .metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .application-workspace-guide {
+    grid-template-columns: 1fr;
+  }
+  .application-workspace-guide__steps {
+    grid-template-columns: repeat(3, minmax(130px, 1fr));
+  }
   .content-grid {
     grid-template-columns: 1fr;
   }
@@ -1946,6 +2104,9 @@ h1 {
 }
 
 @media (max-width: 760px) {
+  .application-workspace-guide__steps {
+    grid-template-columns: 1fr;
+  }
   .calendar-event-review dl {
     grid-template-columns: 1fr;
   }

@@ -270,6 +270,7 @@ export function JobReadinessPanel({
   return (
     <section
       className="panel job-readiness-panel"
+      id="job-readiness"
       aria-labelledby="job-readiness-title"
       aria-busy={!!pending}
     >

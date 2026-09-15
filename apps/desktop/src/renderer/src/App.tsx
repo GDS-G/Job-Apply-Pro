@@ -77,6 +77,7 @@ import {
 } from "./CalendarEventPanel";
 import { GreenhouseDiscoveryPanel } from "./GreenhouseDiscoveryPanel";
 import { JobReadinessPanel } from "./JobReadinessPanel";
+import { ApplicationWorkspaceGuide } from "./ApplicationWorkspaceGuide";
 
 const initialStatus: BackendRuntimeStatus = {
   state: "starting",
@@ -117,7 +118,7 @@ function AppMark() {
       </div>
       <div>
         <strong>Job Apply Pro</strong>
-        <span>Production hardening</span>
+        <span>Guided workspace</span>
       </div>
     </div>
   );
@@ -491,10 +492,62 @@ export function App() {
   }, [refreshWorkflows, status.state]);
 
   useEffect(() => {
-    if (status.state === "ready" && profileId) {
+    if (status.state === "ready" && profileId && !selected) {
       void refreshKnowledge(profileId);
     }
-  }, [profileId, refreshKnowledge, status.state]);
+  }, [profileId, refreshKnowledge, selected, status.state]);
+
+  useEffect(() => {
+    if (status.state !== "ready" || !selected) return;
+
+    let active = true;
+    const selectedApplicationId = selected.application_id;
+    const selectedProfileId = selected.profile_id;
+
+    setProfileId(selectedProfileId);
+    setProfile((current) =>
+      current?.id === selectedProfileId ? current : null,
+    );
+    setKnowledge((current) =>
+      current?.profile_id === selectedProfileId ? current : null,
+    );
+    setAnswerApplicationId(selectedApplicationId);
+    setApplicationAnswers([]);
+    setFieldBindings([]);
+    setFieldExecutions([]);
+    setFieldCoverage(null);
+    setFieldBindingPreview(null);
+    setTailoredDocument(null);
+    setDocumentSelection(null);
+    setError(null);
+
+    void Promise.all([
+      window.jobApplyPro.workbench.getCandidateKnowledge(selectedProfileId),
+      window.jobApplyPro.workbench.listApplicationAnswers(
+        selectedApplicationId,
+      ),
+      window.jobApplyPro.workbench.listApplicationFieldBindings(
+        selectedApplicationId,
+      ),
+      window.jobApplyPro.workbench.listApplicationFieldExecutions(
+        selectedApplicationId,
+      ),
+    ])
+      .then(([nextKnowledge, answers, bindings, executions]) => {
+        if (!active) return;
+        setKnowledge(nextKnowledge);
+        setApplicationAnswers(answers);
+        setFieldBindings(bindings);
+        setFieldExecutions(executions);
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(readableError(caught));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selected?.application_id, selected?.profile_id, status.state]);
 
   const metrics = useMemo(() => {
     const activeBrowsers = browserSessions.filter((item) =>
@@ -887,34 +940,6 @@ export function App() {
       const revisions =
         await window.jobApplyPro.workbench.listAnswerRevisions(answerId);
       setAnswerHistory((current) => ({ ...current, [answerId]: revisions }));
-    } catch (caught) {
-      setError(readableError(caught));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function loadApplicationAnswers(applicationId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      setAnswerApplicationId(applicationId);
-      setFieldCoverage(null);
-      setApplicationAnswers(
-        await window.jobApplyPro.workbench.listApplicationAnswers(
-          applicationId,
-        ),
-      );
-      setFieldBindings(
-        await window.jobApplyPro.workbench.listApplicationFieldBindings(
-          applicationId,
-        ),
-      );
-      setFieldExecutions(
-        await window.jobApplyPro.workbench.listApplicationFieldExecutions(
-          applicationId,
-        ),
-      );
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -1445,17 +1470,32 @@ export function App() {
     }
   }
 
-  const latestPortalRun = portalRuns[0] ?? null;
+  const latestPortalRun =
+    portalRuns.find((run) => run.workflow_id === selected?.workflow_id) ?? null;
   const latestSupervisedRun =
     supervisedPortalRuns.find(
       (run) => run.workflow_id === selected?.workflow_id,
-    ) ??
-    supervisedPortalRuns[0] ??
-    null;
+    ) ?? null;
   const activeChallenge =
     challengeSessions.find(
       (item) => item.workflow_id === selected?.workflow_id,
     ) ?? null;
+  const selectedBrowserSessionIds = new Set(
+    browserSessions
+      .filter((session) => session.workflow_id === selected?.workflow_id)
+      .map((session) => session.id),
+  );
+  const unresolvedSelectedBrowserEffects =
+    operations?.unresolved_external_effects.filter(
+      (effect) =>
+        effect.kind === "BROWSER_ACTION" &&
+        effect.subject_type === "browser_session" &&
+        selectedBrowserSessionIds.has(effect.subject_id),
+    ) ?? [];
+  const selectedCommunicationCount = communications.filter(
+    (record) =>
+      record.analysis.correlation.workflow_id === selected?.workflow_id,
+  ).length;
 
   return (
     <div className="shell">
@@ -1567,11 +1607,11 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Durable External-Effect Ledger v0.63.0-alpha.1</strong>
+              <strong>Guided Application Workspace v0.64.0-alpha.1</strong>
               <p>
-                Account-bound, create-only calendar plans now require exact
-                native review and one durable provider attempt, with invitations
-                disabled.
+                Every development view is now scoped to the selected saved
+                application, with a guided path through readiness, evidence,
+                fields, challenges, and follow-up.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -1606,6 +1646,32 @@ export function App() {
               </button>
             </div>
           ) : null}
+
+          <ApplicationWorkspaceGuide
+            workflow={selected}
+            documentCount={
+              knowledge && knowledge.profile_id === selected?.profile_id
+                ? knowledge.documents.filter((document) => !document.archived)
+                    .length
+                : 0
+            }
+            answerCount={applicationAnswers.length}
+            fieldBindingCount={fieldBindings.length}
+            portalStatus={
+              latestSupervisedRun?.state ?? latestPortalRun?.state ?? null
+            }
+            challengeStatus={activeChallenge?.status ?? null}
+            messageCount={selectedCommunicationCount}
+            unresolvedBrowserEffectCount={
+              unresolvedSelectedBrowserEffects.length
+            }
+            onNavigate={(sectionId) =>
+              document.getElementById(sectionId)?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              })
+            }
+          />
 
           <section className="metrics-grid" aria-label="Workbench metrics">
             {metrics.map((metric, index) => (
@@ -1750,6 +1816,7 @@ export function App() {
                     <button
                       className={`queue-item queue-item--button${selected?.workflow_id === item.workflow_id ? " queue-item--selected" : ""}`}
                       key={item.workflow_id}
+                      disabled={busy}
                       onClick={() => setSelectedId(item.workflow_id)}
                       type="button"
                     >
@@ -1936,7 +2003,7 @@ export function App() {
             onChanged={refreshWorkflows}
           />
 
-          <section className="panel knowledge-panel">
+          <section className="panel knowledge-panel" id="candidate-evidence">
             <div className="panel__header">
               <div>
                 <h2>Candidate documents & evidence</h2>
@@ -2303,15 +2370,24 @@ export function App() {
                 <label>
                   Target application
                   <select
+                    disabled={busy}
                     name="application_id"
-                    onChange={(event) =>
-                      void loadApplicationAnswers(event.currentTarget.value)
-                    }
+                    onChange={(event) => {
+                      const workflow = workflows.find(
+                        (item) =>
+                          item.application_id === event.currentTarget.value,
+                      );
+                      if (workflow) setSelectedId(workflow.workflow_id);
+                    }}
                     required
+                    value={selected?.application_id ?? ""}
                   >
                     <option value="">Choose application</option>
                     {workflows
-                      .filter((workflow) => workflow.profile_id === profileId)
+                      .filter(
+                        (workflow) =>
+                          workflow.profile_id === selected?.profile_id,
+                      )
                       .map((workflow) => (
                         <option
                           key={workflow.application_id}
@@ -2706,23 +2782,23 @@ export function App() {
                       {fieldCoverage.required_control_count} required controls
                     </strong>
                     <span>
-                      {fieldCoverage.already_verified_count} verified ﾂｷ{" "}
-                      {fieldCoverage.satisfied_on_page_count} valid on page ﾂｷ{" "}
-                      {fieldCoverage.ready_to_execute_count} ready ﾂｷ{" "}
-                      {fieldCoverage.manual_required_count} manual ﾂｷ{" "}
-                      {fieldCoverage.unbound_count} unbound ﾂｷ{" "}
-                      {fieldCoverage.stale_binding_count} stale ﾂｷ{" "}
+                      {fieldCoverage.already_verified_count} verified ·{" "}
+                      {fieldCoverage.satisfied_on_page_count} valid on page ·{" "}
+                      {fieldCoverage.ready_to_execute_count} ready ·{" "}
+                      {fieldCoverage.manual_required_count} manual ·{" "}
+                      {fieldCoverage.unbound_count} unbound ·{" "}
+                      {fieldCoverage.stale_binding_count} stale ·{" "}
                       {fieldCoverage.ambiguous_binding_count} ambiguous
                     </span>
                     {fieldCoverage.items.map((item) => (
                       <small key={item.control_key}>
-                        {item.label} ﾂｷ {item.status.replaceAll("_", " ")} ﾂｷ{" "}
+                        {item.label} · {item.status.replaceAll("_", " ")} ·{" "}
                         {item.reason}
                       </small>
                     ))}
                     <small>
-                      Review {fieldCoverage.review_fingerprint.slice(0, 16)}窶ｦ
-                      ﾂｷ metadata only; no answer text decrypted
+                      Review {fieldCoverage.review_fingerprint.slice(0, 16)}… ·
+                      metadata only; no answer text decrypted
                     </small>
                   </article>
                 ) : null}
@@ -2837,9 +2913,25 @@ export function App() {
               >
                 <label>
                   Target application
-                  <select name="application_id" required>
+                  <select
+                    disabled={busy}
+                    name="application_id"
+                    onChange={(event) => {
+                      const workflow = workflows.find(
+                        (item) =>
+                          item.application_id === event.currentTarget.value,
+                      );
+                      if (workflow) setSelectedId(workflow.workflow_id);
+                    }}
+                    required
+                    value={selected?.application_id ?? ""}
+                  >
+                    <option value="">Choose application</option>
                     {workflows
-                      .filter((workflow) => workflow.profile_id === profileId)
+                      .filter(
+                        (workflow) =>
+                          workflow.profile_id === selected?.profile_id,
+                      )
                       .map((workflow) => (
                         <option
                           key={workflow.application_id}
@@ -2953,9 +3045,25 @@ export function App() {
               >
                 <label>
                   Target application
-                  <select name="application_id" required>
+                  <select
+                    disabled={busy}
+                    name="application_id"
+                    onChange={(event) => {
+                      const workflow = workflows.find(
+                        (item) =>
+                          item.application_id === event.currentTarget.value,
+                      );
+                      if (workflow) setSelectedId(workflow.workflow_id);
+                    }}
+                    required
+                    value={selected?.application_id ?? ""}
+                  >
+                    <option value="">Choose application</option>
                     {workflows
-                      .filter((workflow) => workflow.profile_id === profileId)
+                      .filter(
+                        (workflow) =>
+                          workflow.profile_id === selected?.profile_id,
+                      )
                       .map((workflow) => (
                         <option
                           key={workflow.application_id}
@@ -3105,7 +3213,7 @@ export function App() {
             </div>
           </section>
 
-          <section className="panel portal-panel">
+          <section className="panel portal-panel" id="application-portal">
             <div className="panel__header">
               <div>
                 <h2>Reference ATS vertical slice</h2>

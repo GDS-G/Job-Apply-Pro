@@ -226,6 +226,7 @@ export function GreenhouseDiscoveryPanel({
   return (
     <section
       className="panel greenhouse-discovery-panel"
+      id="job-discovery"
       aria-labelledby="greenhouse-discovery-title"
       aria-busy={!!pending}
     >
