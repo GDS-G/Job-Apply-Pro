@@ -14,6 +14,11 @@ from job_apply_pro.domain.greenhouse_application import (
     GreenhouseApplicationLaunchError,
     GreenhouseApplicationLaunchPreview,
 )
+from job_apply_pro.domain.greenhouse_form import (
+    GreenhouseFormActionApproval,
+    GreenhouseFormActionPreview,
+    GreenhouseFormActionRequest,
+)
 from job_apply_pro.domain.job_readiness import (
     JobReadinessError,
     JobReadinessSnapshot,
@@ -92,12 +97,17 @@ GreenhouseApplicationPreviewServiceDependency = Annotated[
 
 def get_greenhouse_application_service(
     readiness: ReadinessService,
+    session: SessionDependency,
     supervised: Annotated[
         SupervisedPortalService,
         Depends(get_supervised_portal_service),
     ],
 ) -> GreenhouseApplicationService:
-    return GreenhouseApplicationService(readiness, supervised)
+    return GreenhouseApplicationService(
+        readiness,
+        supervised,
+        CandidateKnowledgeRepository(session),
+    )
 
 
 GreenhouseApplicationServiceDependency = Annotated[
@@ -217,3 +227,40 @@ def start_greenhouse_application_launch(
         raise HTTPException(503, "Browser worker is unavailable") from None
     except BrowserWorkerError:
         raise HTTPException(422, "The supervised browser could not be started") from None
+
+
+@router.post(
+    "/greenhouse-form-actions/preview",
+    response_model=GreenhouseFormActionPreview,
+)
+def preview_greenhouse_form_action(
+    application_id: ApplicationId,
+    command: GreenhouseFormActionRequest,
+    service: GreenhouseApplicationServiceDependency,
+) -> GreenhouseFormActionPreview:
+    _match(application_id, command.application_id)
+    return _run(lambda: service.preview_form_action(command))
+
+
+@router.post(
+    "/greenhouse-form-actions/execute",
+    response_model=SupervisedPortalRunSnapshot,
+)
+def execute_greenhouse_form_action(
+    application_id: ApplicationId,
+    approval: GreenhouseFormActionApproval,
+    service: GreenhouseApplicationServiceDependency,
+) -> SupervisedPortalRunSnapshot:
+    _match(application_id, approval.application_id)
+    try:
+        return _run(lambda: service.execute_form_action(approval))
+    except SupervisedPortalPolicyError as error:
+        raise HTTPException(403, str(error)) from None
+    except (SupervisedPortalStateError, BrowserSessionStateError) as error:
+        raise HTTPException(409, str(error)) from None
+    except BrowserPolicyError as error:
+        raise HTTPException(403, str(error)) from None
+    except BrowserWorkerUnavailableError:
+        raise HTTPException(503, "Browser worker is unavailable") from None
+    except BrowserWorkerError:
+        raise HTTPException(422, "The reviewed Greenhouse action could not be completed") from None

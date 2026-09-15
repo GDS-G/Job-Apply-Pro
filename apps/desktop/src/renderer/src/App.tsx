@@ -1353,6 +1353,45 @@ export function App() {
     }
   }
 
+  async function executeGreenhouseFormAction(
+    run: SupervisedPortalRunSnapshot,
+    action: "REVIEW_DOCUMENT_UPLOAD" | "REVIEW_NAVIGATION",
+    controlKey: string,
+  ) {
+    if (
+      !selected ||
+      selected.workflow_id !== run.workflow_id ||
+      !run.greenhouse_form
+    ) {
+      setError(
+        "Select the matching application and capture the current Greenhouse page before reviewing this action.",
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const updated =
+        await window.jobApplyPro.workbench.executeGreenhouseFormAction({
+          application_id: selected.application_id,
+          run_id: run.id,
+          action,
+          control_key: controlKey,
+          form_review_fingerprint: run.greenhouse_form.review_fingerprint,
+        });
+      if (updated) {
+        setSupervisedPortalRuns((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+        await refreshWorkflows();
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitSupervisedPortal(run: SupervisedPortalRunSnapshot) {
     setBusy(true);
     setError(null);
@@ -1607,14 +1646,13 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>
-                Greenhouse Form Execution Contracts v0.66.0-alpha.1
-              </strong>
+              <strong>Reviewed Greenhouse Form Actions v0.67.0-alpha.1</strong>
               <p>
-                Reviewed Greenhouse launches now expose exact form-stage,
-                required-field, upload, custom-widget, navigation, and
-                postcondition guidance without granting browser action
-                authority.
+                Exact selected-resume upload and ready one-stage navigation now
+                require fresh backend review, native confirmation, durable
+                effect admission, and verified postconditions. Field entry,
+                custom widgets, legal controls, and final submission remain
+                separate.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3442,13 +3480,52 @@ export function App() {
                         </small>
                         {latestSupervisedRun.greenhouse_form.controls.map(
                           (control) => (
-                            <small key={control.control_key}>
-                              {control.label} ·{" "}
-                              {control.action.replaceAll("_", " ")} ·
-                              postcondition{" "}
-                              {control.postcondition.replaceAll("_", " ")}
-                              {control.blocking ? " · blocking" : ""}
-                            </small>
+                            <div
+                              className="field-binding-preview"
+                              key={control.control_key}
+                            >
+                              <small>
+                                {control.label} ·{" "}
+                                {control.action.replaceAll("_", " ")} ·
+                                postcondition{" "}
+                                {control.postcondition.replaceAll("_", " ")}
+                                {control.blocking ? " · blocking" : ""}
+                              </small>
+                              {control.action === "REVIEW_DOCUMENT_UPLOAD" ? (
+                                <button
+                                  className="button button--secondary"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void executeGreenhouseFormAction(
+                                      latestSupervisedRun,
+                                      "REVIEW_DOCUMENT_UPLOAD",
+                                      control.control_key,
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  <Upload size={14} /> Review & upload document
+                                </button>
+                              ) : null}
+                              {control.action === "REVIEW_NAVIGATION" &&
+                              latestSupervisedRun.greenhouse_form
+                                ?.ready_to_advance ? (
+                                <button
+                                  className="button button--secondary"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void executeGreenhouseFormAction(
+                                      latestSupervisedRun,
+                                      "REVIEW_NAVIGATION",
+                                      control.control_key,
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  <Play size={14} /> Review & advance form
+                                </button>
+                              ) : null}
+                            </div>
                           ),
                         )}
                         <small>

@@ -43,6 +43,9 @@ import type {
   GreenhouseImportResult,
   GreenhouseApplicationLaunchApproval,
   GreenhouseApplicationLaunchPreview,
+  GreenhouseFormActionApproval,
+  GreenhouseFormActionPreview,
+  GreenhouseFormActionRequest,
   GreenhouseJobImportInput,
   GreenhouseJobList,
   GreenhouseJobListInput,
@@ -180,6 +183,25 @@ export class BackendClient {
   ): Promise<SupervisedPortalRunSnapshot> {
     return this.request(
       `/applications/${encodeURIComponent(input.application_id)}/job-review/greenhouse-launch`,
+      { method: "POST", body: JSON.stringify(input) },
+      120_000,
+    );
+  }
+
+  previewGreenhouseFormAction(
+    input: GreenhouseFormActionRequest,
+  ): Promise<GreenhouseFormActionPreview> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/greenhouse-form-actions/preview`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+
+  executeGreenhouseFormAction(
+    input: GreenhouseFormActionApproval,
+  ): Promise<SupervisedPortalRunSnapshot> {
+    return this.request(
+      `/applications/${encodeURIComponent(input.application_id)}/job-review/greenhouse-form-actions/execute`,
       { method: "POST", body: JSON.stringify(input) },
       120_000,
     );

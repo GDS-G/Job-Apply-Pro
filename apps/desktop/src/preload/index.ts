@@ -18,6 +18,7 @@ import type {
   ChallengeSessionCreate,
   GreenhouseJobImportInput,
   GreenhouseApplicationLaunchInput,
+  GreenhouseFormActionInput,
   GreenhouseJobListInput,
   GreenhouseJobReviewInput,
   IntegrationProvider,
@@ -63,6 +64,8 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
     startGreenhouseApplicationLaunch: (
       input: GreenhouseApplicationLaunchInput,
     ) => ipcRenderer.invoke("greenhouse-application:start", input),
+    executeGreenhouseFormAction: (input: GreenhouseFormActionInput) =>
+      ipcRenderer.invoke("greenhouse-form-action:execute", input),
     listGreenhouseJobs: (input: GreenhouseJobListInput) =>
       ipcRenderer.invoke("discovery:greenhouse-list", input),
     reviewGreenhouseJob: (input: GreenhouseJobReviewInput) =>

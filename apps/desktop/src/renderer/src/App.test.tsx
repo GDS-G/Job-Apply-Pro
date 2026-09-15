@@ -188,6 +188,9 @@ describe("App", () => {
       window.jobApplyPro.workbench,
       "listSupervisedPortalRuns",
     ).mockResolvedValue([run]);
+    const execute = vi
+      .spyOn(window.jobApplyPro.workbench, "executeGreenhouseFormAction")
+      .mockResolvedValue(null);
 
     render(<App />);
 
@@ -200,6 +203,18 @@ describe("App", () => {
     expect(
       screen.getByText(/sanitized replay support is not live compatibility/i),
     ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review & upload document" }),
+    );
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledExactlyOnceWith({
+        application_id: discoveredWorkflow.application_id,
+        run_id: run.id,
+        action: "REVIEW_DOCUMENT_UPLOAD",
+        control_key: "resume",
+        form_review_fingerprint: run.greenhouse_form?.review_fingerprint,
+      }),
+    );
   });
 
   it("keeps portal and candidate details scoped to the selected workflow", async () => {
@@ -289,7 +304,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Greenhouse Form Execution Contracts v0.66.0-alpha.1"),
+      screen.getByText("Reviewed Greenhouse Form Actions v0.67.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

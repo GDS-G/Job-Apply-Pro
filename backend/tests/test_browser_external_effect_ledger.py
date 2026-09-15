@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.security.keys import StaticKeyProvider
 from job_apply_pro.services.browser_runtime import (
     BrowserActionUncertainError,
+    BrowserPolicyError,
     BrowserRuntimeService,
     BrowserSessionStateError,
 )
@@ -161,6 +163,44 @@ def _action() -> BrowserAction:
         intended_result="Capture the reviewed fixture",
         verification=BrowserVerification(),
     )
+
+
+def test_upload_staging_requires_exact_reviewed_plaintext_sha256(
+    session: Session, tmp_path: Path
+) -> None:
+    service, _, worker = _service(session, tmp_path, RuntimeError("unused"))
+    version_id = "version-reviewed"
+    plaintext = b"synthetic immutable resume bytes"
+    document_dir = tmp_path / "documents"
+    document_dir.mkdir()
+    encrypted = document_dir / "resume.enc"
+    cipher = SensitiveDataCipher(StaticKeyProvider(b"e" * 32))
+    encrypted.write_text(
+        cipher.encrypt_bytes(plaintext, context=f"document:{version_id}:file"),
+        encoding="ascii",
+    )
+
+    with pytest.raises(BrowserPolicyError, match="do not match"):
+        service.stage_encrypted_upload(
+            "00000000-0000-4000-8000-000000000101",
+            version_id=version_id,
+            encrypted_path=str(encrypted),
+            file_name="candidate-resume.pdf",
+            expected_sha256="0" * 64,
+        )
+    assert not (tmp_path / "artifacts" / "staged-uploads").exists()
+
+    staged = service.stage_encrypted_upload(
+        "00000000-0000-4000-8000-000000000101",
+        version_id=version_id,
+        encrypted_path=str(encrypted),
+        file_name="candidate-resume.pdf",
+        expected_sha256=hashlib.sha256(plaintext).hexdigest(),
+    )
+    assert Path(staged).read_bytes() == plaintext
+    service.clear_staged_uploads("00000000-0000-4000-8000-000000000101")
+    assert not Path(staged).exists()
+    assert worker.calls == 0
 
 
 def test_confirmed_worker_result_uses_attempt_as_action_identity(

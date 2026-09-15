@@ -16,6 +16,11 @@ from job_apply_pro.api.routes.job_readiness import (
     get_readiness_service,
 )
 from job_apply_pro.config import Settings
+from job_apply_pro.domain.browser import BrowserControlKind
+from job_apply_pro.domain.greenhouse_form import (
+    GREENHOUSE_FORM_UPLOAD_CONFIRMATION,
+    GreenhouseFormAction,
+)
 from job_apply_pro.domain.knowledge import DocumentKind
 from job_apply_pro.domain.portals import (
     PortalInterventionReason,
@@ -27,6 +32,7 @@ from job_apply_pro.domain.portals import (
 from job_apply_pro.main import app
 from job_apply_pro.services.greenhouse_application import GreenhouseApplicationService
 from job_apply_pro.storage.database import get_session
+from test_greenhouse_application import _action_run
 from test_job_readiness import Fixture, fixture
 
 __all__ = ["fixture"]
@@ -124,6 +130,74 @@ def test_api_launches_only_the_exact_current_reviewed_greenhouse_application(
     stale = api.post(path, json=body | {"review_fingerprint": "0" * 64})
     assert stale.status_code == 409
     assert supervised.start_reviewed_greenhouse.call_count == 1
+
+
+def test_api_executes_only_the_exact_current_reviewed_greenhouse_form_action(
+    api: TestClient, fixture: Fixture
+) -> None:
+    fixture.ready_to_select()
+    fixture.service.approve_resume(fixture.selection())
+    selected = fixture.knowledge.get_version_record(fixture.version_id)
+    assert selected is not None
+    reviewed_document = selected.model_copy(update={"file_name": "candidate-resume.pdf"})
+    knowledge = Mock()
+    knowledge.get_version_record.return_value = reviewed_document
+    supervised = Mock()
+    run = _action_run(
+        fixture,
+        action=GreenhouseFormAction.REVIEW_DOCUMENT_UPLOAD,
+        control_kind=BrowserControlKind.FILE_UPLOAD,
+        ready=False,
+    )
+    supervised.get.return_value = run
+    supervised.upload_reviewed_greenhouse_document.return_value = run
+    service = GreenhouseApplicationService(fixture.service, supervised, knowledge)
+    app.dependency_overrides[get_greenhouse_application_service] = lambda: service
+    assert run.greenhouse_form is not None
+    path = f"/api/v1/applications/{fixture.application_id}/job-review/greenhouse-form-actions"
+    request = {
+        "application_id": fixture.application_id,
+        "run_id": run.id,
+        "action": "REVIEW_DOCUMENT_UPLOAD",
+        "control_key": "resume",
+        "form_review_fingerprint": run.greenhouse_form.review_fingerprint,
+    }
+    preview_response = api.post(f"{path}/preview", json=request)
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["selected_document_version_id"] == fixture.version_id
+    assert preview["selected_document_file_name"] == "candidate-resume.pdf"
+
+    executed = api.post(
+        f"{path}/execute",
+        json=request
+        | {
+            "preview_fingerprint": preview["preview_fingerprint"],
+            "confirmation_phrase": GREENHOUSE_FORM_UPLOAD_CONFIRMATION,
+        },
+    )
+    assert executed.status_code == 200
+    supervised.upload_reviewed_greenhouse_document.assert_called_once_with(
+        run.id,
+        form_review_fingerprint=request["form_review_fingerprint"],
+        control_key="resume",
+        document=reviewed_document,
+    )
+
+    injected = api.post(
+        f"{path}/preview",
+        json=request | {"file_path": "C:/attacker-controlled/resume.pdf"},
+    )
+    assert injected.status_code == 422
+    stale = api.post(
+        f"{path}/execute",
+        json=request
+        | {
+            "preview_fingerprint": "0" * 64,
+            "confirmation_phrase": GREENHOUSE_FORM_UPLOAD_CONFIRMATION,
+        },
+    )
+    assert stale.status_code == 409
 
 
 def test_actual_dependency_needs_no_ai_registry_or_valid_provider_configuration(

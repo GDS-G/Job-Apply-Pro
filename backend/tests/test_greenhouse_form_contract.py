@@ -187,6 +187,17 @@ def test_navigation_postcondition_requires_current_ready_review_and_later_stage(
     assert not escaped_evidence.verified
     assert "exact Greenhouse origin" in escaped_evidence.reason
 
+    confirmation = result.model_copy(
+        update={"observation": _observation(cases["identifier-backed-confirmation"])}
+    )
+    confirmation_evidence = service.verify_navigation(
+        before,
+        confirmation,
+        expected_review_fingerprint=assessment.review_fingerprint,
+    )
+    assert not confirmation_evidence.verified
+    assert "cannot establish final application confirmation" in confirmation_evidence.reason
+
 
 def test_upload_postcondition_requires_exact_control_origin_and_observed_filename() -> None:
     service = GreenhouseFormContractService()

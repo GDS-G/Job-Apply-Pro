@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from shutil import rmtree
@@ -435,6 +436,7 @@ class BrowserRuntimeService:
         version_id: str,
         encrypted_path: str,
         file_name: str,
+        expected_sha256: str,
     ) -> str:
         record = self._active_record(session_id)
         source = Path(encrypted_path).resolve()
@@ -446,12 +448,18 @@ class BrowserRuntimeService:
         upload_dir = (Path(record.artifact_dir) / "staged-uploads").resolve()
         if not upload_dir.is_relative_to(Path(record.artifact_dir).resolve()):
             raise BrowserPolicyError("Upload staging directory escaped the browser session")
-        upload_dir.mkdir(parents=True, exist_ok=True)
         destination = upload_dir / safe_name
         plaintext = self._cipher.decrypt_bytes(
             source.read_text(encoding="ascii"),
             context=f"document:{version_id}:file",
         )
+        if (
+            len(expected_sha256) != 64
+            or any(value not in "0123456789abcdef" for value in expected_sha256)
+            or hashlib.sha256(plaintext).hexdigest() != expected_sha256
+        ):
+            raise BrowserPolicyError("Immutable upload bytes do not match the reviewed document")
+        upload_dir.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(plaintext)
         return str(destination)
 

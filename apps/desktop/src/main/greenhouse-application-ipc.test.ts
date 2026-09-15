@@ -2,6 +2,7 @@ import type { IpcMainInvokeEvent } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   GreenhouseApplicationLaunchPreview,
+  GreenhouseFormActionPreview,
   SupervisedPortalRunSnapshot,
 } from "@job-apply-pro/contracts";
 import type { BackendClient } from "./backend-client.js";
@@ -57,6 +58,25 @@ const run = {
   created_at: "2026-09-14T12:00:00Z",
   updated_at: "2026-09-14T12:00:00Z",
 } satisfies SupervisedPortalRunSnapshot;
+const formReview = "d".repeat(64);
+const formPreview = {
+  application_id: "app-1",
+  run_id: "run-1",
+  action: "REVIEW_DOCUMENT_UPLOAD",
+  control_key: "resume",
+  form_review_fingerprint: formReview,
+  workflow_id: "workflow-1",
+  page_fingerprint: "greenhouse-document-page",
+  page_type: "DOCUMENT_UPLOAD",
+  stage: "DOCUMENTS",
+  control_label: "Resume",
+  selected_document_version_id: "version-1",
+  selected_document_file_name: "candidate-resume.pdf",
+  selected_document_sha256: "e".repeat(64),
+  policy_version: "reviewed-greenhouse-form-action/1",
+  preview_fingerprint: "f".repeat(64),
+  notice: "Synthetic reviewed upload.",
+} satisfies GreenhouseFormActionPreview;
 
 describe("Reviewed Greenhouse native launch boundary", () => {
   const client = {
@@ -64,6 +84,10 @@ describe("Reviewed Greenhouse native launch boundary", () => {
       vi.fn<BackendClient["previewGreenhouseApplicationLaunch"]>(),
     startGreenhouseApplicationLaunch:
       vi.fn<BackendClient["startGreenhouseApplicationLaunch"]>(),
+    previewGreenhouseFormAction:
+      vi.fn<BackendClient["previewGreenhouseFormAction"]>(),
+    executeGreenhouseFormAction:
+      vi.fn<BackendClient["executeGreenhouseFormAction"]>(),
   };
   const invoke = async (channel: string, ...args: unknown[]) =>
     handlers.get(channel)!({ sender: {} } as IpcMainInvokeEvent, ...args);
@@ -75,6 +99,10 @@ describe("Reviewed Greenhouse native launch boundary", () => {
       .mockReset()
       .mockResolvedValue(preview);
     client.startGreenhouseApplicationLaunch.mockReset().mockResolvedValue(run);
+    client.previewGreenhouseFormAction
+      .mockReset()
+      .mockResolvedValue(formPreview);
+    client.executeGreenhouseFormAction.mockReset().mockResolvedValue(run);
     registerGreenhouseApplicationIpc(client);
   });
 
@@ -163,5 +191,130 @@ describe("Reviewed Greenhouse native launch boundary", () => {
     ).rejects.toThrow("changed");
     expect(showMessageBox).not.toHaveBeenCalled();
     expect(client.startGreenhouseApplicationLaunch).not.toHaveBeenCalled();
+  });
+
+  it("refetches an exact upload preview and requires cancel-default native review", async () => {
+    const input = {
+      application_id: "app-1",
+      run_id: "run-1",
+      action: "REVIEW_DOCUMENT_UPLOAD" as const,
+      control_key: "resume",
+      form_review_fingerprint: formReview,
+    };
+    await expect(
+      invoke("greenhouse-form-action:execute", input),
+    ).resolves.toBeNull();
+    expect(client.previewGreenhouseFormAction).toHaveBeenCalledExactlyOnceWith(
+      input,
+    );
+    expect(client.executeGreenhouseFormAction).not.toHaveBeenCalled();
+    expect(showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultId: 0,
+        cancelId: 0,
+        buttons: ["Cancel", "Upload reviewed document"],
+        detail: expect.stringContaining("candidate-resume.pdf"),
+      }),
+    );
+
+    showMessageBox.mockResolvedValueOnce({ response: 1 });
+    await expect(
+      invoke("greenhouse-form-action:execute", input),
+    ).resolves.toEqual(run);
+    expect(client.executeGreenhouseFormAction).toHaveBeenCalledExactlyOnceWith({
+      ...input,
+      preview_fingerprint: formPreview.preview_fingerprint,
+      confirmation_phrase: "UPLOAD REVIEWED GREENHOUSE DOCUMENT",
+    });
+  });
+
+  it("uses the distinct reviewed navigation confirmation without document fields", async () => {
+    const navigation = {
+      ...formPreview,
+      action: "REVIEW_NAVIGATION" as const,
+      control_key: "next",
+      control_label: "Next",
+      stage: "APPLICATION" as const,
+      page_type: "APPLICATION_FORM",
+      selected_document_version_id: null,
+      selected_document_file_name: null,
+      selected_document_sha256: null,
+    };
+    client.previewGreenhouseFormAction.mockResolvedValueOnce(navigation);
+    showMessageBox.mockResolvedValueOnce({ response: 1 });
+    const input = {
+      application_id: "app-1",
+      run_id: "run-1",
+      action: "REVIEW_NAVIGATION" as const,
+      control_key: "next",
+      form_review_fingerprint: formReview,
+    };
+
+    await expect(
+      invoke("greenhouse-form-action:execute", input),
+    ).resolves.toEqual(run);
+    expect(showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: ["Cancel", "Advance reviewed form"],
+        detail: expect.stringContaining("It cannot submit the application"),
+      }),
+    );
+    expect(client.executeGreenhouseFormAction).toHaveBeenCalledWith({
+      ...input,
+      preview_fingerprint: navigation.preview_fingerprint,
+      confirmation_phrase: "ADVANCE REVIEWED GREENHOUSE FORM",
+    });
+  });
+
+  it("rejects incomplete or cross-action backend previews before native review", async () => {
+    const input = {
+      application_id: "app-1",
+      run_id: "run-1",
+      action: "REVIEW_DOCUMENT_UPLOAD" as const,
+      control_key: "resume",
+      form_review_fingerprint: formReview,
+    };
+    for (const changed of [
+      { policy_version: "untrusted-policy" },
+      { preview_fingerprint: "F".repeat(64) },
+      { selected_document_sha256: null },
+      { selected_document_file_name: "C:/candidate-resume.pdf" },
+    ]) {
+      client.previewGreenhouseFormAction.mockResolvedValueOnce({
+        ...formPreview,
+        ...changed,
+      } as GreenhouseFormActionPreview);
+      await expect(
+        invoke("greenhouse-form-action:execute", input),
+      ).rejects.toThrow("changed");
+    }
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(client.executeGreenhouseFormAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed or over-broad renderer form action inputs before backend review", async () => {
+    const base = {
+      application_id: "app-1",
+      run_id: "run-1",
+      action: "REVIEW_NAVIGATION",
+      control_key: "next",
+      form_review_fingerprint: formReview,
+    };
+    for (const value of [
+      { ...base, action: "FINAL_SUBMISSION_GATE" },
+      { ...base, control_key: "../next" },
+      { ...base, form_review_fingerprint: "D".repeat(64) },
+      { ...base, locator: "button" },
+      { ...base, confirmation_phrase: "BYPASS" },
+    ])
+      await expect(
+        invoke("greenhouse-form-action:execute", value),
+      ).rejects.toThrow(TypeError);
+    await expect(
+      invoke("greenhouse-form-action:execute", base, "extra"),
+    ).rejects.toThrow(TypeError);
+    expect(client.previewGreenhouseFormAction).not.toHaveBeenCalled();
+    expect(client.executeGreenhouseFormAction).not.toHaveBeenCalled();
+    expect(showMessageBox).not.toHaveBeenCalled();
   });
 });

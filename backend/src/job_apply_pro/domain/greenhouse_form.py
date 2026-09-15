@@ -33,6 +33,11 @@ class GreenhousePostconditionKind(StrEnum):
     IDENTIFIER_BACKED_CONFIRMATION = "IDENTIFIER_BACKED_CONFIRMATION"
 
 
+GREENHOUSE_FORM_ACTION_POLICY_VERSION = "reviewed-greenhouse-form-action/1"
+GREENHOUSE_FORM_UPLOAD_CONFIRMATION = "UPLOAD REVIEWED GREENHOUSE DOCUMENT"
+GREENHOUSE_FORM_NAVIGATION_CONFIRMATION = "ADVANCE REVIEWED GREENHOUSE FORM"
+
+
 class GreenhouseControlContract(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -77,3 +82,34 @@ class GreenhousePostconditionEvidence(BaseModel):
     verified: bool
     reason: str = Field(min_length=1, max_length=500)
     evidence_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class GreenhouseFormActionModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class GreenhouseFormActionRequest(GreenhouseFormActionModel):
+    application_id: str = Field(min_length=1, max_length=100)
+    run_id: str = Field(min_length=1, max_length=100)
+    action: GreenhouseFormAction
+    control_key: str = Field(min_length=1, max_length=200)
+    form_review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class GreenhouseFormActionPreview(GreenhouseFormActionRequest):
+    workflow_id: str = Field(min_length=1, max_length=100)
+    page_fingerprint: str = Field(min_length=1, max_length=200)
+    page_type: str = Field(min_length=1, max_length=100)
+    stage: GreenhouseFormStage
+    control_label: str = Field(min_length=1, max_length=300)
+    selected_document_version_id: str | None = Field(default=None, max_length=100)
+    selected_document_file_name: str | None = Field(default=None, max_length=300)
+    selected_document_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    policy_version: str = GREENHOUSE_FORM_ACTION_POLICY_VERSION
+    preview_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    notice: str = Field(min_length=1, max_length=800)
+
+
+class GreenhouseFormActionApproval(GreenhouseFormActionRequest):
+    preview_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmation_phrase: str = Field(min_length=1, max_length=100)

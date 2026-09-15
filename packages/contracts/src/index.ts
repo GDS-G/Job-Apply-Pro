@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Greenhouse Form Execution Contracts",
-  version: "0.66.0-alpha.1",
+  name: "Reviewed Greenhouse Form Actions",
+  version: "0.67.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -692,6 +692,38 @@ export interface GreenhouseFormContractAssessment {
   controls: GreenhouseControlContract[];
   limitations: string[];
   review_fingerprint: string;
+}
+
+export type GreenhouseReviewedFormAction =
+  "REVIEW_DOCUMENT_UPLOAD" | "REVIEW_NAVIGATION";
+
+export interface GreenhouseFormActionInput {
+  application_id: string;
+  run_id: string;
+  action: GreenhouseReviewedFormAction;
+  control_key: string;
+  form_review_fingerprint: string;
+}
+
+export type GreenhouseFormActionRequest = GreenhouseFormActionInput;
+
+export interface GreenhouseFormActionPreview extends GreenhouseFormActionRequest {
+  workflow_id: string;
+  page_fingerprint: string;
+  page_type: string;
+  stage: GreenhouseFormStage;
+  control_label: string;
+  selected_document_version_id?: string | null;
+  selected_document_file_name?: string | null;
+  selected_document_sha256?: string | null;
+  policy_version: string;
+  preview_fingerprint: string;
+  notice: string;
+}
+
+export interface GreenhouseFormActionApproval extends GreenhouseFormActionRequest {
+  preview_fingerprint: string;
+  confirmation_phrase: string;
 }
 
 export interface SupervisedPortalRunSnapshot {
@@ -2007,6 +2039,9 @@ export interface DesktopBridge {
     ): Promise<GreenhouseApplicationLaunchPreview>;
     startGreenhouseApplicationLaunch(
       input: GreenhouseApplicationLaunchInput,
+    ): Promise<SupervisedPortalRunSnapshot | null>;
+    executeGreenhouseFormAction(
+      input: GreenhouseFormActionInput,
     ): Promise<SupervisedPortalRunSnapshot | null>;
     listGreenhouseJobs(
       input: GreenhouseJobListInput,

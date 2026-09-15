@@ -202,13 +202,14 @@ class ReferencePortalService:
             browser.id, self._adapter.fill("Full name", candidate.contact.full_name)
         )
         self._require_verified(browser.id, self._adapter.fill("Email", candidate.contact.email))
-        staged_document = self._browser.stage_encrypted_upload(
-            browser.id,
-            version_id=document.id,
-            encrypted_path=document.storage_path,
-            file_name=document.file_name,
-        )
         try:
+            staged_document = self._browser.stage_encrypted_upload(
+                browser.id,
+                version_id=document.id,
+                encrypted_path=document.storage_path,
+                file_name=document.file_name,
+                expected_sha256=document.sha256,
+            )
             self._require_verified(
                 browser.id,
                 self._adapter.upload("Resume", staged_document, document.file_name),

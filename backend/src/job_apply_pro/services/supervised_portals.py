@@ -18,10 +18,18 @@ from job_apply_pro.domain.browser import (
     BrowserPermission,
     BrowserSessionCreate,
     BrowserSessionSnapshot,
+    BrowserSessionState,
+    BrowserVerification,
     ConfirmationState,
     LocatorStrategy,
     SemanticLocator,
+    VerificationKind,
 )
+from job_apply_pro.domain.greenhouse_form import (
+    GreenhouseFormAction,
+    GreenhousePostconditionEvidence,
+)
+from job_apply_pro.domain.knowledge import CandidateDocumentVersionRecord
 from job_apply_pro.domain.portals import (
     PortalAdapterDefinition,
     PortalCapability,
@@ -79,6 +87,18 @@ class SupervisedBrowserProtocol(Protocol):
     def takeover(self, session_id: str) -> BrowserSessionSnapshot: ...
 
     def execute_action(self, session_id: str, action: BrowserAction) -> BrowserActionResult: ...
+
+    def stage_encrypted_upload(
+        self,
+        session_id: str,
+        *,
+        version_id: str,
+        encrypted_path: str,
+        file_name: str,
+        expected_sha256: str,
+    ) -> str: ...
+
+    def clear_staged_uploads(self, session_id: str) -> None: ...
 
     def stop(self, session_id: str) -> BrowserSessionSnapshot: ...
 
@@ -275,6 +295,96 @@ class SupervisedPortalService:
         )
         return self._with_runtime_observation(self.get(run_id), observation)
 
+    def upload_reviewed_greenhouse_document(
+        self,
+        run_id: str,
+        *,
+        form_review_fingerprint: str,
+        control_key: str,
+        document: CandidateDocumentVersionRecord,
+    ) -> SupervisedPortalRunSnapshot:
+        run, before, control = self._review_greenhouse_control(
+            run_id,
+            form_review_fingerprint=form_review_fingerprint,
+            control_key=control_key,
+            expected_action=GreenhouseFormAction.REVIEW_DOCUMENT_UPLOAD,
+        )
+        try:
+            staged_path = self._browser.stage_encrypted_upload(
+                run.browser_session_id,
+                version_id=document.id,
+                encrypted_path=document.storage_path,
+                file_name=document.file_name,
+                expected_sha256=document.sha256,
+            )
+            action = BrowserAction(
+                kind=BrowserActionKind.UPLOAD,
+                locator=control.locator,
+                file_path=staged_path,
+                preconditions=[
+                    BrowserVerification(
+                        kind=VerificationKind.LOCATOR_VISIBLE,
+                        locator=control.locator,
+                    )
+                ],
+                intended_result="Upload the exact reviewed immutable application document",
+                verification=BrowserVerification(kind=VerificationKind.NONE),
+                permission=BrowserPermission.ELEVATED,
+                confirmation=ConfirmationState.CONFIRMED,
+            )
+            result = self._browser.execute_action(run.browser_session_id, action)
+            postcondition = self._greenhouse_forms.verify_upload(
+                before,
+                result,
+                control_key=control_key,
+                expected_file_name=document.file_name,
+            )
+            return self._finish_greenhouse_action(run, result, postcondition)
+        except Exception:
+            self._takeover_if_active(run.browser_session_id)
+            raise
+        finally:
+            self._browser.clear_staged_uploads(run.browser_session_id)
+
+    def navigate_reviewed_greenhouse_form(
+        self,
+        run_id: str,
+        *,
+        form_review_fingerprint: str,
+        control_key: str,
+    ) -> SupervisedPortalRunSnapshot:
+        run, before, control = self._review_greenhouse_control(
+            run_id,
+            form_review_fingerprint=form_review_fingerprint,
+            control_key=control_key,
+            expected_action=GreenhouseFormAction.REVIEW_NAVIGATION,
+        )
+        try:
+            action = BrowserAction(
+                kind=BrowserActionKind.CLICK,
+                locator=control.locator,
+                preconditions=[
+                    BrowserVerification(
+                        kind=VerificationKind.LOCATOR_VISIBLE,
+                        locator=control.locator,
+                    )
+                ],
+                intended_result="Advance the exact reviewed Greenhouse form by one control",
+                verification=BrowserVerification(kind=VerificationKind.NONE),
+                permission=BrowserPermission.ELEVATED,
+                confirmation=ConfirmationState.CONFIRMED,
+            )
+            result = self._browser.execute_action(run.browser_session_id, action)
+            postcondition = self._greenhouse_forms.verify_navigation(
+                before,
+                result,
+                expected_review_fingerprint=form_review_fingerprint,
+            )
+            return self._finish_greenhouse_action(run, result, postcondition)
+        except Exception:
+            self._takeover_if_active(run.browser_session_id)
+            raise
+
     def submit(
         self, run_id: str, approval: SupervisedPortalSubmissionApproval
     ) -> SupervisedPortalRunSnapshot:
@@ -389,6 +499,97 @@ class SupervisedPortalService:
                 "greenhouse_form": greenhouse_form,
             }
         )
+
+    def _review_greenhouse_control(
+        self,
+        run_id: str,
+        *,
+        form_review_fingerprint: str,
+        control_key: str,
+        expected_action: GreenhouseFormAction,
+    ) -> tuple[SupervisedPortalRunSnapshot, BrowserObservation, BrowserObservedControl]:
+        run = self._active(run_id)
+        self._require_portal_policy(run.portal)
+        if run.portal is not PortalKind.GREENHOUSE:
+            raise SupervisedPortalPolicyError("Reviewed Greenhouse actions accept GREENHOUSE only")
+        try:
+            resumed = self._browser.resume(run.browser_session_id)
+            observation = resumed.observation
+            if observation is None or observation.page_fingerprint != run.page_fingerprint:
+                raise SupervisedPortalStateError(
+                    "Greenhouse page changed after review; capture and review again"
+                )
+            self._require_allowed_observation(run.allowed_origins, observation.origin)
+            assessment = self._greenhouse_forms.assess(observation)
+            if assessment.review_fingerprint != form_review_fingerprint:
+                raise SupervisedPortalStateError(
+                    "Greenhouse form review changed; capture and review again"
+                )
+            contracts = [
+                item
+                for item in assessment.controls
+                if item.control_key == control_key and item.action is expected_action
+            ]
+            observed = [item for item in observation.controls if item.control_key == control_key]
+            if len(contracts) != 1 or len(observed) != 1 or observed[0].locator is None:
+                raise SupervisedPortalPolicyError(
+                    "The reviewed Greenhouse control is missing, ambiguous, or unlocatable"
+                )
+            if expected_action is GreenhouseFormAction.REVIEW_NAVIGATION and (
+                not assessment.ready_to_advance or assessment.navigation_control_key != control_key
+            ):
+                raise SupervisedPortalStateError(
+                    "Required Greenhouse controls are not ready for reviewed navigation"
+                )
+            return run, observation, observed[0]
+        except Exception:
+            self._takeover_if_active(run.browser_session_id)
+            raise
+
+    def _finish_greenhouse_action(
+        self,
+        run: SupervisedPortalRunSnapshot,
+        result: BrowserActionResult,
+        postcondition: GreenhousePostconditionEvidence,
+    ) -> SupervisedPortalRunSnapshot:
+        after = result.observation
+        try:
+            self._require_allowed_observation(run.allowed_origins, after.origin)
+            allowed_origin = True
+        except SupervisedPortalPolicyError:
+            allowed_origin = False
+        match, state, disposition, reasons = self._classify(run.portal, after)
+        verified = result.verified and postcondition.verified and allowed_origin
+        if not verified:
+            state = SupervisedPortalRunState.INTERVENTION_REQUIRED
+            disposition = SupervisedPortalDisposition.MANUAL_INTERVENTION_REQUIRED
+            reasons = [PortalInterventionReason.SITE_CHANGED]
+        updated = run.model_copy(
+            update={
+                "state": state,
+                "current_url": after.url,
+                "page_fingerprint": after.page_fingerprint,
+                "current_match": match,
+                "disposition": disposition,
+                "intervention_reasons": reasons,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        self._repository.save(updated)
+        self._record_evidence(
+            updated,
+            before=run.page_fingerprint,
+            after=after.page_fingerprint,
+            action_kind=result.action.kind,
+            verified=verified,
+            postcondition=postcondition,
+        )
+        self._takeover_if_active(run.browser_session_id)
+        return self._with_runtime_observation(self.get(run.id), after)
+
+    def _takeover_if_active(self, session_id: str) -> None:
+        if self._browser.get_session(session_id).state is BrowserSessionState.ACTIVE:
+            self._browser.takeover(session_id)
 
     def list_runs(self) -> list[SupervisedPortalRunSnapshot]:
         return [self.get(run.id) for run in self._repository.list_runs()]
@@ -556,6 +757,7 @@ class SupervisedPortalService:
         after: str,
         action_kind: BrowserActionKind | None,
         verified: bool,
+        postcondition: GreenhousePostconditionEvidence | None = None,
     ) -> None:
         sequence = self._repository.next_sequence(run.id)
         fingerprint_payload = {
@@ -571,6 +773,10 @@ class SupervisedPortalService:
             "action_kind": action_kind.value if action_kind is not None else None,
             "verified": verified,
             "reasons": [value.value for value in run.intervention_reasons],
+            "postcondition_kind": postcondition.kind.value if postcondition else None,
+            "postcondition_evidence_fingerprint": (
+                postcondition.evidence_fingerprint if postcondition else None
+            ),
         }
         action_fingerprint = hashlib.sha256(
             json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()

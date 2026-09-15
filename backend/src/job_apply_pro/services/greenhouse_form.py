@@ -269,6 +269,11 @@ class GreenhouseFormContractService:
             _STAGE_ORDER[after_assessment.stage] <= _STAGE_ORDER[before_assessment.stage]
         ):
             reasons.append("The observed page is not a recognized later Greenhouse stage.")
+        if (
+            after_assessment is not None
+            and after_assessment.stage is GreenhouseFormStage.CONFIRMATION
+        ):
+            reasons.append("Reviewed navigation cannot establish final application confirmation.")
         candidate = next(
             (
                 control

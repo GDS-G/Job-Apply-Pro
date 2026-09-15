@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from job_apply_pro.domain.browser import (
     BrowserAction,
+    BrowserActionKind,
     BrowserActionResult,
     BrowserEngine,
     BrowserObservation,
@@ -20,6 +22,8 @@ from job_apply_pro.domain.browser import (
     BrowserSessionState,
     BrowserTab,
 )
+from job_apply_pro.domain.greenhouse_form import GreenhouseFormAction
+from job_apply_pro.domain.knowledge import CandidateDocumentVersionRecord
 from job_apply_pro.domain.portals import (
     PortalInterventionReason,
     PortalKind,
@@ -80,6 +84,8 @@ class _Browser:
         resume_observations: list[BrowserObservation] | None = None,
         action_observations: list[BrowserObservation] | None = None,
         expected_start_prefix: str = "https://www.linkedin.com/",
+        upload_dir: Path | None = None,
+        upload_bytes: bytes = b"synthetic reviewed resume",
     ) -> None:
         self._observation = initial
         self._resume = list(resume_observations or [])
@@ -88,6 +94,10 @@ class _Browser:
         self.executed: list[BrowserAction] = []
         self.session_id = str(uuid4())
         self.expected_start_prefix = expected_start_prefix
+        self.upload_dir = upload_dir
+        self.upload_bytes = upload_bytes
+        self.staged_paths: list[Path] = []
+        self.clear_count = 0
 
     def _snapshot(self, trace_path: str | None = None) -> BrowserSessionSnapshot:
         now = datetime.now(UTC)
@@ -142,6 +152,31 @@ class _Browser:
             observation=self._observation,
             created_at=datetime.now(UTC),
         )
+
+    def stage_encrypted_upload(
+        self,
+        session_id: str,
+        *,
+        version_id: str,
+        encrypted_path: str,
+        file_name: str,
+        expected_sha256: str,
+    ) -> str:
+        assert session_id == self.session_id
+        assert version_id == "version-1"
+        assert encrypted_path == "C:/synthetic/encrypted.txt"
+        assert hashlib.sha256(self.upload_bytes).hexdigest() == expected_sha256
+        assert self.upload_dir is not None
+        target = self.upload_dir / file_name
+        target.write_bytes(self.upload_bytes)
+        self.staged_paths.append(target)
+        return str(target)
+
+    def clear_staged_uploads(self, session_id: str) -> None:
+        assert session_id == self.session_id
+        self.clear_count += 1
+        for path in self.staged_paths:
+            path.unlink(missing_ok=True)
 
     def stop(self, session_id: str) -> BrowserSessionSnapshot:
         assert session_id == self.session_id
@@ -447,3 +482,283 @@ def test_reviewed_greenhouse_capture_exposes_current_form_contract(
     assert captured.greenhouse_form.review_field_count == 1
     assert captured.greenhouse_form.navigation_control_key == "next"
     assert not captured.greenhouse_form.ready_to_advance
+
+
+def test_reviewed_greenhouse_upload_uses_exact_document_and_postcondition(
+    session: Session, tmp_path: Path
+) -> None:
+    pending = _observation(
+        page_type="DOCUMENT_UPLOAD",
+        fingerprint="greenhouse-document-pending",
+        visible_text="Greenhouse document upload",
+        url="https://boards.greenhouse.io/example/jobs/1#documents",
+        controls=[
+            {
+                "index": 0,
+                "control_key": "resume",
+                "tag": "input",
+                "type": "file",
+                "label": "Resume",
+                "label_source": "LABEL",
+                "required": True,
+                "native_required": True,
+                "visible": True,
+                "will_validate": True,
+                "constraint_satisfied": False,
+                "locator": {
+                    "strategy": "LABEL",
+                    "value": "Resume",
+                    "exact": True,
+                },
+            }
+        ],
+    )
+    ready = pending.model_copy(
+        update={
+            "sequence": 2,
+            "page_fingerprint": "greenhouse-document-ready",
+            "upload_status": ["candidate-resume.pdf"],
+            "controls": [pending.controls[0].model_copy(update={"constraint_satisfied": True})],
+        }
+    )
+    browser = _Browser(
+        pending,
+        action_observations=[ready],
+        expected_start_prefix="https://boards.greenhouse.io/",
+        upload_dir=tmp_path,
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        browser,
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=False,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    run = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl(str(pending.url)),
+            profile_name="greenhouse-fixture",
+        ),
+        "c" * 64,
+    )
+    assert run.greenhouse_form is not None
+    assessment = run.greenhouse_form
+    assert assessment.controls[0].action is GreenhouseFormAction.REVIEW_DOCUMENT_UPLOAD
+    document = CandidateDocumentVersionRecord(
+        id="version-1",
+        document_id="document-1",
+        version=1,
+        file_name="candidate-resume.pdf",
+        media_type="application/pdf",
+        sha256=hashlib.sha256(browser.upload_bytes).hexdigest(),
+        parser_version="synthetic-v1",
+        page_count=1,
+        character_count=32,
+        created_at=datetime.now(UTC),
+        storage_path="C:/synthetic/encrypted.txt",
+        encrypted_extraction="synthetic",
+    )
+
+    completed = service.upload_reviewed_greenhouse_document(
+        run.id,
+        form_review_fingerprint=assessment.review_fingerprint,
+        control_key="resume",
+        document=document,
+    )
+
+    assert completed.page_fingerprint == ready.page_fingerprint
+    assert completed.greenhouse_form is not None
+    assert completed.greenhouse_form.satisfied_required_count == 1
+    assert completed.evidence[-1].verified
+    assert completed.evidence[-1].action_kind is BrowserActionKind.UPLOAD
+    assert browser.executed[0].permission.value == "ELEVATED"
+    assert browser.executed[0].confirmation.value == "CONFIRMED"
+    assert browser.executed[0].preconditions[0].kind.value == "LOCATOR_VISIBLE"
+    assert browser.clear_count == 1
+    assert not browser.staged_paths[0].exists()
+    assert browser.state is BrowserSessionState.USER_TAKEOVER
+
+
+def test_reviewed_greenhouse_navigation_requires_fresh_ready_page_and_later_stage(
+    session: Session,
+) -> None:
+    application = _observation(
+        page_type="APPLICATION_FORM",
+        fingerprint="greenhouse-application-ready",
+        visible_text="Greenhouse application",
+        url="https://boards.greenhouse.io/example/jobs/1#application",
+        controls=[
+            {
+                "index": 0,
+                "control_key": "email",
+                "tag": "input",
+                "type": "email",
+                "label": "Email",
+                "label_source": "LABEL",
+                "required": True,
+                "native_required": True,
+                "visible": True,
+                "will_validate": True,
+                "constraint_satisfied": True,
+                "locator": {
+                    "strategy": "LABEL",
+                    "value": "Email",
+                    "exact": True,
+                },
+            },
+            {
+                "index": 1,
+                "control_key": "contact-next",
+                "tag": "button",
+                "text": "Next",
+                "visible": True,
+                "locator": {
+                    "strategy": "ROLE",
+                    "value": "button",
+                    "name": "Next",
+                    "exact": True,
+                },
+            },
+        ],
+    )
+    documents = _observation(
+        page_type="DOCUMENT_UPLOAD",
+        fingerprint="greenhouse-document-stage",
+        visible_text="Greenhouse documents",
+        url="https://boards.greenhouse.io/example/jobs/1#documents",
+    )
+    browser = _Browser(
+        application,
+        action_observations=[documents],
+        expected_start_prefix="https://boards.greenhouse.io/",
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        browser,
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=False,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    run = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl(str(application.url)),
+            profile_name="greenhouse-fixture",
+        ),
+        "d" * 64,
+    )
+    assert run.greenhouse_form is not None and run.greenhouse_form.ready_to_advance
+
+    with pytest.raises(SupervisedPortalStateError, match="review changed"):
+        service.navigate_reviewed_greenhouse_form(
+            run.id,
+            form_review_fingerprint="0" * 64,
+            control_key="contact-next",
+        )
+    assert browser.executed == []
+
+    completed = service.navigate_reviewed_greenhouse_form(
+        run.id,
+        form_review_fingerprint=run.greenhouse_form.review_fingerprint,
+        control_key="contact-next",
+    )
+    assert completed.page_fingerprint == documents.page_fingerprint
+    assert completed.greenhouse_form is not None
+    assert completed.greenhouse_form.stage.value == "DOCUMENTS"
+    assert completed.evidence[-1].verified
+    assert completed.evidence[-1].action_kind is BrowserActionKind.CLICK
+    assert len(browser.executed) == 1
+    assert browser.state is BrowserSessionState.USER_TAKEOVER
+
+
+def test_reviewed_greenhouse_navigation_failure_returns_control_without_retry(
+    session: Session,
+) -> None:
+    application = _observation(
+        page_type="APPLICATION_FORM",
+        fingerprint="greenhouse-application-ready",
+        visible_text="Greenhouse application",
+        url="https://boards.greenhouse.io/example/jobs/1#application",
+        controls=[
+            {
+                "index": 0,
+                "control_key": "email",
+                "tag": "input",
+                "type": "email",
+                "label": "Email",
+                "label_source": "LABEL",
+                "required": True,
+                "native_required": True,
+                "visible": True,
+                "will_validate": True,
+                "constraint_satisfied": True,
+                "locator": {
+                    "strategy": "LABEL",
+                    "value": "Email",
+                    "exact": True,
+                },
+            },
+            {
+                "index": 1,
+                "control_key": "contact-next",
+                "tag": "button",
+                "text": "Next",
+                "visible": True,
+                "locator": {
+                    "strategy": "ROLE",
+                    "value": "button",
+                    "name": "Next",
+                    "exact": True,
+                },
+            },
+        ],
+    )
+    escaped = application.model_copy(
+        update={
+            "url": "https://job-boards.greenhouse.io/example/jobs/1#application",
+            "origin": "https://job-boards.greenhouse.io",
+            "page_fingerprint": "greenhouse-escaped-ready",
+        }
+    )
+    browser = _Browser(
+        application,
+        action_observations=[escaped],
+        expected_start_prefix="https://boards.greenhouse.io/",
+    )
+    service = SupervisedPortalService(
+        SupervisedPortalRepository(session),
+        browser,
+        PortalCatalog(),
+        enabled=True,
+        submission_enabled=False,
+        allowed_portals={PortalKind.GREENHOUSE},
+    )
+    run = service.start_reviewed_greenhouse(
+        SupervisedPortalRunCreate(
+            workflow_id="workflow-1",
+            portal=PortalKind.GREENHOUSE,
+            start_url=AnyHttpUrl(str(application.url)),
+            profile_name="greenhouse-fixture",
+        ),
+        "e" * 64,
+    )
+    assert run.greenhouse_form is not None and run.greenhouse_form.ready_to_advance
+
+    completed = service.navigate_reviewed_greenhouse_form(
+        run.id,
+        form_review_fingerprint=run.greenhouse_form.review_fingerprint,
+        control_key="contact-next",
+    )
+
+    assert completed.state is SupervisedPortalRunState.INTERVENTION_REQUIRED
+    assert completed.disposition is SupervisedPortalDisposition.MANUAL_INTERVENTION_REQUIRED
+    assert completed.intervention_reasons == [PortalInterventionReason.SITE_CHANGED]
+    assert not completed.evidence[-1].verified
+    assert completed.evidence[-1].action_kind is BrowserActionKind.CLICK
+    assert len(browser.executed) == 1
+    assert browser.state is BrowserSessionState.USER_TAKEOVER

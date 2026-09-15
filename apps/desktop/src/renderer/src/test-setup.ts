@@ -31,6 +31,7 @@ const bridge: DesktopBridge = {
       throw new Error("Not implemented in this test.");
     },
     startGreenhouseApplicationLaunch: async () => null,
+    executeGreenhouseFormAction: async () => null,
     listGreenhouseJobs: async () => {
       throw new Error("Not implemented in this test.");
     },
