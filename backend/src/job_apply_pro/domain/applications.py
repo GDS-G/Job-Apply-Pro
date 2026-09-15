@@ -331,10 +331,11 @@ class ApplicationFieldBindingRecord(BaseModel):
 
 
 class ApplicationFieldExecutionApproval(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     binding_id: str = Field(min_length=1, max_length=100)
     review_page_fingerprint: str = Field(min_length=1, max_length=200)
+    greenhouse_form_review_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     confirmation_phrase: str = Field(min_length=1, max_length=100)
 
 

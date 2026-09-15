@@ -9,6 +9,7 @@ import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  ApplicationFieldBinding,
   PortalRunSnapshot,
   SupervisedPortalRunSnapshot,
   WorkflowControlAction,
@@ -136,6 +137,29 @@ describe("App", () => {
   });
 
   it("shows the runtime Greenhouse form contract without claiming live compatibility", async () => {
+    const binding = {
+      id: "binding-email",
+      application_id: discoveredWorkflow.application_id,
+      application_answer_id: "answer-email",
+      answer_revision: 2,
+      portal: "GREENHOUSE",
+      page_fingerprint: "gh-upload-pending",
+      control_key: "email",
+      control_kind: "EMAIL",
+      label: "Email",
+      required: true,
+      options: [],
+      canonical_field: "email",
+      confidence: 1,
+      binding_source: "USER_CONFIRMED",
+      answer_source: "USER_REVIEWED",
+      answer_kind: "EXACT",
+      validation_rules: {},
+      automation_permission: "AUTOFILL_ALLOWED",
+      review_fingerprint: "b".repeat(64),
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    } satisfies ApplicationFieldBinding;
     const run: SupervisedPortalRunSnapshot = {
       id: "greenhouse-run",
       portal: "GREENHOUSE",
@@ -149,21 +173,91 @@ describe("App", () => {
       disposition: "USER_ACTION_REQUIRED",
       intervention_reasons: ["USER_TAKEOVER"],
       evidence: [],
-      observed_controls: [],
+      observed_controls: [
+        {
+          index: 0,
+          control_key: "email",
+          kind: "EMAIL",
+          tag: "input",
+          input_type: "email",
+          role: "",
+          element_id: "email",
+          field_name: "email",
+          group_label: "",
+          label: "Email",
+          label_source: "LABEL",
+          text: "",
+          href: "",
+          canonical_field: "email",
+          section_path: [],
+          repeat_group: "",
+          repeat_index: null,
+          repeat_count: 1,
+          conditional_region: "",
+          conditional_trigger: "",
+          widget_popup: "",
+          widget_expanded: null,
+          widget_multiselectable: false,
+          widget_searchable: false,
+          accept: "",
+          checked: false,
+          required: true,
+          native_required: true,
+          accessible_required: false,
+          disabled: false,
+          native_disabled: false,
+          inherited_disabled: false,
+          accessible_disabled: false,
+          read_only: false,
+          native_read_only: false,
+          accessible_read_only: false,
+          busy: false,
+          control_busy: false,
+          form_busy: false,
+          inert: false,
+          direct_inert: false,
+          inherited_inert: false,
+          accessibility_hidden: false,
+          direct_accessibility_hidden: false,
+          inherited_accessibility_hidden: false,
+          visible: true,
+          will_validate: true,
+          constraint_satisfied: false,
+          accessible_invalid: false,
+          legal_attestation: false,
+          character_limit: 320,
+          minimum_number: null,
+          maximum_number: null,
+          earliest_date: null,
+          latest_date: null,
+          options: [],
+          locator: { strategy: "LABEL", value: "Email", exact: true },
+        },
+      ],
       greenhouse_form: {
         policy_version: "greenhouse-form-execution-contract/1",
         page_fingerprint: "gh-upload-pending",
         page_type: "DOCUMENT_UPLOAD",
         stage: "DOCUMENTS",
-        required_control_count: 1,
+        required_control_count: 3,
         satisfied_required_count: 0,
-        review_field_count: 0,
+        review_field_count: 1,
         upload_review_count: 1,
-        manual_intervention_count: 0,
+        manual_intervention_count: 1,
         navigation_control_key: "documents-next",
         navigation_label: "Continue",
         ready_to_advance: false,
         controls: [
+          {
+            control_key: "email",
+            label: "Email",
+            control_kind: "EMAIL",
+            required: true,
+            blocking: true,
+            action: "REVIEW_FIELD",
+            postcondition: "VALUE_EQUALS",
+            reason: "Sanitized fixture",
+          },
           {
             control_key: "resume",
             label: "Resume",
@@ -173,6 +267,16 @@ describe("App", () => {
             action: "REVIEW_DOCUMENT_UPLOAD",
             postcondition: "UPLOAD_FILE_NAME_OBSERVED",
             reason: "Sanitized fixture",
+          },
+          {
+            control_key: "location-widget",
+            label: "Location search",
+            control_kind: "CUSTOM",
+            required: true,
+            blocking: true,
+            action: "USER_INTERVENTION",
+            postcondition: "USER_VERIFIED",
+            reason: "Sanitized custom-widget fixture",
           },
         ],
         limitations: ["Sanitized replay support is not live compatibility."],
@@ -188,8 +292,15 @@ describe("App", () => {
       window.jobApplyPro.workbench,
       "listSupervisedPortalRuns",
     ).mockResolvedValue([run]);
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "listApplicationFieldBindings",
+    ).mockResolvedValue([binding]);
     const execute = vi
       .spyOn(window.jobApplyPro.workbench, "executeGreenhouseFormAction")
+      .mockResolvedValue(null);
+    const executeField = vi
+      .spyOn(window.jobApplyPro.workbench, "executeApplicationField")
       .mockResolvedValue(null);
 
     render(<App />);
@@ -198,11 +309,31 @@ describe("App", () => {
       await screen.findByText("Greenhouse documents form contract"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/0\/1 required controls satisfied/),
+      screen.getByText(/0\/3 required controls satisfied/),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/sanitized replay support is not live compatibility/i),
     ).toBeInTheDocument();
+    expect(screen.getByText(/manual handoff:/i)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review field binding" }),
+    );
+    expect(
+      screen.getByLabelText("Detected control from current supervised page"),
+    ).toHaveValue("email");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Review & populate exact field",
+      }),
+    );
+    await waitFor(() =>
+      expect(executeField).toHaveBeenCalledExactlyOnceWith(
+        run.id,
+        binding.id,
+        run.page_fingerprint,
+        run.greenhouse_form?.review_fingerprint,
+      ),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Review & upload document" }),
     );
@@ -304,7 +435,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Reviewed Greenhouse Form Actions v0.67.0-alpha.1"),
+      screen.getByText("Reviewed Greenhouse Native Fields v0.68.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

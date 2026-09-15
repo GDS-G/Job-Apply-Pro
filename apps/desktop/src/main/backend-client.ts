@@ -377,6 +377,7 @@ export class BackendClient {
     runId: string,
     bindingId: string,
     reviewPageFingerprint: string,
+    greenhouseFormReviewFingerprint: string | null = null,
   ): Promise<ApplicationFieldExecution> {
     return this.request(
       `/portals/supervised/runs/${encodeURIComponent(runId)}/field-executions`,
@@ -385,6 +386,7 @@ export class BackendClient {
         body: JSON.stringify({
           binding_id: bindingId,
           review_page_fingerprint: reviewPageFingerprint,
+          greenhouse_form_review_fingerprint: greenhouseFormReviewFingerprint,
           confirmation_phrase: "EXECUTE APPROVED FIELD",
         }),
       },

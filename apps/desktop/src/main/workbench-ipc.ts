@@ -1023,6 +1023,7 @@ export function registerWorkbenchIpc(
       runIdValue: unknown,
       bindingIdValue: unknown,
       fingerprintValue: unknown,
+      greenhouseFingerprintValue: unknown,
     ) => {
       const runId = requiredText(runIdValue, "Supervised portal run id", 100);
       const bindingId = requiredText(bindingIdValue, "Field binding id", 100);
@@ -1031,6 +1032,19 @@ export function registerWorkbenchIpc(
         "Reviewed page fingerprint",
         200,
       );
+      const greenhouseFingerprint =
+        greenhouseFingerprintValue == null
+          ? null
+          : requiredText(
+              greenhouseFingerprintValue,
+              "Greenhouse form review fingerprint",
+              64,
+            );
+      if (
+        greenhouseFingerprint !== null &&
+        !/^[a-f0-9]{64}$/.test(greenhouseFingerprint)
+      )
+        throw new TypeError("Greenhouse form review fingerprint is invalid.");
       const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
       const options = {
         type: "warning" as const,
@@ -1038,7 +1052,10 @@ export function registerWorkbenchIpc(
         message:
           "One reviewed answer will be entered into the currently observed field.",
         detail:
-          "The backend will reject changed pages, answers, controls, legal attestations, uploads, signatures, custom widgets, and all final-submit actions.",
+          "The backend will reject changed pages, answers, controls, legal attestations, uploads, signatures, custom widgets, and all final-submit actions." +
+          (greenhouseFingerprint
+            ? " The current Greenhouse form review must also classify this exact control for reviewed native-field execution."
+            : ""),
         buttons: ["Cancel", "Populate exact approved field"],
         defaultId: 0,
         cancelId: 0,
@@ -1052,6 +1069,7 @@ export function registerWorkbenchIpc(
         runId,
         bindingId,
         fingerprint,
+        greenhouseFingerprint,
       );
     },
   );

@@ -32,11 +32,17 @@ from job_apply_pro.domain.browser import (
     SemanticLocator,
     VerificationKind,
 )
+from job_apply_pro.domain.greenhouse_form import GreenhouseFormAction
 from job_apply_pro.domain.portals import (
+    PortalKind,
     SupervisedPortalRunSnapshot,
     SupervisedPortalRunState,
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
+from job_apply_pro.services.greenhouse_form import (
+    GreenhouseFormContractError,
+    GreenhouseFormContractService,
+)
 
 
 class FieldExecutionError(RuntimeError):
@@ -113,6 +119,7 @@ class ApplicationFieldExecutionService:
         browser: BrowserProtocol,
         cipher: SensitiveDataCipher,
         enabled: bool,
+        greenhouse_forms: GreenhouseFormContractService | None = None,
     ) -> None:
         self._bindings = bindings
         self._binding_service = binding_service
@@ -123,6 +130,7 @@ class ApplicationFieldExecutionService:
         self._browser = browser
         self._cipher = cipher
         self._enabled = enabled
+        self._greenhouse_forms = greenhouse_forms or GreenhouseFormContractService()
 
     def execute(
         self, run_id: str, approval: ApplicationFieldExecutionApproval
@@ -190,6 +198,35 @@ class ApplicationFieldExecutionService:
                 )
             control = controls[0]
             self._validate_control(binding, control)
+            if run.portal is PortalKind.GREENHOUSE:
+                if approval.greenhouse_form_review_fingerprint is None:
+                    raise FieldExecutionPolicyError(
+                        "Greenhouse field execution requires the current form review"
+                    )
+                try:
+                    assessment = self._greenhouse_forms.assess(observation)
+                except GreenhouseFormContractError as error:
+                    raise FieldExecutionConflictError(
+                        "Current page is not a recognized Greenhouse form"
+                    ) from error
+                if assessment.review_fingerprint != approval.greenhouse_form_review_fingerprint:
+                    raise FieldExecutionConflictError(
+                        "Greenhouse form changed after review; capture and review again"
+                    )
+                contracts = [
+                    item
+                    for item in assessment.controls
+                    if item.control_key == control.control_key
+                    and item.action is GreenhouseFormAction.REVIEW_FIELD
+                ]
+                if len(contracts) != 1:
+                    raise FieldExecutionPolicyError(
+                        "Current Greenhouse contract does not authorize this native field"
+                    )
+            elif approval.greenhouse_form_review_fingerprint is not None:
+                raise FieldExecutionPolicyError(
+                    "Greenhouse form review is invalid for another portal"
+                )
             field = self._observed_field(run, control)
             preview = self._binding_service.preview(
                 ApplicationFieldBindingPreviewRequest(

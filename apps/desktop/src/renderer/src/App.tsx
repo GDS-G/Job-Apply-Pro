@@ -193,6 +193,7 @@ export function App() {
     input: ApplicationFieldBindingPreviewInput;
     preview: ApplicationFieldBindingPreview;
   } | null>(null);
+  const [detectedControlKey, setDetectedControlKey] = useState("");
   const [tailoredDocument, setTailoredDocument] = useState<{
     input: TailoredDocumentRequest;
     preview: TailoredDocumentPreview;
@@ -517,6 +518,7 @@ export function App() {
     setFieldExecutions([]);
     setFieldCoverage(null);
     setFieldBindingPreview(null);
+    setDetectedControlKey("");
     setTailoredDocument(null);
     setDocumentSelection(null);
     setError(null);
@@ -1165,6 +1167,9 @@ export function App() {
           latestSupervisedRun.id,
           binding.id,
           latestSupervisedRun.page_fingerprint,
+          latestSupervisedRun.portal === "GREENHOUSE"
+            ? (latestSupervisedRun.greenhouse_form?.review_fingerprint ?? null)
+            : null,
         );
       if (execution) {
         setFieldExecutions((current) => [execution, ...current]);
@@ -1182,6 +1187,20 @@ export function App() {
       setError(readableError(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function reviewGreenhouseField(controlKey: string) {
+    setDetectedControlKey(controlKey);
+    setFieldBindingPreview(null);
+    const fieldBindingSection = document.getElementById(
+      "observed-field-binding",
+    );
+    if (typeof fieldBindingSection?.scrollIntoView === "function") {
+      fieldBindingSection.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     }
   }
 
@@ -1646,13 +1665,13 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>Reviewed Greenhouse Form Actions v0.67.0-alpha.1</strong>
+              <strong>Reviewed Greenhouse Native Fields v0.68.0-alpha.1</strong>
               <p>
-                Exact selected-resume upload and ready one-stage navigation now
-                require fresh backend review, native confirmation, durable
-                effect admission, and verified postconditions. Field entry,
-                custom widgets, legal controls, and final submission remain
-                separate.
+                One exact reviewed Greenhouse native field can now compose with
+                the current form contract, selected-resume upload, and ready
+                one-stage navigation. Every value action remains separately
+                confirmed; custom widgets, legal controls, and final submission
+                require manual or later governed paths.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -2661,7 +2680,10 @@ export function App() {
                 )}
               </div>
             </div>
-            <div className="panel__header panel__header--subsection">
+            <div
+              className="panel__header panel__header--subsection"
+              id="observed-field-binding"
+            >
               <div>
                 <h3>Observed portal field binding</h3>
                 <p>
@@ -2693,7 +2715,14 @@ export function App() {
                 </label>
                 <label>
                   Detected control from current supervised page
-                  <select name="detected_control_key" defaultValue="">
+                  <select
+                    aria-label="Detected control from current supervised page"
+                    name="detected_control_key"
+                    onChange={(event) =>
+                      setDetectedControlKey(event.currentTarget.value)
+                    }
+                    value={detectedControlKey}
+                  >
                     <option value="">Enter sanitized metadata manually</option>
                     {(latestSupervisedRun?.observed_controls ?? [])
                       .filter(
@@ -2704,7 +2733,13 @@ export function App() {
                           !control.read_only &&
                           !control.busy &&
                           !control.inert &&
-                          !control.accessibility_hidden,
+                          !control.accessibility_hidden &&
+                          (latestSupervisedRun?.portal !== "GREENHOUSE" ||
+                            latestSupervisedRun.greenhouse_form?.controls.some(
+                              (item) =>
+                                item.control_key === control.control_key &&
+                                item.action === "REVIEW_FIELD",
+                            )),
                       )
                       .map((control) => (
                         <option
@@ -2903,7 +2938,13 @@ export function App() {
                       binding.page_fingerprint &&
                     latestSupervisedRun.observed_controls.some(
                       (control) => control.control_key === binding.control_key,
-                    ) ? (
+                    ) &&
+                    (latestSupervisedRun.portal !== "GREENHOUSE" ||
+                      latestSupervisedRun.greenhouse_form?.controls.some(
+                        (control) =>
+                          control.control_key === binding.control_key &&
+                          control.action === "REVIEW_FIELD",
+                      )) ? (
                       <button
                         className="button button--primary"
                         disabled={busy}
@@ -3491,6 +3532,18 @@ export function App() {
                                 {control.postcondition.replaceAll("_", " ")}
                                 {control.blocking ? " · blocking" : ""}
                               </small>
+                              {control.action === "REVIEW_FIELD" ? (
+                                <button
+                                  className="button button--secondary"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    reviewGreenhouseField(control.control_key)
+                                  }
+                                  type="button"
+                                >
+                                  <ShieldCheck size={14} /> Review field binding
+                                </button>
+                              ) : null}
                               {control.action === "REVIEW_DOCUMENT_UPLOAD" ? (
                                 <button
                                   className="button button--secondary"
@@ -3524,6 +3577,14 @@ export function App() {
                                 >
                                   <Play size={14} /> Review & advance form
                                 </button>
+                              ) : null}
+                              {control.action === "USER_INTERVENTION" ? (
+                                <small>
+                                  Manual handoff: complete this control only in
+                                  the visible supervised browser, then capture
+                                  the page again. The app will not infer or
+                                  automate this value.
+                                </small>
                               ) : null}
                             </div>
                           ),

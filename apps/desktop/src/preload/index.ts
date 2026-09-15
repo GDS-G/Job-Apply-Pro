@@ -153,12 +153,14 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       runId: string,
       bindingId: string,
       reviewPageFingerprint: string,
+      greenhouseFormReviewFingerprint?: string | null,
     ) =>
       ipcRenderer.invoke(
         "portals:execute-application-field",
         runId,
         bindingId,
         reviewPageFingerprint,
+        greenhouseFormReviewFingerprint ?? null,
       ),
     listApplicationFieldExecutions: (applicationId: string) =>
       ipcRenderer.invoke(

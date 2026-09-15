@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Greenhouse Form Actions",
-  version: "0.67.0-alpha.1",
+  name: "Reviewed Greenhouse Native Fields",
+  version: "0.68.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -2111,6 +2111,7 @@ export interface DesktopBridge {
       runId: string,
       bindingId: string,
       reviewPageFingerprint: string,
+      greenhouseFormReviewFingerprint?: string | null,
     ): Promise<ApplicationFieldExecution | null>;
     listApplicationFieldExecutions(
       applicationId: string,

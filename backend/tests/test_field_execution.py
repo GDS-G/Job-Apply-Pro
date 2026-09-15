@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -54,6 +55,7 @@ from job_apply_pro.services.field_execution import (
     FieldExecutionConflictError,
     FieldExecutionPolicyError,
 )
+from job_apply_pro.services.greenhouse_form import GreenhouseFormContractService
 from job_apply_pro.storage.models import BrowserActionRow, BrowserSessionRow
 from job_apply_pro.storage.repositories import BrowserRuntimeRepository
 
@@ -62,20 +64,30 @@ SECRET_ANSWER = "private-answer-value"
 
 
 def _observation(
-    control: BrowserObservedControl, fingerprint: str = "page-v1"
+    control: BrowserObservedControl,
+    fingerprint: str = "page-v1",
+    portal: PortalKind = PortalKind.LINKEDIN,
 ) -> BrowserObservation:
+    if portal is PortalKind.GREENHOUSE:
+        url = "https://job-boards.greenhouse.io/synthetic/jobs/100#app"
+        title = "Greenhouse application"
+        page_type = "APPLICATION_FORM"
+    else:
+        url = "https://www.linkedin.com/jobs/apply"
+        title = "Apply"
+        page_type = "APPLICATION"
     return BrowserObservation(
         sequence=1,
-        url="https://www.linkedin.com/jobs/apply",
-        title="Apply",
-        origin="https://www.linkedin.com",
-        page_type="APPLICATION",
+        url=url,
+        title=title,
+        origin=url.split("/", 3)[0] + "//" + url.split("/", 3)[2],
+        page_type=page_type,
         page_fingerprint=fingerprint,
         tabs=[
             BrowserTab(
                 index=0,
-                url="https://www.linkedin.com/jobs/apply",
-                title="Apply",
+                url=url,
+                title=title,
                 active=True,
             )
         ],
@@ -169,7 +181,11 @@ class _Browser:
 
 
 def _fixture_service(
-    *, enabled: bool = True, fingerprint: str = "page-v1"
+    *,
+    enabled: bool = True,
+    fingerprint: str = "page-v1",
+    portal: PortalKind = PortalKind.LINKEDIN,
+    control_satisfied: bool = False,
 ) -> tuple[ApplicationFieldExecutionService, _Browser, _ExecutionRepository]:
     cipher = SensitiveDataCipher(StaticKeyProvider(b"k" * 32))
     answer = ApplicationAnswerRecord(
@@ -213,7 +229,7 @@ def _fixture_service(
         application_id="application-1",
         application_answer_id=answer.id,
         answer_revision=answer.revision,
-        portal=PortalKind.LINKEDIN.value,
+        portal=portal.value,
         page_fingerprint="page-v1",
         control_key="email-control",
         control_kind=PortalFieldControlKind.EMAIL,
@@ -240,17 +256,25 @@ def _fixture_service(
         field_name="email",
         label="Email",
         required=True,
+        native_required=portal is PortalKind.GREENHOUSE,
         visible=True,
+        will_validate=True,
+        constraint_satisfied=control_satisfied,
         locator=SemanticLocator(strategy=LocatorStrategy.LABEL, value="Email"),
+    )
+    current_url = (
+        "https://job-boards.greenhouse.io/synthetic/jobs/100#app"
+        if portal is PortalKind.GREENHOUSE
+        else "https://www.linkedin.com/jobs/apply"
     )
     run = SupervisedPortalRunSnapshot(
         id="run-1",
-        portal=PortalKind.LINKEDIN,
+        portal=portal,
         workflow_id="workflow-1",
         browser_session_id="session-1",
         state=SupervisedPortalRunState.AWAITING_USER,
-        current_url="https://www.linkedin.com/jobs/apply",
-        allowed_origins=["https://www.linkedin.com"],
+        current_url=current_url,
+        allowed_origins=[current_url.split("/", 3)[0] + "//" + current_url.split("/", 3)[2]],
         page_fingerprint="page-v1",
         current_match=None,
         disposition=SupervisedPortalDisposition.USER_ACTION_REQUIRED,
@@ -269,7 +293,7 @@ def _fixture_service(
         created_at=NOW,
         updated_at=NOW,
     )
-    browser = _Browser(_observation(control, fingerprint))
+    browser = _Browser(_observation(control, fingerprint, portal))
     executions = _ExecutionRepository()
     service = ApplicationFieldExecutionService(
         bindings=_ValueRepository(binding),  # type: ignore[arg-type]
@@ -308,6 +332,80 @@ def test_executes_exact_approved_field_without_auditing_answer_text() -> None:
     assert browser.action.permission is BrowserPermission.ELEVATED
     assert browser.action.confirmation is ConfirmationState.CONFIRMED
     assert browser.takeovers == 1
+
+
+def test_greenhouse_field_requires_current_provider_contract_review() -> None:
+    service, browser, executions = _fixture_service(portal=PortalKind.GREENHOUSE)
+    assert browser.observation is not None
+    review = GreenhouseFormContractService().assess(browser.observation).review_fingerprint
+    base = {
+        "binding_id": "binding-1",
+        "review_page_fingerprint": "page-v1",
+        "confirmation_phrase": "EXECUTE APPROVED FIELD",
+    }
+
+    with pytest.raises(FieldExecutionPolicyError, match="current form review"):
+        service.execute("run-1", ApplicationFieldExecutionApproval.model_validate(base))
+    with pytest.raises(FieldExecutionConflictError, match="changed after review"):
+        service.execute(
+            "run-1",
+            ApplicationFieldExecutionApproval.model_validate(
+                base | {"greenhouse_form_review_fingerprint": "0" * 64}
+            ),
+        )
+    assert browser.action is None
+    assert executions.values == []
+
+    result = service.execute(
+        "run-1",
+        ApplicationFieldExecutionApproval.model_validate(
+            base | {"greenhouse_form_review_fingerprint": review}
+        ),
+    )
+    assert result.verified
+    assert browser.action is not None and browser.action.sensitive_value
+
+
+def test_field_approval_rejects_unrecognized_renderer_authority() -> None:
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ApplicationFieldExecutionApproval.model_validate(
+            {
+                "binding_id": "binding-1",
+                "review_page_fingerprint": "page-v1",
+                "confirmation_phrase": "EXECUTE APPROVED FIELD",
+                "url": "https://untrusted.invalid",
+            }
+        )
+
+
+def test_greenhouse_field_rejects_already_satisfied_or_foreign_contract() -> None:
+    satisfied, browser, _ = _fixture_service(portal=PortalKind.GREENHOUSE, control_satisfied=True)
+    assert browser.observation is not None
+    review = GreenhouseFormContractService().assess(browser.observation).review_fingerprint
+    with pytest.raises(FieldExecutionPolicyError, match="does not authorize"):
+        satisfied.execute(
+            "run-1",
+            ApplicationFieldExecutionApproval(
+                binding_id="binding-1",
+                review_page_fingerprint="page-v1",
+                greenhouse_form_review_fingerprint=review,
+                confirmation_phrase="EXECUTE APPROVED FIELD",
+            ),
+        )
+    assert browser.action is None
+
+    linkedin, linkedin_browser, _ = _fixture_service()
+    with pytest.raises(FieldExecutionPolicyError, match="another portal"):
+        linkedin.execute(
+            "run-1",
+            ApplicationFieldExecutionApproval(
+                binding_id="binding-1",
+                review_page_fingerprint="page-v1",
+                greenhouse_form_review_fingerprint="a" * 64,
+                confirmation_phrase="EXECUTE APPROVED FIELD",
+            ),
+        )
+    assert linkedin_browser.action is None
 
 
 def test_rejects_disabled_policy_and_stale_live_page() -> None:
