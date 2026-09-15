@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Browser Exact URL Reconciliation",
-  version: "0.79.0-alpha.1",
+  name: "Reviewed Browser Link Navigation",
+  version: "0.80.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -387,6 +387,11 @@ export interface BrowserObservedControl {
   label_source: string;
   text: string;
   href: string;
+  resolved_href?: string;
+  href_has_query?: boolean;
+  href_has_fragment?: boolean;
+  href_has_credentials?: boolean;
+  href_download?: boolean;
   canonical_field: string;
   section_path: string[];
   repeat_group: string;
@@ -770,6 +775,22 @@ export interface SupervisedPortalRunCreate {
   allowed_origins: string[];
 }
 
+export interface SupervisedPortalLinkCandidate {
+  control_key: string;
+  label: string;
+  target_origin: string;
+  target_path: string;
+}
+
+export interface SupervisedPortalLinkNavigationPreview extends SupervisedPortalLinkCandidate {
+  run_id: string;
+  browser_session_id: string;
+  source_page_type: string;
+  page_fingerprint: string;
+  review_fingerprint: string;
+  notice: string;
+}
+
 export interface SupervisedPortalStepEvidence {
   id: string;
   run_id: string;
@@ -882,6 +903,7 @@ export interface SupervisedPortalRunSnapshot {
   intervention_reasons: PortalInterventionReason[];
   evidence: SupervisedPortalStepEvidence[];
   observed_controls: BrowserObservedControl[];
+  reviewed_links?: SupervisedPortalLinkCandidate[];
   greenhouse_form?: GreenhouseFormContractAssessment | null;
   trace_path?: string | null;
   created_at: string;
@@ -2334,6 +2356,11 @@ export interface DesktopBridge {
       runId: string,
       priorPageFingerprint: string,
     ): Promise<SupervisedPortalRunSnapshot>;
+    navigateSupervisedPortalLink(
+      runId: string,
+      controlKey: string,
+      expectedPageFingerprint: string,
+    ): Promise<SupervisedPortalRunSnapshot | null>;
     submitSupervisedPortal(
       runId: string,
       reviewFingerprint: string,

@@ -80,6 +80,7 @@ import type {
   PortalAdapterDefinition,
   ReferencePortalRunCreate,
   RestorePlan,
+  SupervisedPortalLinkNavigationPreview,
   SupervisedPortalRunCreate,
   SupervisedPortalRunSnapshot,
   SupportDiagnostics,
@@ -787,6 +788,39 @@ export class BackendClient {
         method: "POST",
         body: JSON.stringify({
           prior_page_fingerprint: priorPageFingerprint,
+        }),
+      },
+      120_000,
+    );
+  }
+
+  previewSupervisedPortalLinkNavigation(
+    runId: string,
+    controlKey: string,
+    expectedPageFingerprint: string,
+  ): Promise<SupervisedPortalLinkNavigationPreview> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(runId)}/links/${encodeURIComponent(controlKey)}/navigation/preview`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          expected_page_fingerprint: expectedPageFingerprint,
+        }),
+      },
+      120_000,
+    );
+  }
+
+  approveSupervisedPortalLinkNavigation(
+    preview: SupervisedPortalLinkNavigationPreview,
+  ): Promise<SupervisedPortalRunSnapshot> {
+    return this.request(
+      `/portals/supervised/runs/${encodeURIComponent(preview.run_id)}/links/${encodeURIComponent(preview.control_key)}/navigation/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          expected_review_fingerprint: preview.review_fingerprint,
+          confirmation_phrase: "NAVIGATE REVIEWED LINK",
         }),
       },
       120_000,

@@ -24,6 +24,9 @@ from job_apply_pro.domain.portals import (
     ReferencePortalRunCreate,
     SubmissionApproval,
     SupervisedPortalCapture,
+    SupervisedPortalLinkNavigationApproval,
+    SupervisedPortalLinkNavigationPreview,
+    SupervisedPortalLinkNavigationReview,
     SupervisedPortalRunCreate,
     SupervisedPortalRunSnapshot,
     SupervisedPortalSubmissionApproval,
@@ -287,6 +290,52 @@ def capture_supervised_portal_step(
 ) -> SupervisedPortalRunSnapshot:
     try:
         return service.capture(run_id, command)
+    except (
+        LookupError,
+        BrowserPolicyError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        SupervisedPortalPolicyError,
+        SupervisedPortalStateError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/supervised/runs/{run_id}/links/{control_key}/navigation/preview",
+    response_model=SupervisedPortalLinkNavigationPreview,
+)
+def preview_supervised_portal_link_navigation(
+    run_id: str,
+    control_key: str,
+    review: SupervisedPortalLinkNavigationReview,
+    service: SupervisedPortalServiceDependency,
+) -> SupervisedPortalLinkNavigationPreview:
+    try:
+        return service.preview_reviewed_link_navigation(run_id, control_key, review)
+    except (
+        LookupError,
+        BrowserPolicyError,
+        BrowserSessionStateError,
+        BrowserWorkerError,
+        SupervisedPortalPolicyError,
+        SupervisedPortalStateError,
+    ) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/supervised/runs/{run_id}/links/{control_key}/navigation/approve",
+    response_model=SupervisedPortalRunSnapshot,
+)
+def approve_supervised_portal_link_navigation(
+    run_id: str,
+    control_key: str,
+    approval: SupervisedPortalLinkNavigationApproval,
+    service: SupervisedPortalServiceDependency,
+) -> SupervisedPortalRunSnapshot:
+    try:
+        return service.navigate_reviewed_link(run_id, control_key, approval)
     except (
         LookupError,
         BrowserPolicyError,

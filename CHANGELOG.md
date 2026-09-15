@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.80.0-alpha.1] - Unreleased
+
+### Reviewed Browser Link Navigation
+
+- Derive ordinary navigation candidates in the backend from one visible, enabled, uniquely keyed native anchor in a supervised non-Greenhouse takeover session.
+- Strip query values, fragment values, embedded usernames, and embedded passwords from browser observations; retain only non-sensitive presence flags and reject those targets.
+- Reject downloads, JavaScript/non-HTTP(S) links, already-current targets, foreign origins, cross-portal hosts, duplicates, stale pages, and changed reviews.
+- Bind a backend review fingerprint to the policy, run/session/portal, allowed origins, exact source evidence, control identity/label, and exact normalized target URL.
+- Require a Cancel-default native Electron review and fixed backend approval phrase; the renderer supplies no URL or claimed result.
+- Reobserve after resume, reprove the immutable review, then issue one standard direct `NAVIGATE` with exact `URL_EQUALS` instead of clicking the DOM anchor.
+- Reuse v0.79 no-replay exact-URL reconciliation when a worker response is uncertain; never retry the navigation.
+- Reuse schema `20260915_0030`; production portals, authorized live acceptance, signing, and physical Windows validation remain separate gates.
+
 ## [0.79.0-alpha.1] - Unreleased
 
 ### Reviewed Browser Exact URL Reconciliation

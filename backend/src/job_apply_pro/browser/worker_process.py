@@ -518,6 +518,14 @@ class BrowserWorker:
                         .trim().slice(0, 500),
                       label: (option.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 300)
                     })) : [];
+              const resolvedHref = 'href' in el ? String(el.href || '') : '';
+              let hrefHasCredentials = false;
+              try {
+                const parsedHref = new URL(resolvedHref);
+                hrefHasCredentials = Boolean(parsedHref.username || parsedHref.password);
+              } catch (_error) {
+                hrefHasCredentials = false;
+              }
               return {
                 index,
                 id,
@@ -531,6 +539,11 @@ class BrowserWorker:
                 labelSource: labelInfo.source,
                 text: (el.innerText || '').trim().slice(0, 200),
                 href: el.getAttribute('href') || '',
+                resolvedHref,
+                hrefHasQuery: resolvedHref.includes('?'),
+                hrefHasFragment: resolvedHref.includes('#'),
+                hrefHasCredentials,
+                hrefDownload: el.hasAttribute('download'),
                 canonicalField: el.getAttribute('data-canonical-field') || '',
                 sectionPath: ancestors,
                 repeatGroup: repeatGroup.slice(0, 200),

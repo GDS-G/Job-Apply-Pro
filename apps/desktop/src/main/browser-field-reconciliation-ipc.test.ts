@@ -14,6 +14,8 @@ import type {
   BrowserProfileCleanupResult,
   BrowserProfileRetirementPreview,
   BrowserProfileRetirementResult,
+  SupervisedPortalLinkNavigationPreview,
+  SupervisedPortalRunSnapshot,
 } from "@job-apply-pro/contracts";
 
 import { BackendClient } from "./backend-client.js";
@@ -47,6 +49,8 @@ vi.mock("electron", () => ({
 const operationId = "64a4cc96-07d1-4a0e-8000-a74811a13c0e";
 const attemptId = "19c70be6-ea1b-4c71-b668-d359f7ce4b06";
 const sessionId = "5fdf419a-0771-4d75-99d2-c76ba2f89719";
+const runId = "6f3cf568-ec3b-4d8c-bccb-49ca1db4bb35";
+const linkControlKey = "reviewed-job-link";
 const cleanupId = "d1c5770b-22b0-4e97-81ee-722f9d9ad947";
 const preview: BrowserFieldReconciliationPreview = {
   operation_id: operationId,
@@ -175,6 +179,23 @@ const cleanupResult: BrowserProfileCleanupResult = {
   cleaned_at: "2026-09-15T18:06:00+00:00",
   notice: "Isolated local browser profile data was removed.",
 };
+const supervisedLinkPreview: SupervisedPortalLinkNavigationPreview = {
+  run_id: runId,
+  browser_session_id: sessionId,
+  control_key: linkControlKey,
+  label: "View reviewed job",
+  source_page_type: "JOB_SEARCH_RESULTS",
+  target_origin: "https://www.linkedin.com",
+  target_path: "/jobs/view/456",
+  page_fingerprint: "linkedin-search-v1",
+  review_fingerprint: "9".repeat(64),
+  notice: "Approval navigates directly to the exact reviewed target.",
+};
+const supervisedLinkResult = {
+  id: runId,
+  current_url: "https://www.linkedin.com/jobs/view/456",
+  page_fingerprint: "linkedin-detail-v2",
+} as unknown as SupervisedPortalRunSnapshot;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -320,6 +341,43 @@ describe("browser field reconciliation backend client", () => {
     });
   });
 
+  it("previews and approves one reviewed direct link through separate routes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json(supervisedLinkPreview))
+      .mockResolvedValueOnce(Response.json(supervisedLinkResult));
+
+    await expect(
+      client.previewSupervisedPortalLinkNavigation(
+        runId,
+        linkControlKey,
+        "linkedin-search-v1",
+      ),
+    ).resolves.toEqual(supervisedLinkPreview);
+    await expect(
+      client.approveSupervisedPortalLinkNavigation(supervisedLinkPreview),
+    ).resolves.toEqual(supervisedLinkResult);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `http://127.0.0.1:8765/portals/supervised/runs/${runId}/links/${linkControlKey}/navigation/preview`,
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        expected_page_fingerprint: "linkedin-search-v1",
+      }),
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      `http://127.0.0.1:8765/portals/supervised/runs/${runId}/links/${linkControlKey}/navigation/approve`,
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        expected_review_fingerprint: "9".repeat(64),
+        confirmation_phrase: "NAVIGATE REVIEWED LINK",
+      }),
+    });
+  });
+
   it("lists and reviews browser profiles through authenticated routes", async () => {
     fetchMock
       .mockResolvedValueOnce(Response.json([retirementPreview]))
@@ -428,6 +486,10 @@ describe("browser field reconciliation IPC boundary", () => {
       vi.fn<BackendClient["previewBrowserProfileCleanup"]>(),
     approveBrowserProfileCleanup:
       vi.fn<BackendClient["approveBrowserProfileCleanup"]>(),
+    previewSupervisedPortalLinkNavigation:
+      vi.fn<BackendClient["previewSupervisedPortalLinkNavigation"]>(),
+    approveSupervisedPortalLinkNavigation:
+      vi.fn<BackendClient["approveSupervisedPortalLinkNavigation"]>(),
   };
   const supervisor = { client } as unknown as BackendSupervisor;
   const updates = {} as UpdateManager;
@@ -466,6 +528,13 @@ describe("browser field reconciliation IPC boundary", () => {
     return listener({ sender } as IpcMainInvokeEvent, ...args);
   }
 
+  async function invokeSupervisedLink(...args: unknown[]): Promise<unknown> {
+    const listener = handlers.get("portals:navigate-reviewed-link");
+    if (!listener)
+      throw new Error("Reviewed link navigation IPC was not registered");
+    return listener({ sender } as IpcMainInvokeEvent, ...args);
+  }
+
   beforeEach(() => {
     handlers.clear();
     vi.clearAllMocks();
@@ -492,7 +561,63 @@ describe("browser field reconciliation IPC boundary", () => {
     client.approveBrowserProfileRetirement.mockResolvedValue(retirementResult);
     client.previewBrowserProfileCleanup.mockResolvedValue(cleanupPreview);
     client.approveBrowserProfileCleanup.mockResolvedValue(cleanupResult);
+    client.previewSupervisedPortalLinkNavigation.mockResolvedValue(
+      supervisedLinkPreview,
+    );
+    client.approveSupervisedPortalLinkNavigation.mockResolvedValue(
+      supervisedLinkResult,
+    );
     registerWorkbenchIpc(supervisor, updates, notifications);
+  });
+
+  it("rejects malformed reviewed-link run identifiers before preview", async () => {
+    await expect(
+      invokeSupervisedLink("not-a-run", linkControlKey, "linkedin-search-v1"),
+    ).rejects.toThrow("Supervised portal run id must be a UUID.");
+
+    expect(client.previewSupervisedPortalLinkNavigation).not.toHaveBeenCalled();
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(client.approveSupervisedPortalLinkNavigation).not.toHaveBeenCalled();
+  });
+
+  it("keeps reviewed-link navigation cancel-default and action-free", async () => {
+    await expect(
+      invokeSupervisedLink(runId, linkControlKey, "linkedin-search-v1"),
+    ).resolves.toBeNull();
+
+    expect(
+      client.previewSupervisedPortalLinkNavigation,
+    ).toHaveBeenCalledExactlyOnceWith(
+      runId,
+      linkControlKey,
+      "linkedin-search-v1",
+    );
+    expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+      message: "View reviewed job",
+      buttons: ["Cancel", "Navigate reviewed link"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    expect(showMessageBox.mock.calls[0]?.[0]?.detail).toContain(
+      "https://www.linkedin.com/jobs/view/456",
+    );
+    expect(showMessageBox.mock.calls[0]?.[0]?.detail).toContain(
+      "instead of activating the page link",
+    );
+    expect(client.approveSupervisedPortalLinkNavigation).not.toHaveBeenCalled();
+  });
+
+  it("approves only the immutable backend reviewed-link preview", async () => {
+    showMessageBox.mockResolvedValue({ response: 1 });
+
+    await expect(
+      invokeSupervisedLink(runId, linkControlKey, "linkedin-search-v1"),
+    ).resolves.toEqual(supervisedLinkResult);
+
+    expect(
+      client.approveSupervisedPortalLinkNavigation,
+    ).toHaveBeenCalledExactlyOnceWith(supervisedLinkPreview);
   });
 
   it("rejects malformed identifiers before preview, dialog, or approval", async () => {

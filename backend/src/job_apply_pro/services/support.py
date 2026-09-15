@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Reviewed Browser Exact URL Reconciliation"
+    BUILD_NAME = "Reviewed Browser Link Navigation"
 
     def __init__(
         self,

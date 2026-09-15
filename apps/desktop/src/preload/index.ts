@@ -250,6 +250,17 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
         runId,
         priorPageFingerprint,
       ),
+    navigateSupervisedPortalLink: (
+      runId: string,
+      controlKey: string,
+      expectedPageFingerprint: string,
+    ) =>
+      ipcRenderer.invoke(
+        "portals:navigate-reviewed-link",
+        runId,
+        controlKey,
+        expectedPageFingerprint,
+      ),
     submitSupervisedPortal: (
       runId: string,
       reviewFingerprint: string,

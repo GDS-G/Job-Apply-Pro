@@ -349,6 +349,68 @@ describe("App", () => {
     );
   });
 
+  it("offers only backend-reviewed direct links and keeps exact review identifiers", async () => {
+    const api = window.jobApplyPro.workbench;
+    const run: SupervisedPortalRunSnapshot = {
+      id: "6f3cf568-ec3b-4d8c-bccb-49ca1db4bb35",
+      portal: "LINKEDIN",
+      workflow_id: discoveredWorkflow.workflow_id,
+      browser_session_id: "6a17312e-f9d4-4aca-a8f6-833b459cc678",
+      state: "AWAITING_USER",
+      current_url: "https://www.linkedin.com/jobs/search",
+      allowed_origins: ["https://www.linkedin.com"],
+      page_fingerprint: "linkedin-search-v1",
+      disposition: "USER_ACTION_REQUIRED",
+      intervention_reasons: ["USER_TAKEOVER"],
+      evidence: [],
+      observed_controls: [],
+      reviewed_links: [
+        {
+          control_key: "reviewed-job-link",
+          label: "View reviewed job",
+          target_origin: "https://www.linkedin.com",
+          target_path: "/jobs/view/456",
+        },
+      ],
+      greenhouse_form: null,
+      trace_path: null,
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    };
+    vi.spyOn(api, "listWorkflows").mockResolvedValue([discoveredWorkflow]);
+    vi.spyOn(api, "listSupervisedPortalRuns").mockResolvedValue([run]);
+    const navigate = vi
+      .spyOn(api, "navigateSupervisedPortalLink")
+      .mockResolvedValue({
+        ...run,
+        current_url: "https://www.linkedin.com/jobs/view/456",
+        page_fingerprint: "linkedin-detail-v2",
+        reviewed_links: [],
+      });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Reviewed direct links"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/https:\/\/www\.linkedin\.com\/jobs\/view\/456/),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Review and navigate View reviewed job",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledExactlyOnceWith(
+        run.id,
+        "reviewed-job-link",
+        run.page_fingerprint,
+      ),
+    );
+  });
+
   it("maps only a Greenhouse reviewed custom control to a single-select binding", async () => {
     const run: SupervisedPortalRunSnapshot = {
       id: "greenhouse-widget-run",
@@ -669,9 +731,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText(
-        "Reviewed Browser Exact URL Reconciliation v0.79.0-alpha.1",
-      ),
+      screen.getByText("Reviewed Browser Link Navigation v0.80.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

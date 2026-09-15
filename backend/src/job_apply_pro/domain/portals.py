@@ -1,11 +1,14 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from job_apply_pro.domain.browser import BrowserActionKind, BrowserEngine, BrowserObservedControl
 from job_apply_pro.domain.greenhouse_form import GreenhouseFormContractAssessment
 from job_apply_pro.domain.workflow import WorkflowState
+
+_UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 
 
 class PortalKind(StrEnum):
@@ -263,6 +266,43 @@ class SupervisedPortalSubmissionApproval(BaseModel):
     confirmation_phrase: str = Field(min_length=1, max_length=40)
 
 
+class SupervisedPortalLinkCandidate(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    control_key: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=300)
+    target_origin: str = Field(min_length=1, max_length=500)
+    target_path: str = Field(min_length=1, max_length=500)
+
+
+class SupervisedPortalLinkNavigationReview(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    expected_page_fingerprint: str = Field(min_length=1, max_length=200)
+
+
+class SupervisedPortalLinkNavigationPreview(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_id: str = Field(pattern=_UUID_PATTERN)
+    browser_session_id: str = Field(pattern=_UUID_PATTERN)
+    control_key: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=300)
+    source_page_type: str = Field(min_length=1, max_length=100)
+    target_origin: str = Field(min_length=1, max_length=500)
+    target_path: str = Field(min_length=1, max_length=500)
+    page_fingerprint: str = Field(min_length=1, max_length=200)
+    review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    notice: str = Field(min_length=1, max_length=500)
+
+
+class SupervisedPortalLinkNavigationApproval(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    expected_review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmation_phrase: Literal["NAVIGATE REVIEWED LINK"]
+
+
 class SupervisedPortalStepEvidence(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -299,6 +339,9 @@ class SupervisedPortalRunSnapshot(BaseModel):
     intervention_reasons: list[PortalInterventionReason]
     evidence: list[SupervisedPortalStepEvidence]
     observed_controls: list[BrowserObservedControl] = Field(default_factory=list, max_length=100)
+    reviewed_links: list[SupervisedPortalLinkCandidate] = Field(
+        default_factory=list, max_length=100
+    )
     greenhouse_form: GreenhouseFormContractAssessment | None = None
     trace_path: str | None = None
     created_at: datetime

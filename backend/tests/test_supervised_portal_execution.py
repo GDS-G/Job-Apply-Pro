@@ -29,11 +29,14 @@ from job_apply_pro.domain.portals import (
     PortalKind,
     SupervisedPortalCapture,
     SupervisedPortalDisposition,
+    SupervisedPortalLinkNavigationApproval,
+    SupervisedPortalLinkNavigationReview,
     SupervisedPortalRunCreate,
     SupervisedPortalRunState,
     SupervisedPortalSubmissionApproval,
 )
 from job_apply_pro.portals.catalog import PortalCatalog
+from job_apply_pro.services.browser_runtime import BrowserActionUncertainError
 from job_apply_pro.services.supervised_portals import (
     SupervisedPortalPolicyError,
     SupervisedPortalService,
@@ -82,13 +85,16 @@ class _Browser:
         initial: BrowserObservation,
         *,
         resume_observations: list[BrowserObservation] | None = None,
+        observe_observations: list[BrowserObservation] | None = None,
         action_observations: list[BrowserObservation] | None = None,
         expected_start_prefix: str = "https://www.linkedin.com/",
         upload_dir: Path | None = None,
         upload_bytes: bytes = b"synthetic reviewed resume",
+        action_error: Exception | None = None,
     ) -> None:
         self._observation = initial
         self._resume = list(resume_observations or [])
+        self._observe = list(observe_observations or [])
         self._actions = list(action_observations or [])
         self.state = BrowserSessionState.ACTIVE
         self.executed: list[BrowserAction] = []
@@ -96,6 +102,7 @@ class _Browser:
         self.expected_start_prefix = expected_start_prefix
         self.upload_dir = upload_dir
         self.upload_bytes = upload_bytes
+        self.action_error = action_error
         self.staged_paths: list[Path] = []
         self.clear_count = 0
 
@@ -132,6 +139,12 @@ class _Browser:
             self._observation = self._resume.pop(0)
         return self._snapshot()
 
+    def observe(self, session_id: str) -> BrowserSessionSnapshot:
+        assert session_id == self.session_id
+        if self._observe:
+            self._observation = self._observe.pop(0)
+        return self._snapshot()
+
     def takeover(self, session_id: str) -> BrowserSessionSnapshot:
         assert session_id == self.session_id
         self.state = BrowserSessionState.USER_TAKEOVER
@@ -140,6 +153,8 @@ class _Browser:
     def execute_action(self, session_id: str, action: BrowserAction) -> BrowserActionResult:
         assert session_id == self.session_id
         self.executed.append(action)
+        if self.action_error is not None:
+            raise self.action_error
         if self._actions:
             self._observation = self._actions.pop(0)
         return BrowserActionResult(
@@ -210,6 +225,213 @@ def _start(service: SupervisedPortalService):  # type: ignore[no-untyped-def]
             profile_name="linkedin-fixture",
         )
     )
+
+
+def _link_control(
+    control_key: str,
+    href: str,
+    *,
+    label: str = "View reviewed job",
+    **updates: object,
+) -> dict[str, object]:
+    return {
+        "index": 0,
+        "control_key": control_key,
+        "tag": "a",
+        "label": label,
+        "text": label,
+        "href": href,
+        "resolved_href": href,
+        "visible": True,
+        **updates,
+    }
+
+
+def test_reviewed_link_candidates_expose_only_plain_same_portal_targets(
+    session: Session,
+) -> None:
+    source_url = "https://www.linkedin.com/jobs/search"
+    source = _observation(
+        page_type="JOB_SEARCH_RESULTS",
+        fingerprint="link-search-v1",
+        visible_text="LinkedIn jobs search results",
+        url=source_url,
+        controls=[
+            _link_control("safe-link", "https://www.linkedin.com/jobs/view/456"),
+            _link_control("query-link", "https://www.linkedin.com/jobs/view/456?trk=secret"),
+            _link_control("fragment-link", "https://www.linkedin.com/jobs/view/456#apply"),
+            _link_control(
+                "download-link",
+                "https://www.linkedin.com/jobs/export/456",
+                href_download=True,
+            ),
+            _link_control("foreign-link", "https://example.invalid/jobs/456"),
+            _link_control("current-link", source_url),
+            _link_control("script-link", "javascript:submitApplication()"),
+            _link_control(
+                "credentialed-link",
+                "https://fixture-user:fixture-secret@www.linkedin.com/jobs/view/456",
+            ),
+            _link_control("disabled-link", "https://www.linkedin.com/jobs/view/789", disabled=True),
+            _link_control("duplicate-link", "https://www.linkedin.com/jobs/view/111"),
+            _link_control("duplicate-link", "https://www.linkedin.com/jobs/view/222"),
+        ],
+    )
+    service = _service(session, _Browser(source))
+
+    run = _start(service)
+
+    assert [candidate.control_key for candidate in run.reviewed_links] == ["safe-link"]
+    assert run.reviewed_links[0].label == "View reviewed job"
+    assert run.reviewed_links[0].target_origin == "https://www.linkedin.com"
+    assert run.reviewed_links[0].target_path == "/jobs/view/456"
+    assert source.controls[1].href == "https://www.linkedin.com/jobs/view/456"
+    assert source.controls[1].href_has_query
+    assert source.controls[2].href_has_fragment
+    credentialed = next(
+        control for control in source.controls if control.control_key == "credentialed-link"
+    )
+    assert credentialed.href_has_credentials
+    assert "fixture-user" not in credentialed.model_dump_json()
+    assert "fixture-secret" not in credentialed.model_dump_json()
+
+
+def test_native_reviewed_link_navigation_composes_exact_url_action(
+    session: Session,
+) -> None:
+    source = _observation(
+        page_type="JOB_SEARCH_RESULTS",
+        fingerprint="link-search-v1",
+        visible_text="LinkedIn jobs search results",
+        url="https://www.linkedin.com/jobs/search",
+        controls=[_link_control("safe-link", "https://www.linkedin.com/jobs/view/456")],
+    )
+    target = _observation(
+        page_type="JOB_DETAIL",
+        fingerprint="link-detail-v2",
+        visible_text="LinkedIn engineering role Apply",
+        url="https://www.linkedin.com/jobs/view/456",
+    )
+    browser = _Browser(source, action_observations=[target])
+    service = _service(session, browser)
+    run = _start(service)
+
+    preview = service.preview_reviewed_link_navigation(
+        run.id,
+        "safe-link",
+        SupervisedPortalLinkNavigationReview(expected_page_fingerprint=run.page_fingerprint),
+    )
+    assert preview.run_id == run.id
+    assert preview.browser_session_id == run.browser_session_id
+    assert preview.target_origin == "https://www.linkedin.com"
+    assert preview.target_path == "/jobs/view/456"
+    assert len(preview.review_fingerprint) == 64
+
+    updated = service.navigate_reviewed_link(
+        run.id,
+        "safe-link",
+        SupervisedPortalLinkNavigationApproval(
+            expected_review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="NAVIGATE REVIEWED LINK",
+        ),
+    )
+
+    assert len(browser.executed) == 1
+    action = browser.executed[0]
+    assert action.kind is BrowserActionKind.NAVIGATE
+    assert str(action.url) == "https://www.linkedin.com/jobs/view/456"
+    assert action.locator is None
+    assert action.preconditions == []
+    assert action.verification.kind.value == "URL_EQUALS"
+    assert action.verification.value == str(action.url)
+    assert action.permission.value == "STANDARD"
+    assert action.confirmation.value == "NOT_REQUIRED"
+    assert updated.current_url == str(action.url)
+    assert updated.page_fingerprint == target.page_fingerprint
+    assert updated.evidence[-1].action_kind is BrowserActionKind.NAVIGATE
+    assert updated.evidence[-1].verified
+    assert browser.state is BrowserSessionState.USER_TAKEOVER
+
+
+def test_reviewed_link_navigation_reproves_page_and_rejects_injected_authority(
+    session: Session,
+) -> None:
+    source = _observation(
+        page_type="JOB_SEARCH_RESULTS",
+        fingerprint="link-search-v1",
+        visible_text="LinkedIn jobs search results",
+        url="https://www.linkedin.com/jobs/search",
+        controls=[_link_control("safe-link", "https://www.linkedin.com/jobs/view/456")],
+    )
+    changed = source.model_copy(update={"page_fingerprint": "link-search-changed", "controls": []})
+    browser = _Browser(source, observe_observations=[source, changed])
+    service = _service(session, browser)
+    run = _start(service)
+    preview = service.preview_reviewed_link_navigation(
+        run.id,
+        "safe-link",
+        SupervisedPortalLinkNavigationReview(expected_page_fingerprint=run.page_fingerprint),
+    )
+
+    with pytest.raises(SupervisedPortalStateError, match="page changed"):
+        service.navigate_reviewed_link(
+            run.id,
+            "safe-link",
+            SupervisedPortalLinkNavigationApproval(
+                expected_review_fingerprint=preview.review_fingerprint,
+                confirmation_phrase="NAVIGATE REVIEWED LINK",
+            ),
+        )
+    assert browser.executed == []
+    assert browser.state is BrowserSessionState.USER_TAKEOVER
+
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        SupervisedPortalLinkNavigationApproval.model_validate(
+            {
+                "expected_review_fingerprint": preview.review_fingerprint,
+                "confirmation_phrase": "NAVIGATE REVIEWED LINK",
+                "url": "https://untrusted.invalid",
+            }
+        )
+
+
+def test_reviewed_link_navigation_never_retries_an_uncertain_external_effect(
+    session: Session,
+) -> None:
+    source = _observation(
+        page_type="JOB_SEARCH_RESULTS",
+        fingerprint="link-search-v1",
+        visible_text="LinkedIn jobs search results",
+        url="https://www.linkedin.com/jobs/search",
+        controls=[_link_control("safe-link", "https://www.linkedin.com/jobs/view/456")],
+    )
+    browser = _Browser(
+        source,
+        action_error=BrowserActionUncertainError(
+            "Browser action outcome is uncertain; automatic retry is blocked"
+        ),
+    )
+    service = _service(session, browser)
+    run = _start(service)
+    preview = service.preview_reviewed_link_navigation(
+        run.id,
+        "safe-link",
+        SupervisedPortalLinkNavigationReview(expected_page_fingerprint=run.page_fingerprint),
+    )
+
+    with pytest.raises(BrowserActionUncertainError, match="automatic retry is blocked"):
+        service.navigate_reviewed_link(
+            run.id,
+            "safe-link",
+            SupervisedPortalLinkNavigationApproval(
+                expected_review_fingerprint=preview.review_fingerprint,
+                confirmation_phrase="NAVIGATE REVIEWED LINK",
+            ),
+        )
+
+    assert len(browser.executed) == 1
+    assert browser.executed[0].kind is BrowserActionKind.NAVIGATE
+    assert browser.state is BrowserSessionState.USER_TAKEOVER
 
 
 def test_supervised_run_captures_manual_steps_and_exact_final_submission(

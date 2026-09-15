@@ -131,6 +131,7 @@ const bridge: DesktopBridge = {
     captureSupervisedPortal: async () => {
       throw new Error("Not implemented in this test.");
     },
+    navigateSupervisedPortalLink: async () => null,
     submitSupervisedPortal: async () => null,
     stopSupervisedPortal: async () => {
       throw new Error("Not implemented in this test.");

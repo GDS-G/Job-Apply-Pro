@@ -194,6 +194,11 @@ class BrowserObservedControl(BaseModel):
     label_source: str = Field(default="NONE", max_length=40)
     text: str = Field(default="", max_length=200)
     href: str = Field(default="", max_length=2_000)
+    resolved_href: str = Field(default="", max_length=2_000)
+    href_has_query: bool = False
+    href_has_fragment: bool = False
+    href_has_credentials: bool = False
+    href_download: bool = False
     canonical_field: str = Field(default="", max_length=160)
     section_path: list[str] = Field(default_factory=list, max_length=10)
     repeat_group: str = Field(default="", max_length=200)
@@ -379,11 +384,45 @@ class BrowserObservedControl(BaseModel):
             return None
 
         href = str(item.get("href", ""))[:2_000]
+        resolved_href = str(item.get("resolved_href", item.get("resolvedHref", "")))[:2_000]
+        href_has_query = bool(item.get("href_has_query", item.get("hrefHasQuery")))
+        href_has_fragment = bool(item.get("href_has_fragment", item.get("hrefHasFragment")))
+        href_has_credentials = bool(
+            item.get("href_has_credentials", item.get("hrefHasCredentials"))
+        )
+        href_download = bool(item.get("href_download", item.get("hrefDownload")))
         if href:
             parsed_href = urlsplit(href)
-            href = urlunsplit((parsed_href.scheme, parsed_href.netloc, parsed_href.path, "", ""))[
-                :2_000
-            ]
+            href_has_query = href_has_query or bool(parsed_href.query)
+            href_has_fragment = href_has_fragment or bool(parsed_href.fragment)
+            href_has_credentials = href_has_credentials or bool(
+                parsed_href.username or parsed_href.password
+            )
+            href = urlunsplit(
+                (
+                    parsed_href.scheme,
+                    parsed_href.netloc.rsplit("@", 1)[-1],
+                    parsed_href.path,
+                    "",
+                    "",
+                )
+            )[:2_000]
+        if resolved_href:
+            parsed_resolved_href = urlsplit(resolved_href)
+            href_has_query = href_has_query or bool(parsed_resolved_href.query)
+            href_has_fragment = href_has_fragment or bool(parsed_resolved_href.fragment)
+            href_has_credentials = href_has_credentials or bool(
+                parsed_resolved_href.username or parsed_resolved_href.password
+            )
+            resolved_href = urlunsplit(
+                (
+                    parsed_resolved_href.scheme,
+                    parsed_resolved_href.netloc.rsplit("@", 1)[-1],
+                    parsed_resolved_href.path,
+                    "",
+                    "",
+                )
+            )[:2_000]
         native_required = bool(
             item.get("native_required", item.get("nativeRequired", item.get("required")))
         )
@@ -423,6 +462,11 @@ class BrowserObservedControl(BaseModel):
             "label_source": label_source,
             "text": text,
             "href": href,
+            "resolved_href": resolved_href,
+            "href_has_query": href_has_query,
+            "href_has_fragment": href_has_fragment,
+            "href_has_credentials": href_has_credentials,
+            "href_download": href_download,
             "canonical_field": canonical_field,
             "section_path": section_path,
             "repeat_group": str(item.get("repeat_group", item.get("repeatGroup", "")))[:200],

@@ -286,6 +286,19 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </label>
                 </body>
             """,
+            "/reviewed-links": f"""
+                <body data-page-type="JOB_SEARCH_RESULTS">
+                  <h1>Reviewed links</h1>
+                  <a id="plain-link" href="/experience">Plain target</a>
+                  <a id="query-link" href="/experience?tracking=secret-token">Query target</a>
+                  <a id="fragment-link" href="/experience#details">Fragment target</a>
+                  <a id="credentialed-link"
+                    href="http://fixture-user:fixture-secret@127.0.0.1:{server_port}/experience">
+                    Credentialed target
+                  </a>
+                  <a id="download-link" href="/experience" download>Download target</a>
+                </body>
+            """,
             "/review": """
                 <body data-page-type="REVIEW">
                   <h1>Review application</h1>
@@ -1115,6 +1128,57 @@ def test_observation_excludes_css_hidden_controls(session: Session, tmp_path: Pa
             }
             assert revealed_names == {"visible_question", "hidden_question"}
             assert revealed.observation.page_fingerprint != initial_fingerprint
+    finally:
+        worker.close()
+
+
+def test_observation_resolves_links_and_redacts_query_and_fragment_values(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/reviewed-links"),
+                    profile_name="reviewed-link-observation",
+                )
+            )
+            assert started.observation is not None
+            controls = {control.element_id: control for control in started.observation.controls}
+
+            plain = controls["plain-link"]
+            assert plain.kind is BrowserControlKind.LINK
+            assert plain.href == "/experience"
+            assert plain.resolved_href == f"{origin}/experience"
+            assert not plain.href_has_query
+            assert not plain.href_has_fragment
+            assert not plain.href_download
+
+            query = controls["query-link"]
+            assert query.href == "/experience"
+            assert query.resolved_href == f"{origin}/experience"
+            assert query.href_has_query
+            assert "secret-token" not in query.model_dump_json()
+
+            fragment = controls["fragment-link"]
+            assert fragment.href == "/experience"
+            assert fragment.resolved_href == f"{origin}/experience"
+            assert fragment.href_has_fragment
+            assert "details" not in fragment.model_dump_json()
+
+            credentialed = controls["credentialed-link"]
+            assert credentialed.href == f"{origin}/experience"
+            assert credentialed.resolved_href == f"{origin}/experience"
+            assert credentialed.href_has_credentials
+            assert "fixture-user" not in credentialed.model_dump_json()
+            assert "fixture-secret" not in credentialed.model_dump_json()
+
+            assert controls["download-link"].href_download
+            service.stop(started.id)
     finally:
         worker.close()
 

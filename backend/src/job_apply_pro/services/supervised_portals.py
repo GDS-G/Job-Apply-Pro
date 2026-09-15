@@ -6,13 +6,16 @@ import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Protocol
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from uuid import uuid4
+
+from pydantic import AnyHttpUrl
 
 from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserActionResult,
+    BrowserControlKind,
     BrowserObservation,
     BrowserObservedControl,
     BrowserPermission,
@@ -39,6 +42,10 @@ from job_apply_pro.domain.portals import (
     PortalPageMatch,
     SupervisedPortalCapture,
     SupervisedPortalDisposition,
+    SupervisedPortalLinkCandidate,
+    SupervisedPortalLinkNavigationApproval,
+    SupervisedPortalLinkNavigationPreview,
+    SupervisedPortalLinkNavigationReview,
     SupervisedPortalRunCreate,
     SupervisedPortalRunSnapshot,
     SupervisedPortalRunState,
@@ -89,6 +96,8 @@ class SupervisedBrowserProtocol(Protocol):
 
     def resume(self, session_id: str) -> BrowserSessionSnapshot: ...
 
+    def observe(self, session_id: str) -> BrowserSessionSnapshot: ...
+
     def takeover(self, session_id: str) -> BrowserSessionSnapshot: ...
 
     def execute_action(self, session_id: str, action: BrowserAction) -> BrowserActionResult: ...
@@ -115,6 +124,7 @@ _INTERVENTION_CAPABILITIES = {
     PortalCapability.ASSESSMENT: PortalInterventionReason.ASSESSMENT,
 }
 _SUBMIT_PATTERN = re.compile(r"\b(?:submit(?: application)?|send application|apply now)\b", re.I)
+_LINK_NAVIGATION_POLICY_VERSION = "reviewed-browser-link-navigation-v1"
 
 
 def parse_portal_allowlist(value: str) -> set[PortalKind]:
@@ -294,6 +304,71 @@ class SupervisedPortalService:
             verified=match is not None,
         )
         return self._with_runtime_observation(self.get(run_id), observation)
+
+    def preview_reviewed_link_navigation(
+        self,
+        run_id: str,
+        control_key: str,
+        review: SupervisedPortalLinkNavigationReview,
+    ) -> SupervisedPortalLinkNavigationPreview:
+        run = self._active(run_id)
+        self._require_portal_policy(run.portal)
+        if review.expected_page_fingerprint != run.page_fingerprint:
+            raise SupervisedPortalStateError(
+                "Link-navigation page changed; capture and review the current page again"
+            )
+        observed = self._browser.observe(run.browser_session_id).observation
+        if observed is None:
+            raise SupervisedPortalStateError("Browser session did not produce an observation")
+        preview, _ = self._prove_reviewed_link_navigation(run, observed, control_key)
+        return preview
+
+    def navigate_reviewed_link(
+        self,
+        run_id: str,
+        control_key: str,
+        approval: SupervisedPortalLinkNavigationApproval,
+    ) -> SupervisedPortalRunSnapshot:
+        run = self._active(run_id)
+        self._require_portal_policy(run.portal)
+        observed = self._browser.observe(run.browser_session_id).observation
+        if observed is None:
+            raise SupervisedPortalStateError("Browser session did not produce an observation")
+        preview, target_url = self._prove_reviewed_link_navigation(run, observed, control_key)
+        if approval.expected_review_fingerprint != preview.review_fingerprint:
+            raise SupervisedPortalStateError(
+                "Reviewed link changed; capture and review the current page again"
+            )
+        resumed = self._browser.resume(run.browser_session_id)
+        before = resumed.observation
+        if before is None:
+            self._takeover_if_active(run.browser_session_id)
+            raise SupervisedPortalStateError("Browser session did not produce an observation")
+        try:
+            current_preview, current_target = self._prove_reviewed_link_navigation(
+                run, before, control_key
+            )
+            if (
+                current_preview.review_fingerprint != approval.expected_review_fingerprint
+                or current_target != target_url
+            ):
+                raise SupervisedPortalStateError(
+                    "Reviewed link changed; capture and review the current page again"
+                )
+            action = BrowserAction(
+                kind=BrowserActionKind.NAVIGATE,
+                url=AnyHttpUrl(current_target),
+                intended_result="Navigate directly to the exact reviewed link target",
+                verification=BrowserVerification(
+                    kind=VerificationKind.URL_EQUALS,
+                    value=current_target,
+                ),
+            )
+            result = self._browser.execute_action(run.browser_session_id, action)
+            return self._finish_link_navigation(run, result)
+        except Exception:
+            self._takeover_if_active(run.browser_session_id)
+            raise
 
     def upload_reviewed_greenhouse_document(
         self,
@@ -557,9 +632,193 @@ class SupervisedPortalService:
         return run.model_copy(
             update={
                 "observed_controls": observation.controls,
+                "reviewed_links": self._reviewed_link_candidates(run, observation),
                 "greenhouse_form": greenhouse_form,
             }
         )
+
+    def _reviewed_link_candidates(
+        self, run: SupervisedPortalRunSnapshot, observation: BrowserObservation
+    ) -> list[SupervisedPortalLinkCandidate]:
+        candidates: list[SupervisedPortalLinkCandidate] = []
+        for control_key in dict.fromkeys(control.control_key for control in observation.controls):
+            try:
+                candidate, _ = self._reviewed_link_target(run, observation, control_key)
+            except SupervisedPortalError:
+                continue
+            candidates.append(candidate)
+        return candidates
+
+    def _prove_reviewed_link_navigation(
+        self,
+        run: SupervisedPortalRunSnapshot,
+        observation: BrowserObservation,
+        control_key: str,
+    ) -> tuple[SupervisedPortalLinkNavigationPreview, str]:
+        if observation.page_fingerprint != run.page_fingerprint:
+            raise SupervisedPortalStateError(
+                "Link-navigation page changed; capture and review the current page again"
+            )
+        self._require_allowed_observation(run.allowed_origins, observation.origin)
+        candidate, target_url = self._reviewed_link_target(run, observation, control_key)
+        payload = {
+            "policy_version": _LINK_NAVIGATION_POLICY_VERSION,
+            "run_id": run.id,
+            "browser_session_id": run.browser_session_id,
+            "portal": run.portal.value,
+            "allowed_origins": sorted(run.allowed_origins),
+            "source_url": observation.url,
+            "source_origin": observation.origin,
+            "source_page_type": observation.page_type,
+            "source_page_fingerprint": observation.page_fingerprint,
+            "control_key": candidate.control_key,
+            "label": candidate.label,
+            "target_url": target_url,
+        }
+        review_fingerprint = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return (
+            SupervisedPortalLinkNavigationPreview(
+                run_id=run.id,
+                browser_session_id=run.browser_session_id,
+                control_key=candidate.control_key,
+                label=candidate.label,
+                source_page_type=observation.page_type,
+                target_origin=candidate.target_origin,
+                target_path=candidate.target_path,
+                page_fingerprint=observation.page_fingerprint,
+                review_fingerprint=review_fingerprint,
+                notice=(
+                    "Approval navigates directly to this exact reviewed target instead of "
+                    "activating the page link. Redirects and changed pages fail closed."
+                ),
+            ),
+            target_url,
+        )
+
+    def _reviewed_link_target(
+        self,
+        run: SupervisedPortalRunSnapshot,
+        observation: BrowserObservation,
+        control_key: str,
+    ) -> tuple[SupervisedPortalLinkCandidate, str]:
+        if (
+            run.portal is PortalKind.GREENHOUSE
+            or run.state is not SupervisedPortalRunState.AWAITING_USER
+        ):
+            raise SupervisedPortalPolicyError(
+                "Reviewed direct-link navigation is unavailable in this portal state"
+            )
+        if not control_key or len(control_key) > 200:
+            raise SupervisedPortalPolicyError("Reviewed link control key is invalid")
+        controls = [
+            control for control in observation.controls if control.control_key == control_key
+        ]
+        if len(controls) != 1:
+            raise SupervisedPortalPolicyError(
+                "Reviewed link must identify exactly one observed control"
+            )
+        control = controls[0]
+        if (
+            control.kind is not BrowserControlKind.LINK
+            or control.tag.casefold() != "a"
+            or not control.visible
+            or control.disabled
+            or control.busy
+            or control.inert
+            or control.accessibility_hidden
+            or control.href_has_query
+            or control.href_has_fragment
+            or control.href_has_credentials
+            or control.href_download
+        ):
+            raise SupervisedPortalPolicyError(
+                "Observed control is outside the reviewed direct-link contract"
+            )
+        label = (control.label or control.text).strip()
+        href = control.resolved_href or control.href
+        if not label or not href:
+            raise SupervisedPortalPolicyError(
+                "Reviewed link requires one visible label and direct target"
+            )
+        try:
+            raw_target = urljoin(observation.url, href)
+            parsed = urlsplit(raw_target)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError
+            target_url = str(AnyHttpUrl(raw_target))
+            target_origin = _origin(target_url)
+        except (TypeError, ValueError):
+            raise SupervisedPortalPolicyError(
+                "Reviewed link target must be one plain HTTP or HTTPS URL"
+            ) from None
+        definition = self._catalog.get(run.portal)
+        if (
+            len(target_url) > 500
+            or target_url == observation.url
+            or target_origin not in run.allowed_origins
+            or not _portal_host_allowed(definition, target_url)
+        ):
+            raise SupervisedPortalPolicyError(
+                "Reviewed link target is outside this portal session boundary"
+            )
+        target_path = urlsplit(target_url).path or "/"
+        if len(target_path) > 500:
+            raise SupervisedPortalPolicyError("Reviewed link target path is too long")
+        return (
+            SupervisedPortalLinkCandidate(
+                control_key=control.control_key,
+                label=label,
+                target_origin=target_origin,
+                target_path=target_path,
+            ),
+            target_url,
+        )
+
+    def _finish_link_navigation(
+        self, run: SupervisedPortalRunSnapshot, result: BrowserActionResult
+    ) -> SupervisedPortalRunSnapshot:
+        after = result.observation
+        allowed = True
+        try:
+            self._require_allowed_observation(run.allowed_origins, after.origin)
+        except SupervisedPortalPolicyError:
+            allowed = False
+        match, state, disposition, reasons = self._classify(run.portal, after)
+        verified = result.verified and allowed and match is not None
+        if not verified:
+            state = SupervisedPortalRunState.INTERVENTION_REQUIRED
+            disposition = SupervisedPortalDisposition.MANUAL_INTERVENTION_REQUIRED
+            reasons = [PortalInterventionReason.SITE_CHANGED]
+        updated = run.model_copy(
+            update={
+                "state": state,
+                "current_url": after.url,
+                "page_fingerprint": after.page_fingerprint,
+                "current_match": match,
+                "disposition": disposition,
+                "intervention_reasons": reasons,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        self._repository.save(updated)
+        self._record_evidence(
+            updated,
+            before=run.page_fingerprint,
+            after=after.page_fingerprint,
+            action_kind=BrowserActionKind.NAVIGATE,
+            verified=verified,
+        )
+        self._takeover_if_active(run.browser_session_id)
+        return self._with_runtime_observation(self.get(run.id), after)
 
     def _review_greenhouse_control(
         self,

@@ -1573,6 +1573,32 @@ export function App() {
     }
   }
 
+  async function navigateSupervisedPortalLink(
+    run: SupervisedPortalRunSnapshot,
+    controlKey: string,
+  ) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated =
+        await window.jobApplyPro.workbench.navigateSupervisedPortalLink(
+          run.id,
+          controlKey,
+          run.page_fingerprint,
+        );
+      if (updated) {
+        setSupervisedPortalRuns((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+        await refreshWorkflows();
+      }
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function executeGreenhouseFormAction(
     run: SupervisedPortalRunSnapshot,
     action: "REVIEW_DOCUMENT_UPLOAD" | "REVIEW_NAVIGATION",
@@ -1927,14 +1953,13 @@ export function App() {
               <Gauge size={20} />
             </span>
             <div>
-              <strong>
-                Reviewed Browser Exact URL Reconciliation v0.79.0-alpha.1
-              </strong>
+              <strong>Reviewed Browser Link Navigation v0.80.0-alpha.1</strong>
               <p>
-                An uncertain exact reviewed Greenhouse final submission can be
-                reconciled only after two read-only identifier-backed
-                confirmation proofs. The submit click is never retried, and the
-                supervised run is confirmed only by a current-page capture.
+                Ordinary same-portal anchors can be reviewed and navigated by
+                exact URL without activating page scripts. Changed,
+                credentialed, query, fragment, download, redirect, and
+                cross-portal targets fail closed under the existing no-replay
+                recovery contract.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -3831,6 +3856,42 @@ export function App() {
                         Manual:{" "}
                         {latestSupervisedRun.intervention_reasons.join(", ")}
                       </small>
+                    ) : null}
+                    {latestSupervisedRun.reviewed_links?.length ? (
+                      <article className="answer-entry field-binding-preview">
+                        <strong>Reviewed direct links</strong>
+                        <small>
+                          Each option navigates to the backend-derived exact URL
+                          instead of clicking the page element. Links with query
+                          strings, fragments, downloads, redirects, or another
+                          portal are excluded or refused.
+                        </small>
+                        {latestSupervisedRun.reviewed_links.map((link) => (
+                          <div
+                            className="field-binding-preview"
+                            key={link.control_key}
+                          >
+                            <small>
+                              {link.label} · {link.target_origin}
+                              {link.target_path}
+                            </small>
+                            <button
+                              aria-label={`Review and navigate ${link.label}`}
+                              className="button button--secondary"
+                              disabled={busy}
+                              onClick={() =>
+                                void navigateSupervisedPortalLink(
+                                  latestSupervisedRun,
+                                  link.control_key,
+                                )
+                              }
+                              type="button"
+                            >
+                              <ShieldCheck size={14} /> Review & navigate link
+                            </button>
+                          </div>
+                        ))}
+                      </article>
                     ) : null}
                     {latestSupervisedRun.greenhouse_form ? (
                       <article className="answer-entry field-binding-preview">

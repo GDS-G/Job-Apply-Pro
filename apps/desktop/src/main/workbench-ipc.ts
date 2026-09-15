@@ -1376,6 +1376,49 @@ export function registerWorkbenchIpc(
       ),
   );
   ipcMain.handle(
+    "portals:navigate-reviewed-link",
+    async (
+      event,
+      runIdValue: unknown,
+      controlKeyValue: unknown,
+      pageFingerprintValue: unknown,
+    ) => {
+      const runId = uuid(runIdValue, "Supervised portal run id");
+      const controlKey = requiredText(
+        controlKeyValue,
+        "Reviewed link control key",
+        200,
+      );
+      const pageFingerprint = requiredText(
+        pageFingerprintValue,
+        "Reviewed link page fingerprint",
+        200,
+      );
+      const preview =
+        await supervisor.client.previewSupervisedPortalLinkNavigation(
+          runId,
+          controlKey,
+          pageFingerprint,
+        );
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = {
+        type: "warning" as const,
+        title: "Navigate to this reviewed link?",
+        message: preview.label,
+        detail: `${preview.target_origin}${preview.target_path}\n\nJob Apply Pro will navigate directly to this exact URL instead of activating the page link. It will refuse a changed page, query or fragment, cross-portal target, redirect, or download link.`,
+        buttons: ["Cancel", "Navigate reviewed link"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveSupervisedPortalLinkNavigation(preview);
+    },
+  );
+  ipcMain.handle(
     "portals:submit-supervised",
     async (
       event,
