@@ -62,6 +62,7 @@ from job_apply_pro.storage.media_cleanup_repository import MediaCleanupRepositor
 from job_apply_pro.storage.oauth_repository import OAuthAuthorizationSession, OAuthRepository
 from job_apply_pro.storage.operations_repository import OperationsRepository
 from job_apply_pro.storage.restore_gate_repository import workspace_access
+from job_apply_pro.storage.restore_history_policy import MODERN_REVISION
 
 _NOW = datetime(2026, 9, 14, 12, tzinfo=UTC)
 _PROVIDER = IntegrationProvider.GOOGLE_CALENDAR
@@ -269,7 +270,7 @@ def history(tmp_path: Path) -> _HistoryRestore:
         engine.dispose()
     with closing(sqlite3.connect(result.database)) as connection, connection:
         connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-        connection.execute("INSERT INTO alembic_version VALUES ('20260913_0029')")
+        connection.execute("INSERT INTO alembic_version VALUES (?)", (MODERN_REVISION,))
     result.documents.mkdir()
     (result.documents / "synthetic-unreferenced.enc").write_text(
         result.cipher.encrypt_bytes(b"synthetic document", context="synthetic-test-document"),

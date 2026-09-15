@@ -436,6 +436,9 @@ def test_dashboard_api_wires_privacy_safe_effect_visibility(session: Session) ->
             "created_at": payload["unresolved_external_effects"][0]["created_at"],
             "updated_at": payload["unresolved_external_effects"][0]["updated_at"],
             "completed_at": None,
+            "reconciliation_available": False,
+            "reconciliation_kind": None,
+            "reconciled_at": None,
         }
     ]
     assert "private embedding input" not in response.text

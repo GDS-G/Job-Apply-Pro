@@ -19,6 +19,15 @@ class ExternalEffectStatus(StrEnum):
     UNCERTAIN = "UNCERTAIN"
 
 
+class ExternalEffectReconciliationKind(StrEnum):
+    BROWSER_FIELD_VALUE_CONFIRMED = "BROWSER_FIELD_VALUE_CONFIRMED"
+
+
+class ExternalEffectReconciliationStatus(StrEnum):
+    AVAILABLE = "AVAILABLE"
+    CONFIRMED_APPLIED = "CONFIRMED_APPLIED"
+
+
 TERMINAL_EXTERNAL_EFFECT_STATUSES = {
     ExternalEffectStatus.CONFIRMED,
     ExternalEffectStatus.FAILED,
@@ -119,6 +128,46 @@ class ExternalEffectAttempt(BaseModel):
         return self
 
 
+class ExternalEffectReconciliation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(pattern=_ID_PATTERN)
+    attempt_id: str = Field(pattern=_ID_PATTERN)
+    kind: ExternalEffectReconciliationKind
+    status: ExternalEffectReconciliationStatus
+    encrypted_payload: str = Field(min_length=1)
+    source_page_fingerprint: str = Field(pattern=_SAFE_REFERENCE_PATTERN)
+    evidence_reference: str | None = Field(default=None, pattern=_SAFE_REFERENCE_PATTERN)
+    evidence_fingerprint: str | None = Field(default=None, pattern=_FINGERPRINT_PATTERN)
+    result_page_fingerprint: str | None = Field(default=None, pattern=_SAFE_REFERENCE_PATTERN)
+    policy_version: str = Field(pattern=_SAFE_REFERENCE_PATTERN)
+    actor: str = Field(pattern=_SAFE_REFERENCE_PATTERN)
+    created_at: datetime
+    reconciled_at: datetime | None = None
+
+    @field_validator("created_at", "reconciled_at")
+    @classmethod
+    def require_aware_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("External-effect reconciliation timestamp must be timezone-aware")
+        return value.astimezone(UTC) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> "ExternalEffectReconciliation":
+        terminal = self.status is ExternalEffectReconciliationStatus.CONFIRMED_APPLIED
+        fields = (
+            self.evidence_reference,
+            self.evidence_fingerprint,
+            self.result_page_fingerprint,
+            self.reconciled_at,
+        )
+        if terminal != all(value is not None for value in fields):
+            raise ValueError("Only confirmed reconciliation has complete terminal evidence")
+        if not terminal and any(value is not None for value in fields):
+            raise ValueError("Available reconciliation intent cannot have outcome evidence")
+        return self
+
+
 class ExternalEffectAdmission(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -131,6 +180,7 @@ class ExternalEffectRecord(BaseModel):
 
     operation: ExternalEffectOperation
     attempts: list[ExternalEffectAttempt]
+    reconciliation: ExternalEffectReconciliation | None = None
 
 
 class ExternalEffectPublicRecord(BaseModel):
@@ -147,6 +197,9 @@ class ExternalEffectPublicRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    reconciliation_available: bool = False
+    reconciliation_kind: ExternalEffectReconciliationKind | None = None
+    reconciled_at: datetime | None = None
 
 
 class ExternalEffectMetrics(BaseModel):

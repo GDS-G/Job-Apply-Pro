@@ -46,6 +46,7 @@ class OperationsService:
                     status=effect_status,
                     limit=self.ATTENTION_LIMIT,
                 )
+                if record.reconciled_at is None
             ),
             key=lambda record: (record.created_at, record.id),
             reverse=True,

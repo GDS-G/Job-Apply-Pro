@@ -11,7 +11,12 @@ from job_apply_pro.domain.ai import AITaskType, DataClassification
 from job_apply_pro.domain.browser import BrowserActionKind, BrowserEngine, BrowserSessionState
 from job_apply_pro.domain.challenges import ChallengeKind, ChallengeStatus
 from job_apply_pro.domain.communications import IntegrationProvider
-from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
+from job_apply_pro.domain.external_effects import (
+    ExternalEffectKind,
+    ExternalEffectReconciliationKind,
+    ExternalEffectReconciliationStatus,
+    ExternalEffectStatus,
+)
 from job_apply_pro.domain.portals import (
     PortalKind,
     SupervisedPortalDisposition,
@@ -538,6 +543,28 @@ TABLES: dict[str, Table] = {
         ("id",),
         (("operation_id", "external_effect_operations", "id"),),
     ),
+    "external_effect_reconciliations": Table(
+        (
+            Column("operation_id", "text", False, 36),
+            Column("attempt_id", "text", False, 36),
+            Column("kind", "text", False, 40),
+            Column("status", "text", False, 40),
+            Column("encrypted_payload", "text", False),
+            Column("source_page_fingerprint", "text", False, 200),
+            Column("evidence_reference", "text", True, 200),
+            Column("evidence_fingerprint", "text", True, 64),
+            Column("result_page_fingerprint", "text", True, 200),
+            Column("policy_version", "text", False, 200),
+            Column("actor", "text", False, 200),
+            Column("created_at", "datetime", False),
+            Column("reconciled_at", "datetime", True),
+        ),
+        ("operation_id",),
+        (
+            ("operation_id", "external_effect_operations", "id"),
+            ("attempt_id", "external_effect_attempts", "id"),
+        ),
+    ),
     "external_effect_operations": Table(
         (
             Column("id", "text", False, 36),
@@ -889,6 +916,7 @@ ROOTS = frozenset(
         "ai_media_cleanup",
         "external_effect_operations",
         "external_effect_attempts",
+        "external_effect_reconciliations",
     }
 )
 
@@ -908,13 +936,14 @@ EXACT_SETS = frozenset(
         "ai_cache",
         "external_effect_operations",
         "external_effect_attempts",
+        "external_effect_reconciliations",
     }
 )
 
 # These mutable snapshots also trigger admission when there is no mutation audit.
 ROOTS = ROOTS | EXACT_SETS
 
-MODERN_REVISION = "20260913_0029"
+MODERN_REVISION = "20260915_0030"
 OPERATIONAL_TABLES = frozenset(
     {"alembic_version", "backup_manifests", "backup_schedules", "restore_plans", "error_records"}
 )
@@ -938,6 +967,8 @@ ENUM_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("external_effect_operations", "kind"): frozenset(ExternalEffectKind),
     ("external_effect_operations", "status"): frozenset(ExternalEffectStatus),
     ("external_effect_attempts", "status"): frozenset(ExternalEffectStatus),
+    ("external_effect_reconciliations", "kind"): frozenset(ExternalEffectReconciliationKind),
+    ("external_effect_reconciliations", "status"): frozenset(ExternalEffectReconciliationStatus),
     ("calendar_mutation_plans", "kind"): frozenset(
         {"CREATE_CALENDAR_EVENT", "UPDATE_CALENDAR_EVENT"}
     ),
@@ -981,6 +1012,7 @@ LEGACY_EMPTY_REVISIONS = {
             "calendar_mutation_claims",
             "external_effect_operations",
             "external_effect_attempts",
+            "external_effect_reconciliations",
         }
     ),
     "20260913_0026": frozenset(
@@ -989,6 +1021,7 @@ LEGACY_EMPTY_REVISIONS = {
             "calendar_mutation_claims",
             "external_effect_operations",
             "external_effect_attempts",
+            "external_effect_reconciliations",
         }
     ),
     "20260913_0027": frozenset(
@@ -996,9 +1029,17 @@ LEGACY_EMPTY_REVISIONS = {
             "calendar_mutation_claims",
             "external_effect_operations",
             "external_effect_attempts",
+            "external_effect_reconciliations",
         }
     ),
-    "20260913_0028": frozenset({"external_effect_operations", "external_effect_attempts"}),
+    "20260913_0028": frozenset(
+        {
+            "external_effect_operations",
+            "external_effect_attempts",
+            "external_effect_reconciliations",
+        }
+    ),
+    "20260913_0029": frozenset({"external_effect_reconciliations"}),
 }
 
 # SQL uniqueness is checked explicitly even when a corrupted database lost its constraints.
@@ -1035,6 +1076,7 @@ UNIQUES: dict[str, tuple[tuple[str, ...], ...]] = {
     "communication_follow_ups": (("dedupe_key",),),
     "external_effect_operations": (("claim_fingerprint",),),
     "external_effect_attempts": (("operation_id", "sequence"),),
+    "external_effect_reconciliations": (("attempt_id",),),
 }
 
 # SQLite declarations are part of restore compatibility. ``None`` is the
@@ -1237,6 +1279,9 @@ INDEXES: dict[str, tuple[Index, ...]] = {
         ),
         Index("ix_external_effect_operations_kind", ("kind",)),
         Index("ix_external_effect_operations_status", ("status",)),
+    ),
+    "external_effect_reconciliations": (
+        Index("ix_external_effect_reconciliations_created", ("created_at",)),
     ),
     "fit_scores": (
         Index("ix_fit_scores_job_id", ("job_id",)),

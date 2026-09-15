@@ -208,6 +208,9 @@ export function App() {
   const [providerSyncMessage, setProviderSyncMessage] = useState<string | null>(
     null,
   );
+  const [reconciliationMessage, setReconciliationMessage] = useState<
+    string | null
+  >(null);
 
   const selected =
     workflows.find((workflow) => workflow.workflow_id === selectedId) ??
@@ -761,6 +764,26 @@ export function App() {
           item.workflow_id === updated.workflow_id ? updated : item,
         ),
       );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reconcileBrowserField(operationId: string, sessionId: string) {
+    setBusy(true);
+    setReconciliationMessage(null);
+    try {
+      const result = await window.jobApplyPro.workbench.reconcileBrowserField(
+        operationId,
+        sessionId,
+      );
+      if (result) {
+        setReconciliationMessage(result.notice);
+        await refreshWorkflows();
+      }
+      setError(null);
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -1679,7 +1702,7 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Greenhouse Single-Select Widgets v0.70.0-alpha.1
+                Reviewed Browser Field Reconciliation v0.71.0-alpha.1
               </strong>
               <p>
                 One exact current Greenhouse final-submit control can now use
@@ -3981,6 +4004,11 @@ export function App() {
                   {operations?.external_effects.unresolved ?? 0} unresolved
                 </span>
               </div>
+              {reconciliationMessage && (
+                <p className="status-note" role="status">
+                  {reconciliationMessage}
+                </p>
+              )}
               {operations?.unresolved_external_effects.length ? (
                 <div className="external-effect-list">
                   {operations.unresolved_external_effects.map((effect) => (
@@ -4007,6 +4035,27 @@ export function App() {
                       <time dateTime={effect.updated_at}>
                         Updated {new Date(effect.updated_at).toLocaleString()}
                       </time>
+                      {effect.reconciliation_available &&
+                        effect.kind === "BROWSER_ACTION" &&
+                        effect.subject_type === "browser_session" &&
+                        browserSessions.some(
+                          (session) => session.id === effect.subject_id,
+                        ) && (
+                          <button
+                            className="button button--secondary"
+                            disabled={busy}
+                            onClick={() =>
+                              void reconcileBrowserField(
+                                effect.id,
+                                effect.subject_id,
+                              )
+                            }
+                            type="button"
+                          >
+                            <ShieldCheck size={15} /> Verify current field
+                            outcome
+                          </button>
+                        )}
                     </article>
                   ))}
                 </div>

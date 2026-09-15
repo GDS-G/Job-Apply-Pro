@@ -91,6 +91,18 @@ function requiredText(value: unknown, name: string, maxLength: number): string {
   return value.trim();
 }
 
+function uuid(value: unknown, name: string): string {
+  const text = requiredText(value, name, 36);
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      text,
+    )
+  ) {
+    throw new TypeError(`${name} must be a UUID.`);
+  }
+  return text;
+}
+
 function integrationProvider(value: unknown): IntegrationProvider {
   if (
     typeof value !== "string" ||
@@ -727,6 +739,33 @@ export function registerWorkbenchIpc(
       return supervisor.client.listBrowserSessions(
         requiredText(value, "Workflow id", 100),
       );
+    },
+  );
+  ipcMain.handle(
+    "workbench:reconcile-browser-field",
+    async (event, operationValue: unknown, sessionValue: unknown) => {
+      const operationId = uuid(operationValue, "External effect id");
+      const sessionId = uuid(sessionValue, "Browser session id");
+      const preview = await supervisor.client.previewBrowserFieldReconciliation(
+        operationId,
+        sessionId,
+      );
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        type: "warning" as const,
+        title: "Record verified field outcome?",
+        message: "The exact reviewed field value is visible now.",
+        detail: `Action: ${preview.action_kind}\nSession: ${preview.session_id}\nPage fingerprint: ${preview.page_fingerprint}\nReview fingerprint: ${preview.review_fingerprint}\n\nThis records that the prior uncertain field write is now proven. It does not click, type, retry, navigate, or submit.`,
+        buttons: ["Cancel", "Record verified outcome"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveBrowserFieldReconciliation(preview);
     },
   );
   ipcMain.handle("knowledge:get", (_event, value: unknown) =>

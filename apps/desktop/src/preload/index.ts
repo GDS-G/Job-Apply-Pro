@@ -74,6 +74,12 @@ contextBridge.exposeInMainWorld("jobApplyPro", {
       ipcRenderer.invoke("discovery:greenhouse-import", input),
     listBrowserSessions: (workflowId?: string) =>
       ipcRenderer.invoke("workbench:list-browser-sessions", workflowId),
+    reconcileBrowserField: (operationId: string, sessionId: string) =>
+      ipcRenderer.invoke(
+        "workbench:reconcile-browser-field",
+        operationId,
+        sessionId,
+      ),
     getCandidateKnowledge: (profileId: string) =>
       ipcRenderer.invoke("knowledge:get", profileId),
     selectAndImportResume: (

@@ -719,6 +719,64 @@ def test_multi_page_fixture_is_verified_traced_and_restartable(
         worker.close()
 
 
+def test_worker_postcondition_reconciliation_is_read_only_in_real_chromium(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/start"),
+                    engine=BrowserEngine.CHROMIUM,
+                    profile_name="reconciliation-read-only",
+                )
+            )
+            empty_value = BrowserVerification(
+                kind=VerificationKind.VALUE_EQUALS,
+                value="",
+                locator=_label("Full name"),
+            )
+            forbidden_value = empty_value.model_copy(update={"value": "MUST NOT BE WRITTEN"})
+
+            initial = worker.call(
+                "verify_postcondition",
+                {
+                    "session_id": started.id,
+                    "verification": empty_value.model_dump(mode="json"),
+                },
+            )
+            mismatch = worker.call(
+                "verify_postcondition",
+                {
+                    "session_id": started.id,
+                    "verification": forbidden_value.model_dump(mode="json"),
+                },
+            )
+            unchanged = worker.call(
+                "verify_postcondition",
+                {
+                    "session_id": started.id,
+                    "verification": empty_value.model_dump(mode="json"),
+                },
+            )
+
+            assert initial["verified"] is True
+            assert mismatch["verified"] is False
+            assert mismatch["error_code"] == "POSTCONDITION_NOT_OBSERVED"
+            assert unchanged["verified"] is True
+            assert all(
+                result["observation"]["previous_action"] is None
+                for result in (initial, mismatch, unchanged)
+            )
+            service.stop(started.id)
+    finally:
+        worker.close()
+
+
 def test_observation_excludes_css_hidden_controls(session: Session, tmp_path: Path) -> None:
     workflow_id = _create_workflow(session)
     worker = BrowserWorkerClient(timeout_seconds=75)

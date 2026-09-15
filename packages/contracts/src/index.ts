@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Greenhouse Single-Select Widgets",
-  version: "0.70.0-alpha.1",
+  name: "Reviewed Browser Field Reconciliation",
+  version: "0.71.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -475,6 +475,29 @@ export interface BrowserSessionSnapshot {
   trace_path?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface BrowserFieldReconciliationPreview {
+  operation_id: string;
+  attempt_id: string;
+  session_id: string;
+  action_kind: BrowserActionKind;
+  verification_kind:
+    "VALUE_EQUALS" | "SELECTED_LABEL_EQUALS" | "CHECKED_EQUALS";
+  page_fingerprint: string;
+  review_fingerprint: string;
+  notice: string;
+}
+
+export interface BrowserFieldReconciliationResult {
+  operation_id: string;
+  attempt_id: string;
+  session_id: string;
+  action_kind: BrowserActionKind;
+  page_fingerprint: string;
+  reconciliation_kind: "BROWSER_FIELD_VALUE_CONFIRMED";
+  reconciled_at: string;
+  notice: string;
 }
 
 export type PortalCapability =
@@ -1387,6 +1410,8 @@ export type ExternalEffectKind =
 export type ExternalEffectStatus =
   "PREPARED" | "DISPATCHING" | "CONFIRMED" | "FAILED" | "UNCERTAIN";
 
+export type ExternalEffectReconciliationKind = "BROWSER_FIELD_VALUE_CONFIRMED";
+
 export interface ExternalEffectMetrics {
   total: number;
   unresolved: number;
@@ -1406,6 +1431,9 @@ export interface ExternalEffectPublicRecord {
   created_at: string;
   updated_at: string;
   completed_at?: string | null;
+  reconciliation_available: boolean;
+  reconciliation_kind?: ExternalEffectReconciliationKind | null;
+  reconciled_at?: string | null;
 }
 
 export interface OperationsDashboard {
@@ -2062,6 +2090,10 @@ export interface DesktopBridge {
       input: GreenhouseJobImportInput,
     ): Promise<GreenhouseImportResult>;
     listBrowserSessions(workflowId?: string): Promise<BrowserSessionSnapshot[]>;
+    reconcileBrowserField(
+      operationId: string,
+      sessionId: string,
+    ): Promise<BrowserFieldReconciliationResult | null>;
     getCandidateKnowledge(
       profileId: string,
     ): Promise<CandidateKnowledgeSnapshot>;

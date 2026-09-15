@@ -6,6 +6,13 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from job_apply_pro.domain.browser import (
+    BrowserActionKind,
+    BrowserVerification,
+    VerificationKind,
+)
 from job_apply_pro.domain.communications import (
     CalendarCreateFields,
     CalendarEventSnapshot,
@@ -87,6 +94,25 @@ ENCRYPTED = {
         "encrypted_resource": ("ai-media:{id}:{provider_id}:{account_fingerprint}", True)
     },
     "job_readiness_reviews": {"encrypted_payload": ("job-readiness:{application_id}:{id}", True)},
+    "external_effect_reconciliations": {
+        "encrypted_payload": (
+            "external-effect-reconciliation:{operation_id}:{attempt_id}",
+            True,
+        )
+    },
+}
+
+_RECONCILABLE_ACTIONS = {
+    BrowserActionKind.FILL,
+    BrowserActionKind.SELECT_LABEL,
+    BrowserActionKind.CHOOSE_CONTROLLED_OPTION,
+    BrowserActionKind.CHECK,
+    BrowserActionKind.UNCHECK,
+}
+_RECONCILABLE_VERIFICATIONS = {
+    VerificationKind.VALUE_EQUALS,
+    VerificationKind.SELECTED_LABEL_EQUALS,
+    VerificationKind.CHECKED_EQUALS,
 }
 
 
@@ -245,6 +271,35 @@ def _authenticate(snapshot: HistorySnapshot, cipher: SensitiveDataCipher, deadli
                         ):
                             raise RestoreHistoryError(UNAVAILABLE)
                         reviews[record.id] = record
+                    if table == "external_effect_reconciliations":
+                        assert isinstance(payload, dict)
+                        if set(payload) != {
+                            "action_kind",
+                            "verification",
+                            "request_fingerprint",
+                        }:
+                            raise RestoreHistoryError(UNAVAILABLE)
+                        try:
+                            action_kind = BrowserActionKind(str(payload["action_kind"]))
+                            verification = BrowserVerification.model_validate(
+                                payload["verification"]
+                            )
+                        except (TypeError, ValueError, ValidationError):
+                            raise RestoreHistoryError(UNAVAILABLE) from None
+                        request_fingerprint = payload["request_fingerprint"]
+                        if (
+                            action_kind not in _RECONCILABLE_ACTIONS
+                            or verification.kind not in _RECONCILABLE_VERIFICATIONS
+                            or verification.locator is None
+                            or not isinstance(request_fingerprint, str)
+                            or len(request_fingerprint) != 64
+                            or any(value not in "0123456789abcdef" for value in request_fingerprint)
+                            or request_fingerprint
+                            != snapshot.tables["external_effect_operations"][
+                                (row["operation_id"],)
+                            ]["request_fingerprint"]
+                        ):
+                            raise RestoreHistoryError(UNAVAILABLE)
     _review_dependencies(snapshot, reviews, deadline)
 
 

@@ -139,7 +139,7 @@ def _remove_constraints(path: Path, table: str) -> None:
 
 @pytest.mark.parametrize("table", sorted(TABLES))
 def test_explicit_descriptor_matches_model_columns_keys_references_and_uniques(table: str) -> None:
-    assert len(TABLES) == 46
+    assert len(TABLES) == 47
     spec = TABLES[table]
     model = Base.metadata.tables[table]
     assert {column.name for column in spec.columns} == set(model.columns.keys())

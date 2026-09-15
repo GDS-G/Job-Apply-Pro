@@ -16,6 +16,9 @@ from job_apply_pro.domain.external_effects import (
     ExternalEffectAttempt,
     ExternalEffectKind,
     ExternalEffectOperation,
+    ExternalEffectReconciliation,
+    ExternalEffectReconciliationKind,
+    ExternalEffectReconciliationStatus,
     ExternalEffectStatus,
 )
 from job_apply_pro.storage.restore_history_policy import (
@@ -559,7 +562,9 @@ def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
 
     def payload(row: Row) -> dict[str, object]:
         result: dict[str, object] = dict(row)
-        for field in ("created_at", "updated_at", "completed_at"):
+        for field in ("created_at", "updated_at", "completed_at", "reconciled_at"):
+            if field not in row:
+                continue
             value = row[field]
             if value is None:
                 continue
@@ -578,6 +583,10 @@ def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
         for row in snapshot.tables["external_effect_attempts"].values():
             attempt = ExternalEffectAttempt.model_validate(payload(row))
             attempts_by_operation.setdefault(attempt.operation_id, []).append(attempt)
+        reconciliations = {
+            str(row["operation_id"]): ExternalEffectReconciliation.model_validate(payload(row))
+            for row in snapshot.tables["external_effect_reconciliations"].values()
+        }
     except (TypeError, ValueError):
         raise RestoreHistoryError(UNAVAILABLE) from None
 
@@ -628,6 +637,32 @@ def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
                     raise RestoreHistoryError(UNAVAILABLE)
             elif reference != f"provider-response:{attempt.id}":
                 raise RestoreHistoryError(UNAVAILABLE)
+
+    for operation_id, reconciliation in reconciliations.items():
+        reconciled_operation = operations.get(operation_id)
+        attempts = attempts_by_operation.get(operation_id, [])
+        reconciled_attempt = next(
+            (item for item in attempts if item.id == reconciliation.attempt_id), None
+        )
+        if (
+            reconciled_operation is None
+            or reconciled_attempt is None
+            or reconciled_operation.kind is not ExternalEffectKind.BROWSER_ACTION
+            or reconciliation.kind
+            is not ExternalEffectReconciliationKind.BROWSER_FIELD_VALUE_CONFIRMED
+            or reconciliation.policy_version != "browser-field-reconciliation-v1"
+            or reconciled_attempt.operation_id != reconciled_operation.id
+        ):
+            raise RestoreHistoryError(UNAVAILABLE)
+        if reconciliation.status is ExternalEffectReconciliationStatus.CONFIRMED_APPLIED and (
+            reconciled_operation.status is not ExternalEffectStatus.UNCERTAIN
+            or reconciled_attempt.status is not ExternalEffectStatus.UNCERTAIN
+            or reconciled_attempt.id != max(attempts, key=lambda item: item.sequence).id
+            or reconciliation.evidence_reference != f"browser-action:{reconciled_attempt.id}"
+            or reconciliation.source_page_fingerprint != reconciliation.result_page_fingerprint
+            or (reconciled_attempt.id,) not in snapshot.tables["browser_actions"]
+        ):
+            raise RestoreHistoryError(UNAVAILABLE)
 
 
 def _browser_challenge_payloads(snapshot: HistorySnapshot) -> None:

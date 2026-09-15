@@ -28,9 +28,11 @@ def test_external_effect_migration_has_exact_shape_and_is_repeatable(
         command.upgrade(config, "head")
         command.upgrade(config, "head")
         inspector = inspect(engine)
-        assert {"external_effect_operations", "external_effect_attempts"} <= set(
-            inspector.get_table_names()
-        )
+        assert {
+            "external_effect_operations",
+            "external_effect_attempts",
+            "external_effect_reconciliations",
+        } <= set(inspector.get_table_names())
         assert inspector.get_pk_constraint("external_effect_operations")["constrained_columns"] == [
             "id"
         ]
@@ -46,6 +48,17 @@ def test_external_effect_migration_has_exact_shape_and_is_repeatable(
             tuple(item["constrained_columns"])
             for item in inspector.get_foreign_keys("external_effect_attempts")
         } == {("operation_id",)}
+        assert inspector.get_pk_constraint("external_effect_reconciliations")[
+            "constrained_columns"
+        ] == ["operation_id"]
+        assert any(
+            item["column_names"] == ["attempt_id"]
+            for item in inspector.get_unique_constraints("external_effect_reconciliations")
+        )
+        assert {
+            tuple(item["constrained_columns"])
+            for item in inspector.get_foreign_keys("external_effect_reconciliations")
+        } == {("operation_id",), ("attempt_id",)}
         assert {
             tuple(item["column_names"])
             for item in inspector.get_indexes("external_effect_operations")
@@ -57,7 +70,7 @@ def test_external_effect_migration_has_exact_shape_and_is_repeatable(
         }
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-                "20260913_0029"
+                "20260915_0030"
             )
             assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
     finally:

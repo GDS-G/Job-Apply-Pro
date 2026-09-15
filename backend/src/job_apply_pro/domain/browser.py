@@ -8,6 +8,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
+_UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+
 
 class BrowserEngine(StrEnum):
     CHROMIUM = "chromium"
@@ -557,3 +559,37 @@ class BrowserActionResult(BaseModel):
     observation: BrowserObservation
     error: str | None = None
     created_at: datetime
+
+
+class BrowserFieldReconciliationPreview(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(pattern=_UUID_PATTERN)
+    attempt_id: str = Field(pattern=_UUID_PATTERN)
+    session_id: str = Field(pattern=_UUID_PATTERN)
+    action_kind: BrowserActionKind
+    verification_kind: VerificationKind
+    page_fingerprint: str = Field(min_length=1, max_length=200)
+    review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    notice: str = Field(min_length=1, max_length=500)
+
+
+class BrowserFieldReconciliationApproval(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(pattern=_UUID_PATTERN)
+    expected_review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmation_phrase: Literal["RECONCILE VERIFIED FIELD"]
+
+
+class BrowserFieldReconciliationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(pattern=_UUID_PATTERN)
+    attempt_id: str = Field(pattern=_UUID_PATTERN)
+    session_id: str = Field(pattern=_UUID_PATTERN)
+    action_kind: BrowserActionKind
+    page_fingerprint: str = Field(min_length=1, max_length=200)
+    reconciliation_kind: Literal["BROWSER_FIELD_VALUE_CONFIRMED"]
+    reconciled_at: datetime
+    notice: str = Field(min_length=1, max_length=500)

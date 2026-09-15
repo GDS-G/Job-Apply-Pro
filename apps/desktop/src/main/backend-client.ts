@@ -18,6 +18,8 @@ import type {
   AnswerLibraryInput,
   AnswerLibraryRevision,
   BrowserSessionSnapshot,
+  BrowserFieldReconciliationPreview,
+  BrowserFieldReconciliationResult,
   CandidateClaim,
   CandidateDocumentImportInput,
   CandidateDocumentImportResult,
@@ -242,6 +244,32 @@ export class BackendClient {
       ? `?workflow_id=${encodeURIComponent(workflowId)}`
       : "";
     return this.request(`/browser/sessions${query}`);
+  }
+
+  previewBrowserFieldReconciliation(
+    operationId: string,
+    sessionId: string,
+  ): Promise<BrowserFieldReconciliationPreview> {
+    return this.request(
+      `/browser/sessions/${encodeURIComponent(sessionId)}/field-reconciliations/${encodeURIComponent(operationId)}/preview`,
+      { method: "POST" },
+    );
+  }
+
+  approveBrowserFieldReconciliation(
+    preview: BrowserFieldReconciliationPreview,
+  ): Promise<BrowserFieldReconciliationResult> {
+    return this.request(
+      `/browser/sessions/${encodeURIComponent(preview.session_id)}/field-reconciliations/${encodeURIComponent(preview.operation_id)}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          operation_id: preview.operation_id,
+          expected_review_fingerprint: preview.review_fingerprint,
+          confirmation_phrase: "RECONCILE VERIFIED FIELD",
+        }),
+      },
+    );
   }
 
   getCandidateKnowledge(

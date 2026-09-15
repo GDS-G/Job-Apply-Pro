@@ -550,6 +550,30 @@ class ExternalEffectAttemptRow(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ExternalEffectReconciliationRow(Base):
+    __tablename__ = "external_effect_reconciliations"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", name="uq_external_effect_reconciliation_attempt"),
+        Index("ix_external_effect_reconciliations_created", "created_at"),
+    )
+
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("external_effect_operations.id"), primary_key=True
+    )
+    attempt_id: Mapped[str] = mapped_column(ForeignKey("external_effect_attempts.id"))
+    kind: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(40))
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    source_page_fingerprint: Mapped[str] = mapped_column(String(200))
+    evidence_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    evidence_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result_page_fingerprint: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    policy_version: Mapped[str] = mapped_column(String(200))
+    actor: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ModelInvocationRow(Base):
     __tablename__ = "model_invocations"
 

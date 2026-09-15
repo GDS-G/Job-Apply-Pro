@@ -13,11 +13,16 @@ from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionKind,
     BrowserEngine,
+    BrowserFieldReconciliationApproval,
     BrowserObservation,
     BrowserRetryPolicy,
     BrowserSessionRecord,
     BrowserSessionState,
     BrowserVerification,
+    ConfirmationState,
+    LocatorStrategy,
+    SemanticLocator,
+    VerificationKind,
 )
 from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
 from job_apply_pro.domain.workbench import WorkflowRunSnapshot
@@ -88,6 +93,8 @@ class _Worker:
     def __init__(self, result: dict[str, object] | Exception) -> None:
         self.result = result
         self.calls = 0
+        self.verification_result: dict[str, object] | Exception | None = None
+        self.methods: list[str] = []
 
     @property
     def running(self) -> bool:
@@ -101,11 +108,14 @@ class _Worker:
         timeout_seconds: float | None = None,
     ) -> dict[str, object]:
         del params, timeout_seconds
-        assert method == "execute"
         self.calls += 1
-        if isinstance(self.result, Exception):
-            raise self.result
-        return self.result
+        self.methods.append(method)
+        outcome = self.verification_result if method == "verify_postcondition" else self.result
+        if outcome is None:
+            raise AssertionError(f"Unexpected worker method {method}")
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
 
 
 def _service(
@@ -162,6 +172,29 @@ def _action() -> BrowserAction:
         kind=BrowserActionKind.SCREENSHOT,
         intended_result="Capture the reviewed fixture",
         verification=BrowserVerification(),
+    )
+
+
+def _field_action() -> BrowserAction:
+    locator = SemanticLocator(
+        strategy=LocatorStrategy.LABEL,
+        value="Full name",
+        exact=True,
+    )
+    return BrowserAction(
+        kind=BrowserActionKind.FILL,
+        locator=locator,
+        value="Fixture Candidate",
+        preconditions=[BrowserVerification(kind=VerificationKind.LOCATOR_VISIBLE, locator=locator)],
+        intended_result="Populate one explicitly approved application field",
+        verification=BrowserVerification(
+            kind=VerificationKind.VALUE_EQUALS,
+            locator=locator,
+            value="Fixture Candidate",
+        ),
+        permission="ELEVATED",
+        confirmation=ConfirmationState.CONFIRMED,
+        sensitive_value=True,
     )
 
 
@@ -282,6 +315,132 @@ def test_lost_worker_response_is_uncertain_and_blocks_resume(
     with pytest.raises(BrowserSessionStateError, match="not active"):
         service.execute_action(session_id, _action())
     assert worker.calls == 1
+
+
+def test_uncertain_field_is_reconciled_only_by_fresh_exact_postcondition(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _field_action())
+    operation = effects.list_public()[0]
+    assert operation.reconciliation_available
+    stored_action = service.list_actions(session_id)[0]
+    assert stored_action.action.value is None
+    assert stored_action.action.verification.value is None
+
+    observation = _observation()
+    worker.verification_result = {
+        "verified": True,
+        "observation": observation.model_dump(mode="json"),
+        "error_code": None,
+    }
+    preview = service.preview_field_reconciliation(session_id, operation.id)
+    result = service.approve_field_reconciliation(
+        session_id,
+        BrowserFieldReconciliationApproval(
+            operation_id=operation.id,
+            expected_review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="RECONCILE VERIFIED FIELD",
+        ),
+    )
+
+    assert result.reconciliation_kind == "BROWSER_FIELD_VALUE_CONFIRMED"
+    assert result.action_kind is BrowserActionKind.FILL
+    assert worker.methods == ["execute", "verify_postcondition", "verify_postcondition"]
+    assert not effects.has_unresolved_subject("browser_session", session_id)
+    record = effects.get(operation.id)
+    assert record is not None
+    assert record.operation.status is ExternalEffectStatus.UNCERTAIN
+    assert record.reconciliation is not None
+
+
+def test_field_reconciliation_refuses_nonmatching_postcondition(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _field_action())
+    operation = effects.list_public()[0]
+    worker.verification_result = {
+        "verified": False,
+        "observation": _observation().model_dump(mode="json"),
+        "error_code": "POSTCONDITION_NOT_OBSERVED",
+    }
+
+    with pytest.raises(BrowserSessionStateError, match="does not prove"):
+        service.preview_field_reconciliation(session_id, operation.id)
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "verify_postcondition"]
+
+
+def test_field_reconciliation_approval_rechecks_and_refuses_changed_field(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _field_action())
+    operation = effects.list_public()[0]
+    worker.verification_result = {
+        "verified": True,
+        "observation": _observation().model_dump(mode="json"),
+        "error_code": None,
+    }
+    preview = service.preview_field_reconciliation(session_id, operation.id)
+    worker.verification_result = {
+        "verified": False,
+        "observation": _observation().model_dump(mode="json"),
+        "error_code": "POSTCONDITION_NOT_OBSERVED",
+    }
+
+    with pytest.raises(BrowserSessionStateError, match="does not prove"):
+        service.approve_field_reconciliation(
+            session_id,
+            BrowserFieldReconciliationApproval(
+                operation_id=operation.id,
+                expected_review_fingerprint=preview.review_fingerprint,
+                confirmation_phrase="RECONCILE VERIFIED FIELD",
+            ),
+        )
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "verify_postcondition", "verify_postcondition"]
+
+
+def test_uncertain_non_field_action_has_no_reconciliation_authority(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _action())
+    operation = effects.list_public()[0]
+
+    assert not operation.reconciliation_available
+    with pytest.raises(BrowserSessionStateError, match="not an available"):
+        service.preview_field_reconciliation(session_id, operation.id)
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute"]
 
 
 def test_startup_recovery_marks_interrupted_browser_session_for_takeover(

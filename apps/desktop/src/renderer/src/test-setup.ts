@@ -42,6 +42,9 @@ const bridge: DesktopBridge = {
       throw new Error("Not implemented in this test.");
     },
     listBrowserSessions: async () => [],
+    reconcileBrowserField: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     getCandidateKnowledge: async (profileId) => ({
       profile_id: profileId,
       documents: [],
@@ -275,6 +278,7 @@ const bridge: DesktopBridge = {
           created_at: new Date(0).toISOString(),
           updated_at: new Date(0).toISOString(),
           completed_at: new Date(0).toISOString(),
+          reconciliation_available: false,
         },
       ],
       backup_count: 0,

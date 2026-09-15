@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Reviewed Greenhouse Single-Select Widgets"
+    BUILD_NAME = "Reviewed Browser Field Reconciliation"
 
     def __init__(
         self,

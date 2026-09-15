@@ -3,12 +3,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from job_apply_pro.domain.external_effects import (
     ExternalEffectAdmission,
     ExternalEffectKind,
+    ExternalEffectReconciliationStatus,
     ExternalEffectStatus,
 )
 from job_apply_pro.security.encryption import SensitiveDataCipher
@@ -258,3 +259,77 @@ def test_keyed_fingerprint_preserves_exact_input_bytes() -> None:
     assert cipher.keyed_fingerprint(b"value", context="one") != cipher.keyed_fingerprint(
         b"value", context="two"
     )
+
+
+def test_encrypted_browser_field_intent_reconciles_without_changing_uncertain_outcome(
+    tmp_path: Path,
+) -> None:
+    service, factory = _ledger(tmp_path)
+    private_value = "candidate-private-answer"
+    request = {"kind": "FILL", "value": private_value}
+    admission = _admit(service, request=request)
+    attempt = service.prepare_attempt(
+        admission.operation.id,
+        provider="playwright",
+        target_code="FILL",
+        request=request,
+    )
+    intent = service.prepare_browser_field_reconciliation(
+        admission.operation.id,
+        attempt.id,
+        payload={
+            "action_kind": "FILL",
+            "verification": {
+                "kind": "VALUE_EQUALS",
+                "locator": {
+                    "strategy": "LABEL",
+                    "value": "Full name",
+                    "name": None,
+                    "exact": True,
+                },
+                "value": private_value,
+            },
+            "request_fingerprint": admission.operation.request_fingerprint,
+        },
+        source_page_fingerprint="page-field-v1",
+    )
+    assert intent.status is ExternalEffectReconciliationStatus.AVAILABLE
+    service.begin_dispatch(admission.operation.id, attempt.id)
+    service.finish(
+        admission.operation.id,
+        attempt.id,
+        status=ExternalEffectStatus.UNCERTAIN,
+        error_code="WORKER_RESPONSE_UNAVAILABLE",
+    )
+    assert service.has_unresolved_subject("browser_session", "browser-session-1")
+    assert service.list_public()[0].reconciliation_available
+
+    evidence = {
+        "operation_id": admission.operation.id,
+        "attempt_id": attempt.id,
+        "result_page_fingerprint": "page-field-v1",
+    }
+    reconciled = service.reconcile_browser_field(
+        admission.operation.id,
+        attempt.id,
+        evidence_reference=f"browser-action:{attempt.id}",
+        evidence=evidence,
+        page_fingerprint="page-field-v1",
+    )
+
+    assert reconciled.operation.status is ExternalEffectStatus.UNCERTAIN
+    assert reconciled.operation.error_code == "WORKER_RESPONSE_UNAVAILABLE"
+    assert reconciled.reconciliation is not None
+    assert reconciled.reconciliation.status is ExternalEffectReconciliationStatus.CONFIRMED_APPLIED
+    assert not service.has_unresolved_subject("browser_session", "browser-session-1")
+    public = service.list_public()[0]
+    assert not public.reconciliation_available
+    assert public.reconciled_at is not None
+    assert public.reconciliation_kind is not None
+    with factory() as session:
+        stored = " ".join(
+            str(value)
+            for row in session.execute(text("SELECT * FROM external_effect_reconciliations"))
+            for value in row
+        )
+    assert private_value not in stored

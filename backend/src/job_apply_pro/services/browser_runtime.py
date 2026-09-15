@@ -13,16 +13,26 @@ from job_apply_pro.domain.browser import (
     BrowserActionDisposition,
     BrowserActionKind,
     BrowserActionResult,
+    BrowserFieldReconciliationApproval,
+    BrowserFieldReconciliationPreview,
+    BrowserFieldReconciliationResult,
     BrowserObservation,
     BrowserPermission,
     BrowserSessionCreate,
     BrowserSessionRecord,
     BrowserSessionSnapshot,
     BrowserSessionState,
+    BrowserVerification,
     ConfirmationState,
+    VerificationKind,
 )
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
-from job_apply_pro.domain.external_effects import ExternalEffectKind, ExternalEffectStatus
+from job_apply_pro.domain.external_effects import (
+    ExternalEffectKind,
+    ExternalEffectReconciliationKind,
+    ExternalEffectReconciliationStatus,
+    ExternalEffectStatus,
+)
 from job_apply_pro.domain.workflow import utc_now
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.external_effects import (
@@ -51,6 +61,25 @@ class BrowserSessionStateError(BrowserRuntimeError):
 
 class BrowserActionUncertainError(BrowserSessionStateError):
     pass
+
+
+class BrowserReconciliationUnprovenError(BrowserSessionStateError):
+    pass
+
+
+_RECONCILABLE_FIELD_ACTIONS = {
+    BrowserActionKind.FILL,
+    BrowserActionKind.SELECT_LABEL,
+    BrowserActionKind.CHOOSE_CONTROLLED_OPTION,
+    BrowserActionKind.CHECK,
+    BrowserActionKind.UNCHECK,
+}
+_RECONCILABLE_FIELD_VERIFICATIONS = {
+    VerificationKind.VALUE_EQUALS,
+    VerificationKind.SELECTED_LABEL_EQUALS,
+    VerificationKind.CHECKED_EQUALS,
+}
+_FIELD_ACTION_INTENT = "Populate one explicitly approved application field"
 
 
 class BrowserWorkerProtocol(Protocol):
@@ -206,6 +235,12 @@ class BrowserRuntimeService:
         record = self._active_record(session_id)
         self._ensure_no_unresolved_effect(session_id)
         self._validate_action(record, action)
+        source_observation = record.observation
+        reconcilable_field_action = self._is_reconcilable_field_action(action)
+        if reconcilable_field_action and source_observation is None:
+            raise BrowserPolicyError(
+                "Reviewed field execution requires a current browser observation"
+            )
         sequence = self._repository.next_action_sequence(session_id)
         action_request = action.model_dump(mode="json")
         effect_key = f"browser:{session_id}:{sequence}"
@@ -229,6 +264,19 @@ class BrowserRuntimeService:
                 request=action_request,
                 native_key=effect_key,
             )
+            if reconcilable_field_action:
+                assert source_observation is not None  # validated before durable admission
+                self._external_effects.prepare_browser_field_reconciliation(
+                    operation.id,
+                    attempt.id,
+                    payload={
+                        "action_kind": action.kind.value,
+                        "verification": action.verification.model_dump(mode="json"),
+                        "request_fingerprint": operation.request_fingerprint,
+                    },
+                    source_page_fingerprint=source_observation.page_fingerprint,
+                    actor="browser-runtime",
+                )
             self._external_effects.begin_dispatch(operation.id, attempt.id)
         except (ExternalEffectConflictError, ExternalEffectConsumedError) as error:
             if self._external_effects.has_unresolved_subject("browser_session", session_id):
@@ -429,6 +477,63 @@ class BrowserRuntimeService:
         self._record(session_id)
         return self._repository.list_actions(session_id)
 
+    def preview_field_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> BrowserFieldReconciliationPreview:
+        preview, _observation, _evidence = self._prove_field_reconciliation(
+            session_id, operation_id
+        )
+        return preview
+
+    def approve_field_reconciliation(
+        self,
+        session_id: str,
+        approval: BrowserFieldReconciliationApproval,
+    ) -> BrowserFieldReconciliationResult:
+        preview, observation, evidence = self._prove_field_reconciliation(
+            session_id, approval.operation_id
+        )
+        if preview.review_fingerprint != approval.expected_review_fingerprint:
+            raise BrowserReconciliationUnprovenError(
+                "Browser field reconciliation changed after review"
+            )
+        saved = self._repository.save_observation(
+            session_id, BrowserSessionState.USER_TAKEOVER, observation
+        )
+        self._save_checkpoint(saved, observation, pending_action=None)
+        try:
+            effect = self._external_effects.reconcile_browser_field(
+                preview.operation_id,
+                preview.attempt_id,
+                evidence_reference=f"browser-action:{preview.attempt_id}",
+                evidence=evidence,
+                page_fingerprint=observation.page_fingerprint,
+            )
+        except (ExternalEffectConflictError, ValueError) as error:
+            raise BrowserReconciliationUnprovenError(
+                "Browser field reconciliation ownership changed"
+            ) from error
+        reconciliation = effect.reconciliation
+        if (
+            reconciliation is None
+            or reconciliation.status is not ExternalEffectReconciliationStatus.CONFIRMED_APPLIED
+            or reconciliation.reconciled_at is None
+        ):  # pragma: no cover - repository contract
+            raise RuntimeError("Browser field reconciliation did not become durable")
+        return BrowserFieldReconciliationResult(
+            operation_id=preview.operation_id,
+            attempt_id=preview.attempt_id,
+            session_id=session_id,
+            action_kind=preview.action_kind,
+            page_fingerprint=observation.page_fingerprint,
+            reconciliation_kind=ExternalEffectReconciliationKind.BROWSER_FIELD_VALUE_CONFIRMED.value,
+            reconciled_at=reconciliation.reconciled_at,
+            notice=(
+                "The exact reviewed field postcondition was observed and recorded. "
+                "The original uncertain attempt remains immutable and was not retried."
+            ),
+        )
+
     def stage_encrypted_upload(
         self,
         session_id: str,
@@ -472,6 +577,162 @@ class BrowserRuntimeService:
         if record is None:
             raise LookupError(f"Browser session {session_id} was not found")
         return record
+
+    def _prove_field_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> tuple[
+        BrowserFieldReconciliationPreview,
+        BrowserObservation,
+        dict[str, object],
+    ]:
+        session = self._record(session_id)
+        if session.state is not BrowserSessionState.USER_TAKEOVER:
+            raise BrowserSessionStateError("Browser field reconciliation requires user takeover")
+        effect = self._external_effects.get(operation_id)
+        if (
+            effect is None
+            or effect.operation.kind is not ExternalEffectKind.BROWSER_ACTION
+            or effect.operation.subject_type != "browser_session"
+            or effect.operation.subject_id != session_id
+            or effect.operation.status is not ExternalEffectStatus.UNCERTAIN
+            or effect.reconciliation is None
+            or effect.reconciliation.status is not ExternalEffectReconciliationStatus.AVAILABLE
+            or len(effect.attempts) != 1
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "External effect is not an available uncertain browser field"
+            )
+        attempt = effect.attempts[0]
+        intent = effect.reconciliation
+        if (
+            attempt.id != intent.attempt_id
+            or attempt.status is not ExternalEffectStatus.UNCERTAIN
+            or attempt.provider != "playwright"
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser field attempt does not match its durable intent"
+            )
+        actions = [
+            item for item in self._repository.list_actions(session_id) if item.id == attempt.id
+        ]
+        if len(actions) != 1:
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser field has no unique local action evidence"
+            )
+        action_result = actions[0]
+        action = action_result.action
+        try:
+            payload = self._external_effects.browser_field_reconciliation_payload(intent)
+        except ValueError:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser reconciliation intent is invalid"
+            ) from None
+        if set(payload) != {"action_kind", "verification", "request_fingerprint"}:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser reconciliation intent is invalid"
+            )
+        try:
+            action_kind = BrowserActionKind(str(payload["action_kind"]))
+            verification_value = payload["verification"]
+            if not isinstance(verification_value, dict):
+                raise ValueError
+            verification = BrowserVerification.model_validate(verification_value)
+        except (TypeError, ValueError):
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser reconciliation intent is invalid"
+            ) from None
+        if (
+            action_kind not in _RECONCILABLE_FIELD_ACTIONS
+            or verification.kind not in _RECONCILABLE_FIELD_VERIFICATIONS
+            or verification.locator is None
+            or action.kind is not action_kind
+            or action.locator != verification.locator
+            or action.intended_result != _FIELD_ACTION_INTENT
+            or action.permission is not BrowserPermission.ELEVATED
+            or action.confirmation is not ConfirmationState.CONFIRMED
+            or not action.sensitive_value
+            or action_result.verified
+            or action_result.error is None
+            or attempt.target_code != action_kind.value
+            or payload["request_fingerprint"] != effect.operation.request_fingerprint
+            or intent.source_page_fingerprint != action_result.observation.page_fingerprint
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser action is outside the reviewed field contract"
+            )
+        result = self._worker.call(
+            "verify_postcondition",
+            {
+                "session_id": session_id,
+                "verification": verification.model_dump(mode="json"),
+            },
+            timeout_seconds=75,
+        )
+        if set(result) != {"verified", "observation", "error_code"}:
+            raise BrowserReconciliationUnprovenError(
+                "Browser reconciliation worker response is invalid"
+            )
+        try:
+            observation = BrowserObservation.model_validate(result["observation"])
+            self._validate_live_observation(session, observation)
+        except (TypeError, ValueError, BrowserPolicyError):
+            raise BrowserReconciliationUnprovenError(
+                "Browser reconciliation observation is invalid"
+            ) from None
+        if (
+            result["verified"] is not True
+            or result["error_code"] is not None
+            or observation.page_fingerprint != intent.source_page_fingerprint
+            or observation.origin != action_result.observation.origin
+            or observation.page_type != action_result.observation.page_type
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Current page does not prove the exact reviewed field postcondition"
+            )
+        evidence: dict[str, object] = {
+            "policy_version": ExternalEffectService.RECONCILIATION_POLICY_VERSION,
+            "operation_id": effect.operation.id,
+            "attempt_id": attempt.id,
+            "session_id": session_id,
+            "action_kind": action_kind.value,
+            "verification_kind": verification.kind.value,
+            "request_fingerprint": effect.operation.request_fingerprint,
+            "source_page_fingerprint": intent.source_page_fingerprint,
+            "result_page_fingerprint": observation.page_fingerprint,
+            "origin": observation.origin,
+            "page_type": observation.page_type,
+        }
+        review_fingerprint = self._external_effects.request_fingerprint(evidence)
+        return (
+            BrowserFieldReconciliationPreview(
+                operation_id=effect.operation.id,
+                attempt_id=attempt.id,
+                session_id=session_id,
+                action_kind=action_kind,
+                verification_kind=verification.kind,
+                page_fingerprint=observation.page_fingerprint,
+                review_fingerprint=review_fingerprint,
+                notice=(
+                    "The exact encrypted field postcondition is currently observed. "
+                    "Approval records reconciliation without repeating the browser action."
+                ),
+            ),
+            observation,
+            evidence,
+        )
+
+    @staticmethod
+    def _is_reconcilable_field_action(action: BrowserAction) -> bool:
+        return (
+            action.kind in _RECONCILABLE_FIELD_ACTIONS
+            and action.verification.kind in _RECONCILABLE_FIELD_VERIFICATIONS
+            and action.locator is not None
+            and action.verification.locator == action.locator
+            and action.intended_result == _FIELD_ACTION_INTENT
+            and action.permission is BrowserPermission.ELEVATED
+            and action.confirmation is ConfirmationState.CONFIRMED
+            and action.sensitive_value
+        )
 
     def _active_record(
         self, session_id: str, *, allow_takeover: bool = False

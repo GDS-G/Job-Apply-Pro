@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -17,10 +17,17 @@ from job_apply_pro.domain.external_effects import (
     ExternalEffectMetrics,
     ExternalEffectOperation,
     ExternalEffectPublicRecord,
+    ExternalEffectReconciliation,
+    ExternalEffectReconciliationKind,
+    ExternalEffectReconciliationStatus,
     ExternalEffectRecord,
     ExternalEffectStatus,
 )
-from job_apply_pro.storage.models import ExternalEffectAttemptRow, ExternalEffectOperationRow
+from job_apply_pro.storage.models import (
+    ExternalEffectAttemptRow,
+    ExternalEffectOperationRow,
+    ExternalEffectReconciliationRow,
+)
 
 _UNRESOLVED = {
     ExternalEffectStatus.PREPARED.value,
@@ -33,6 +40,12 @@ def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _required_utc(value: datetime) -> datetime:
+    result = _utc(value)
+    assert result is not None
+    return result
 
 
 class ExternalEffectConflictError(RuntimeError):
@@ -96,10 +109,21 @@ class ExternalEffectRepository:
                     self._assert_exact_operation(operation, candidate)
                     return ExternalEffectAdmission(operation=operation, created=False)
                 unresolved = session.scalar(
-                    select(ExternalEffectOperationRow).where(
+                    select(ExternalEffectOperationRow)
+                    .outerjoin(
+                        ExternalEffectReconciliationRow,
+                        and_(
+                            ExternalEffectReconciliationRow.operation_id
+                            == ExternalEffectOperationRow.id,
+                            ExternalEffectReconciliationRow.status
+                            == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value,
+                        ),
+                    )
+                    .where(
                         ExternalEffectOperationRow.subject_type == subject_type,
                         ExternalEffectOperationRow.subject_id == subject_id,
                         ExternalEffectOperationRow.status.in_(_UNRESOLVED),
+                        ExternalEffectReconciliationRow.operation_id.is_(None),
                     )
                 )
                 if unresolved is not None:
@@ -390,14 +414,158 @@ class ExternalEffectRepository:
                 recovered += 1
         return recovered
 
+    def prepare_reconciliation_intent(
+        self,
+        operation_id: str,
+        attempt_id: str,
+        *,
+        kind: ExternalEffectReconciliationKind,
+        encrypted_payload: str,
+        source_page_fingerprint: str,
+        policy_version: str,
+        actor: str,
+        now: datetime,
+    ) -> ExternalEffectReconciliation:
+        candidate = ExternalEffectReconciliation(
+            operation_id=operation_id,
+            attempt_id=attempt_id,
+            kind=kind,
+            status=ExternalEffectReconciliationStatus.AVAILABLE,
+            encrypted_payload=encrypted_payload,
+            source_page_fingerprint=source_page_fingerprint,
+            policy_version=policy_version,
+            actor=actor,
+            created_at=now,
+        )
+        with self._transaction() as session:
+            operation = session.get(ExternalEffectOperationRow, operation_id)
+            attempt = session.get(ExternalEffectAttemptRow, attempt_id)
+            existing = session.get(ExternalEffectReconciliationRow, operation_id)
+            if existing is not None:
+                stored = self._reconciliation(existing)
+                if stored != candidate:
+                    raise ExternalEffectConflictError(
+                        "External-effect reconciliation intent is immutable"
+                    )
+                return stored
+            if (
+                operation is None
+                or attempt is None
+                or attempt.operation_id != operation_id
+                or operation.kind != ExternalEffectKind.BROWSER_ACTION.value
+                or operation.status != ExternalEffectStatus.PREPARED.value
+                or attempt.status != ExternalEffectStatus.PREPARED.value
+            ):
+                raise ExternalEffectConflictError(
+                    "Browser reconciliation intent must precede dispatch"
+                )
+            session.add(
+                ExternalEffectReconciliationRow(
+                    operation_id=candidate.operation_id,
+                    attempt_id=candidate.attempt_id,
+                    kind=candidate.kind.value,
+                    status=candidate.status.value,
+                    encrypted_payload=candidate.encrypted_payload,
+                    source_page_fingerprint=candidate.source_page_fingerprint,
+                    evidence_reference=None,
+                    evidence_fingerprint=None,
+                    result_page_fingerprint=None,
+                    policy_version=candidate.policy_version,
+                    actor=candidate.actor,
+                    created_at=candidate.created_at,
+                    reconciled_at=None,
+                )
+            )
+            session.flush()
+        return candidate
+
+    def reconcile_uncertain(
+        self,
+        operation_id: str,
+        attempt_id: str,
+        *,
+        kind: ExternalEffectReconciliationKind,
+        evidence_reference: str,
+        evidence_fingerprint: str,
+        result_page_fingerprint: str,
+        now: datetime,
+    ) -> ExternalEffectRecord:
+        with self._transaction() as session:
+            operation = session.get(ExternalEffectOperationRow, operation_id)
+            attempt = session.get(ExternalEffectAttemptRow, attempt_id)
+            existing = session.get(ExternalEffectReconciliationRow, operation_id)
+            if existing is None:
+                raise ExternalEffectConflictError(
+                    "Browser reconciliation intent was not recorded before dispatch"
+                )
+            if existing.status == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value:
+                if (
+                    existing.kind != kind.value
+                    or existing.evidence_reference != evidence_reference
+                    or existing.evidence_fingerprint != evidence_fingerprint
+                    or existing.result_page_fingerprint != result_page_fingerprint
+                ):
+                    raise ExternalEffectConflictError(
+                        "External-effect reconciliation evidence is immutable"
+                    )
+                if operation is None:  # pragma: no cover - protected by the foreign key
+                    raise ExternalEffectConflictError("Reconciled external effect was not found")
+                return self._record(session, operation)
+            if (
+                operation is None
+                or attempt is None
+                or attempt.operation_id != operation_id
+                or operation.kind != ExternalEffectKind.BROWSER_ACTION.value
+                or operation.status != ExternalEffectStatus.UNCERTAIN.value
+                or attempt.status != ExternalEffectStatus.UNCERTAIN.value
+            ):
+                raise ExternalEffectConflictError(
+                    "Only the uncertain browser attempt may be reconciled"
+                )
+            latest = session.scalar(
+                select(func.max(ExternalEffectAttemptRow.sequence)).where(
+                    ExternalEffectAttemptRow.operation_id == operation_id
+                )
+            )
+            if latest != attempt.sequence:
+                raise ExternalEffectConflictError(
+                    "Only the latest uncertain browser attempt may be reconciled"
+                )
+            if (
+                existing.status != ExternalEffectReconciliationStatus.AVAILABLE.value
+                or existing.attempt_id != attempt_id
+                or existing.kind != kind.value
+            ):
+                raise ExternalEffectConflictError(
+                    "Browser reconciliation intent does not match the uncertain attempt"
+                )
+            existing.status = ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value
+            existing.evidence_reference = evidence_reference
+            existing.evidence_fingerprint = evidence_fingerprint
+            existing.result_page_fingerprint = result_page_fingerprint
+            existing.reconciled_at = now
+            session.flush()
+            return self._record(session, operation)
+
     def has_unresolved_subject(self, subject_type: str, subject_id: str) -> bool:
         with self._session_factory() as session:
             return (
                 session.scalar(
-                    select(ExternalEffectOperationRow.id).where(
+                    select(ExternalEffectOperationRow.id)
+                    .outerjoin(
+                        ExternalEffectReconciliationRow,
+                        and_(
+                            ExternalEffectReconciliationRow.operation_id
+                            == ExternalEffectOperationRow.id,
+                            ExternalEffectReconciliationRow.status
+                            == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value,
+                        ),
+                    )
+                    .where(
                         ExternalEffectOperationRow.subject_type == subject_type,
                         ExternalEffectOperationRow.subject_id == subject_id,
                         ExternalEffectOperationRow.status.in_(_UNRESOLVED),
+                        ExternalEffectReconciliationRow.operation_id.is_(None),
                     )
                 )
                 is not None
@@ -408,10 +576,20 @@ class ExternalEffectRepository:
             return list(
                 session.scalars(
                     select(ExternalEffectOperationRow.subject_id)
+                    .outerjoin(
+                        ExternalEffectReconciliationRow,
+                        and_(
+                            ExternalEffectReconciliationRow.operation_id
+                            == ExternalEffectOperationRow.id,
+                            ExternalEffectReconciliationRow.status
+                            == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value,
+                        ),
+                    )
                     .where(
                         ExternalEffectOperationRow.kind == kind.value,
                         ExternalEffectOperationRow.subject_type == subject_type,
                         ExternalEffectOperationRow.status.in_(_UNRESOLVED),
+                        ExternalEffectReconciliationRow.operation_id.is_(None),
                     )
                     .distinct()
                     .order_by(ExternalEffectOperationRow.subject_id)
@@ -451,6 +629,14 @@ class ExternalEffectRepository:
             if status is not None:
                 statement = statement.where(ExternalEffectOperationRow.status == status.value)
             rows = session.scalars(statement.limit(limit)).all()
+            reconciliations = {
+                row.operation_id: row
+                for row in session.scalars(
+                    select(ExternalEffectReconciliationRow).where(
+                        ExternalEffectReconciliationRow.operation_id.in_([row.id for row in rows])
+                    )
+                ).all()
+            }
             count_rows = (
                 session.execute(
                     select(
@@ -466,7 +652,14 @@ class ExternalEffectRepository:
             counts: dict[str, int] = {
                 operation_id: int(count) for operation_id, count in count_rows
             }
-            return [self._public(row, int(counts.get(row.id, 0))) for row in rows]
+            return [
+                self._public(
+                    row,
+                    int(counts.get(row.id, 0)),
+                    reconciliations.get(row.id),
+                )
+                for row in rows
+            ]
 
     def metrics(self) -> ExternalEffectMetrics:
         with self._session_factory() as session:
@@ -480,11 +673,30 @@ class ExternalEffectRepository:
                     ExternalEffectOperationRow.kind
                 )
             ).all()
+            unresolved = int(
+                session.scalar(
+                    select(func.count(ExternalEffectOperationRow.id))
+                    .outerjoin(
+                        ExternalEffectReconciliationRow,
+                        and_(
+                            ExternalEffectReconciliationRow.operation_id
+                            == ExternalEffectOperationRow.id,
+                            ExternalEffectReconciliationRow.status
+                            == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value,
+                        ),
+                    )
+                    .where(
+                        ExternalEffectOperationRow.status.in_(_UNRESOLVED),
+                        ExternalEffectReconciliationRow.operation_id.is_(None),
+                    )
+                )
+                or 0
+            )
         by_status = {ExternalEffectStatus(key): int(value) for key, value in status_rows}
         by_kind = {ExternalEffectKind(key): int(value) for key, value in kind_rows}
         return ExternalEffectMetrics(
             total=sum(by_status.values()),
-            unresolved=sum(by_status.get(ExternalEffectStatus(value), 0) for value in _UNRESOLVED),
+            unresolved=unresolved,
             by_status=by_status,
             by_kind=by_kind,
         )
@@ -498,9 +710,13 @@ class ExternalEffectRepository:
             .where(ExternalEffectAttemptRow.operation_id == operation.id)
             .order_by(ExternalEffectAttemptRow.sequence)
         ).all()
+        reconciliation = session.get(ExternalEffectReconciliationRow, operation.id)
         return ExternalEffectRecord(
             operation=cls._operation(operation),
             attempts=[cls._attempt(row) for row in attempts],
+            reconciliation=(
+                cls._reconciliation(reconciliation) if reconciliation is not None else None
+            ),
         )
 
     @staticmethod
@@ -518,8 +734,8 @@ class ExternalEffectRepository:
             result_reference=row.result_reference,
             result_fingerprint=row.result_fingerprint,
             error_code=row.error_code,
-            created_at=_utc(row.created_at),
-            updated_at=_utc(row.updated_at),
+            created_at=_required_utc(row.created_at),
+            updated_at=_required_utc(row.updated_at),
             completed_at=_utc(row.completed_at),
         )
 
@@ -540,13 +756,17 @@ class ExternalEffectRepository:
             input_tokens=row.input_tokens,
             output_tokens=row.output_tokens,
             cost_micros=row.cost_micros,
-            created_at=_utc(row.created_at),
-            updated_at=_utc(row.updated_at),
+            created_at=_required_utc(row.created_at),
+            updated_at=_required_utc(row.updated_at),
             completed_at=_utc(row.completed_at),
         )
 
     @staticmethod
-    def _public(row: ExternalEffectOperationRow, attempt_count: int) -> ExternalEffectPublicRecord:
+    def _public(
+        row: ExternalEffectOperationRow,
+        attempt_count: int,
+        reconciliation: ExternalEffectReconciliationRow | None,
+    ) -> ExternalEffectPublicRecord:
         return ExternalEffectPublicRecord(
             id=row.id,
             kind=ExternalEffectKind(row.kind),
@@ -556,9 +776,46 @@ class ExternalEffectRepository:
             result_reference=row.result_reference,
             error_code=row.error_code,
             attempt_count=attempt_count,
-            created_at=_utc(row.created_at),
-            updated_at=_utc(row.updated_at),
+            created_at=_required_utc(row.created_at),
+            updated_at=_required_utc(row.updated_at),
             completed_at=_utc(row.completed_at),
+            reconciliation_available=(
+                reconciliation is not None
+                and reconciliation.status == ExternalEffectReconciliationStatus.AVAILABLE.value
+                and row.status == ExternalEffectStatus.UNCERTAIN.value
+            ),
+            reconciliation_kind=(
+                ExternalEffectReconciliationKind(reconciliation.kind)
+                if reconciliation is not None
+                and reconciliation.status
+                == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value
+                else None
+            ),
+            reconciled_at=(
+                _utc(reconciliation.reconciled_at)
+                if reconciliation is not None
+                and reconciliation.status
+                == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _reconciliation(row: ExternalEffectReconciliationRow) -> ExternalEffectReconciliation:
+        return ExternalEffectReconciliation(
+            operation_id=row.operation_id,
+            attempt_id=row.attempt_id,
+            kind=ExternalEffectReconciliationKind(row.kind),
+            status=ExternalEffectReconciliationStatus(row.status),
+            encrypted_payload=row.encrypted_payload,
+            source_page_fingerprint=row.source_page_fingerprint,
+            evidence_reference=row.evidence_reference,
+            evidence_fingerprint=row.evidence_fingerprint,
+            result_page_fingerprint=row.result_page_fingerprint,
+            policy_version=row.policy_version,
+            actor=row.actor,
+            created_at=_required_utc(row.created_at),
+            reconciled_at=_utc(row.reconciled_at),
         )
 
     @staticmethod

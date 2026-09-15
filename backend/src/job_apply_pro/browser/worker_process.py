@@ -153,6 +153,29 @@ class BrowserWorker:
         except Exception:  # worker boundary emits only static privacy-safe codes
             return self._uncertain_result(session, "ACTION_EXECUTION_UNCERTAIN")
 
+    def verify_postcondition(
+        self, session_id: str, verification_data: dict[str, Any]
+    ) -> dict[str, object]:
+        """Recheck one deterministic field postcondition without performing an action."""
+
+        session = self._require(session_id)
+        rule = BrowserVerification.model_validate(verification_data)
+        if rule.kind not in {
+            VerificationKind.VALUE_EQUALS,
+            VerificationKind.SELECTED_LABEL_EQUALS,
+            VerificationKind.CHECKED_EQUALS,
+        }:
+            raise ValueError("Only deterministic field postconditions may be reconciled")
+        try:
+            verified = self._verify(session, rule)
+        except Exception:
+            verified = False
+        return {
+            "verified": verified,
+            "observation": self._observe(session).model_dump(mode="json"),
+            "error_code": None if verified else "POSTCONDITION_NOT_OBSERVED",
+        }
+
     def _uncertain_result(self, session: WorkerSession, error_code: str) -> dict[str, object]:
         return {
             "disposition": BrowserActionDisposition.UNCERTAIN.value,
@@ -704,6 +727,10 @@ def main() -> None:
                     result = worker.observe(str(params["session_id"]))
                 elif method == "execute":
                     result = worker.execute(str(params["session_id"]), params["action"])
+                elif method == "verify_postcondition":
+                    result = worker.verify_postcondition(
+                        str(params["session_id"]), params["verification"]
+                    )
                 elif method == "restart_session":
                     result = worker.restart_session(str(params["session_id"]))
                 elif method == "stop_session":

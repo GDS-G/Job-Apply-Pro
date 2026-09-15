@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,9 @@ from job_apply_pro.config import get_settings
 from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionResult,
+    BrowserFieldReconciliationApproval,
+    BrowserFieldReconciliationPreview,
+    BrowserFieldReconciliationResult,
     BrowserSessionCreate,
     BrowserSessionSnapshot,
     BrowserSessionState,
@@ -59,6 +62,7 @@ def recover_browser_external_effects(cipher: SensitiveDataCipher) -> int:
             for table_name in (
                 "external_effect_operations",
                 "external_effect_attempts",
+                "external_effect_reconciliations",
             )
         ):
             # The packaged desktop runs Alembic before serving. This narrow
@@ -105,6 +109,10 @@ def get_browser_service(
 
 
 BrowserServiceDependency = Annotated[BrowserRuntimeService, Depends(get_browser_service)]
+BrowserReconciliationId = Annotated[
+    str,
+    Path(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"),
+]
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -190,6 +198,42 @@ def list_browser_actions(
     try:
         return service.list_actions(session_id)
     except LookupError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/sessions/{session_id}/field-reconciliations/{operation_id}/preview",
+    response_model=BrowserFieldReconciliationPreview,
+)
+def preview_browser_field_reconciliation(
+    session_id: BrowserReconciliationId,
+    operation_id: BrowserReconciliationId,
+    service: BrowserServiceDependency,
+) -> BrowserFieldReconciliationPreview:
+    try:
+        return service.preview_field_reconciliation(session_id, operation_id)
+    except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/sessions/{session_id}/field-reconciliations/{operation_id}/approve",
+    response_model=BrowserFieldReconciliationResult,
+)
+def approve_browser_field_reconciliation(
+    session_id: BrowserReconciliationId,
+    operation_id: BrowserReconciliationId,
+    approval: BrowserFieldReconciliationApproval,
+    service: BrowserServiceDependency,
+) -> BrowserFieldReconciliationResult:
+    if approval.operation_id != operation_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Browser reconciliation operation id does not match the route",
+        )
+    try:
+        return service.approve_field_reconciliation(session_id, approval)
+    except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
         raise _http_error(error) from error
 
 

@@ -669,9 +669,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText(
-        "Reviewed Greenhouse Single-Select Widgets v0.70.0-alpha.1",
-      ),
+      screen.getByText("Reviewed Browser Field Reconciliation v0.71.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),
@@ -743,6 +741,78 @@ describe("App", () => {
     expect(
       screen.getByLabelText(/allow external AI processing/i),
     ).not.toBeChecked();
+  });
+
+  it("offers reviewed field reconciliation only for an eligible takeover session", async () => {
+    const api = window.jobApplyPro.workbench;
+    const operationId = "64a4cc96-07d1-4a0e-8000-a74811a13c0e";
+    const attemptId = "19c70be6-ea1b-4c71-b668-d359f7ce4b06";
+    const sessionId = "5fdf419a-0771-4d75-99d2-c76ba2f89719";
+    const operations = await api.getOperationsDashboard();
+    vi.spyOn(api, "listBrowserSessions").mockResolvedValue([
+      {
+        id: sessionId,
+        workflow_id: "fixture-workflow",
+        engine: "chromium",
+        profile_name: "fixture-profile",
+        state: "USER_TAKEOVER",
+        current_url: "https://boards.greenhouse.io/example/jobs/123",
+        allowed_origins: ["https://boards.greenhouse.io"],
+        observation: null,
+        action_count: 1,
+        trace_path: null,
+        created_at: new Date(0).toISOString(),
+        updated_at: new Date(0).toISOString(),
+      },
+    ]);
+    vi.spyOn(api, "getOperationsDashboard").mockResolvedValue({
+      ...operations,
+      external_effects: {
+        total: 1,
+        unresolved: 1,
+        by_status: { UNCERTAIN: 1 },
+        by_kind: { BROWSER_ACTION: 1 },
+      },
+      unresolved_external_effects: [
+        {
+          id: operationId,
+          kind: "BROWSER_ACTION",
+          subject_type: "browser_session",
+          subject_id: sessionId,
+          status: "UNCERTAIN",
+          error_code: "WORKER_RESPONSE_UNAVAILABLE",
+          attempt_count: 1,
+          created_at: new Date(0).toISOString(),
+          updated_at: new Date(0).toISOString(),
+          completed_at: new Date(0).toISOString(),
+          reconciliation_available: true,
+          reconciliation_kind: "BROWSER_FIELD_VALUE_CONFIRMED",
+        },
+      ],
+    });
+    const reconcile = vi.spyOn(api, "reconcileBrowserField").mockResolvedValue({
+      operation_id: operationId,
+      attempt_id: attemptId,
+      session_id: sessionId,
+      action_kind: "FILL",
+      page_fingerprint: "greenhouse:questionnaire:ab12cd34",
+      reconciliation_kind: "BROWSER_FIELD_VALUE_CONFIRMED",
+      reconciled_at: "2026-09-15T18:00:00+00:00",
+      notice: "Verified field outcome recorded without repeating the action.",
+    });
+
+    render(<App />);
+    const button = await screen.findByRole("button", {
+      name: /verify current field outcome/i,
+    });
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      expect(reconcile).toHaveBeenCalledExactlyOnceWith(operationId, sessionId),
+    );
+    expect(
+      await screen.findByText(/recorded without repeating the action/i),
+    ).toBeInTheDocument();
   });
 
   it("has no serious automated accessibility violations", async () => {
