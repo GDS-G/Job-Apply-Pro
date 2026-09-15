@@ -103,3 +103,4 @@ ADRs capture durable decisions that affect architecture, security, contracts, pe
 - [ADR-0079: Reviewed Greenhouse final submission](0079-reviewed-greenhouse-final-submission.md)
 - [ADR-0080: Reviewed Greenhouse single-select widgets](0080-reviewed-greenhouse-single-select-widgets.md)
 - [ADR-0081: Reviewed browser field reconciliation](0081-reviewed-browser-field-reconciliation.md)
+- [ADR-0082: Interrupted forward restore resume](0082-interrupted-forward-restore-resume.md)

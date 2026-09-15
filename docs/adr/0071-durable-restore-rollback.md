@@ -1,5 +1,7 @@
 # ADR-0071: Durable restore rollback
 
+> ADR-0082 extends this compatible v2 record format with a separately fingerprinted, immutable-direction `RESUME` decision. The rollback behavior and all historical guarantees below remain in force.
+
 ## Status and scope
 
 Accepted as the source design for Durable Restore Rollback `v0.61.0-alpha.1`. The integrated candidate adds authenticated, explicit rollback for an interrupted local offline restore and an isolated native packaged recovery path. Its full source gate, exact backend-dist and installer-payload smokes, delivered supervisor, and source-controller-to-delivered-backend recovery protocol are recorded below. It remains alpha until protected CI/security and physical installed Windows recovery validation are recorded. It does not make multi-file replacement atomic, automatically choose rollback, resume an unfinished forward apply, merge later history, repair arbitrary files, or promise survival of every hardware/power-loss condition. A completed restore with an authenticated `APPLIED` receipt may only be finalized; it cannot be rolled back through this protocol.

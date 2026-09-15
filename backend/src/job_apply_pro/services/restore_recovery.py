@@ -300,6 +300,8 @@ class RestoreRecoveryService:
                 "state": "LEGACY_COMPLETION_OR_MANUAL_RECOVERY",
                 "rollback_supported": False,
                 "review_fingerprint": None,
+                "resume_supported": False,
+                "resume_review_fingerprint": None,
             }
 
     def rollback(self, operation_id: str, review_fingerprint: str) -> None:
@@ -310,6 +312,15 @@ class RestoreRecoveryService:
                 "Legacy restore requires verified completion or manual recovery"
             )
         RestoreRollback(self).rollback(operation_id, review_fingerprint)
+
+    def resume(self, operation_id: str, review_fingerprint: str) -> None:
+        from job_apply_pro.services.restore_rollback import RestoreRollback
+
+        if not self.gate.has_v2_record(operation_id, "intent"):
+            raise RestoreAdmissionError(
+                "Legacy restore requires verified completion or manual recovery"
+            )
+        RestoreRollback(self).resume(operation_id, review_fingerprint)
 
     def finalize(self, operation_id: str) -> None:
         if self.gate.has_v2_record(operation_id, "intent"):

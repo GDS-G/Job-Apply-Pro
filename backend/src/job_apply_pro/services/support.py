@@ -33,7 +33,7 @@ def _database_bytes(database_url: str) -> int:
 
 
 class SupportService:
-    BUILD_NAME = "Reviewed Browser Field Reconciliation"
+    BUILD_NAME = "Interrupted Forward Restore Resume"
 
     def __init__(
         self,

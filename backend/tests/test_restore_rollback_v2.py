@@ -106,6 +106,10 @@ def _rollback(recovery: RestoreRollback, prepared: PreparedRestore) -> None:
     recovery.host.rollback(prepared.operation_id, recovery._review_fingerprint(prepared))
 
 
+def _resume(recovery: RestoreRollback, prepared: PreparedRestore) -> None:
+    recovery.host.resume(prepared.operation_id, recovery._resume_review_fingerprint(prepared))
+
+
 def _packaged_restore_verifier(*, reveal_failure: bool = False) -> str:
     source = (Path(__file__).parents[2] / "scripts" / "test_packaged_backend.ps1").read_text(
         encoding="utf-8"
@@ -217,8 +221,128 @@ def test_rollback_restores_exact_original_database_and_documents_at_each_install
         "state": "ROLLED_BACK",
         "rollback_supported": False,
         "review_fingerprint": None,
+        "resume_supported": False,
+        "resume_review_fingerprint": None,
     }
     assert recovery._receipt(prepared).outcome == "ROLLED_BACK"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("after_installs", [0, 1, 2, 3])
+def test_resume_installs_exact_sealed_after_images_at_each_install_boundary(
+    changed_workspace: Workspace, monkeypatch: pytest.MonkeyPatch, after_installs: int
+) -> None:
+    workspace = changed_workspace
+    recovery, prepared = _interrupted_apply(workspace, monkeypatch, after_installs=after_installs)
+    inspection = recovery.inspect(prepared.operation_id)
+    assert inspection["rollback_supported"] is True
+    assert inspection["resume_supported"] is True
+    assert inspection["review_fingerprint"] == recovery._review_fingerprint(prepared)
+    assert inspection["resume_review_fingerprint"] == recovery._resume_review_fingerprint(prepared)
+    assert inspection["review_fingerprint"] != inspection["resume_review_fingerprint"]
+
+    _resume(recovery, prepared)
+
+    for target in prepared.targets:
+        path = workspace.root / target.path
+        assert hash_file(path) == (target.after.sha256, target.after.size)
+    assert not workspace.gate.blocked()
+    assert recovery.inspect(prepared.operation_id) == {
+        "operation_id": prepared.operation_id,
+        "version": 2,
+        "state": "APPLIED",
+        "rollback_supported": False,
+        "review_fingerprint": None,
+        "resume_supported": False,
+        "resume_review_fingerprint": None,
+    }
+    assert recovery._receipt(prepared).outcome == "APPLIED"  # type: ignore[union-attr]
+    assert recovery._decision(prepared).action == "RESUME"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("first_action", ["ROLLBACK", "RESUME"])
+def test_published_recovery_decision_cannot_switch_direction(
+    changed_workspace: Workspace,
+    monkeypatch: pytest.MonkeyPatch,
+    first_action: str,
+) -> None:
+    workspace = changed_workspace
+    recovery, prepared = _interrupted_apply(
+        workspace, monkeypatch, after_installs=1 if first_action == "ROLLBACK" else 0
+    )
+    before = _live(workspace)
+
+    def stop(*args: object) -> None:
+        raise Interrupted("after decision publication")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(RestoreRollback, "_install", stop)
+        with pytest.raises(Interrupted):
+            if first_action == "ROLLBACK":
+                _rollback(recovery, prepared)
+            else:
+                _resume(recovery, prepared)
+
+    inspection = recovery.inspect(prepared.operation_id)
+    assert inspection["state"] == ("ROLLING_BACK" if first_action == "ROLLBACK" else "RESUMING")
+    assert inspection["rollback_supported"] is (first_action == "ROLLBACK")
+    assert inspection["resume_supported"] is (first_action == "RESUME")
+    with pytest.raises(RestoreAdmissionError, match="decision cannot change"):
+        if first_action == "ROLLBACK":
+            _resume(recovery, prepared)
+        else:
+            _rollback(recovery, prepared)
+    assert _live(workspace) == before
+    assert workspace.gate.blocked()
+
+
+def test_repeated_interrupted_resume_skips_completed_targets_and_keeps_database_last(
+    changed_workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = changed_workspace
+    recovery, prepared = _interrupted_apply(workspace, monkeypatch, after_installs=0)
+    original_install = RestoreRollback._install
+    order: list[str] = []
+
+    def stop(
+        self: RestoreRollback, model: PreparedRestore, target: Replacement, image: Image
+    ) -> None:
+        original_install(self, model, target, image)
+        order.append(target.path)
+        raise Interrupted("resume after one replacement")
+
+    for expected_count in range(1, len(prepared.targets) + 1):
+        with monkeypatch.context() as patch:
+            patch.setattr(RestoreRollback, "_install", stop)
+            with pytest.raises(Interrupted):
+                _resume(recovery, prepared)
+        assert len(order) == expected_count
+        assert workspace.gate.blocked()
+        assert recovery.inspect(prepared.operation_id)["state"] == "RESUMING"
+
+    assert order == [target.path for target in prepared.targets]
+    assert order[-1] == "app.db"
+    _resume(recovery, prepared)
+    assert not workspace.gate.blocked()
+
+
+def test_resume_is_self_contained_when_original_archive_and_staging_are_missing(
+    changed_workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = changed_workspace
+    recovery, prepared = _interrupted_apply(workspace, monkeypatch, after_installs=1)
+    staged = Path(workspace.plan.staged_path)
+    for entry in workspace.manifest.entries:
+        (staged / entry.relative_path).unlink()
+    (staged / "documents").rmdir()
+    (staged / "database").rmdir()
+    staged.rmdir()
+    Path(workspace.manifest.archive_path).unlink()
+
+    _resume(recovery, prepared)
+
+    for target in prepared.targets:
+        assert hash_file(workspace.root / target.path) == (target.after.sha256, target.after.size)
+    assert not workspace.gate.blocked()
 
 
 def test_document_only_restore_also_retains_database_before_bookkeeping(
@@ -891,6 +1015,32 @@ def test_rollback_receipt_after_interruption_finalizes_without_repeating_target_
     assert _live(workspace) == before
 
 
+def test_resume_receipt_after_interruption_finalizes_without_repeating_target_writes(
+    changed_workspace: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = changed_workspace
+    recovery, prepared = _interrupted_apply(workspace, monkeypatch, after_installs=1)
+
+    def stop(*args: object) -> None:
+        raise Interrupted("after resume receipt")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(RestoreRollback, "finalize", stop)
+        with pytest.raises(Interrupted):
+            _resume(recovery, prepared)
+    assert workspace.gate.blocked()
+    assert recovery.inspect(prepared.operation_id)["state"] == "APPLIED"
+
+    def forbidden(*args: object) -> None:
+        raise AssertionError("A terminal forward resume must not replace targets again")
+
+    monkeypatch.setattr(RestoreRollback, "_install", forbidden)
+    _resume(recovery, prepared)
+    assert not workspace.gate.blocked()
+    for target in prepared.targets:
+        assert hash_file(workspace.root / target.path) == (target.after.sha256, target.after.size)
+
+
 def test_legacy_v1_operation_remains_authenticated_manual_or_completion_only(
     changed_workspace: Workspace,
 ) -> None:
@@ -913,6 +1063,8 @@ def test_legacy_v1_operation_remains_authenticated_manual_or_completion_only(
         "state": "LEGACY_COMPLETION_OR_MANUAL_RECOVERY",
         "rollback_supported": False,
         "review_fingerprint": None,
+        "resume_supported": False,
+        "resume_review_fingerprint": None,
     }
     with pytest.raises(RestoreAdmissionError, match="Legacy restore"):
         host.rollback(operation_id, "0" * 64)
@@ -1113,6 +1265,50 @@ restore_rollback({operation_id!r}, {fingerprint!r})
     assert result.stdout == ""
     assert _live(workspace) == before
     assert not workspace.gate.blocked()
+
+
+def test_real_process_crash_during_apply_then_resume_converges_to_sealed_after_bytes(
+    changed_workspace: Workspace,
+) -> None:
+    workspace = changed_workspace
+    apply_script = f"""
+import os
+from job_apply_pro.desktop_entry import restore
+from job_apply_pro.services.restore_rollback import RestoreRollback
+original = RestoreRollback._install
+installed = 0
+def stop(self, prepared, target, image):
+    global installed
+    original(self, prepared, target, image)
+    installed += 1
+    if installed == 1:
+        os._exit(77)
+RestoreRollback._install = stop
+restore({workspace.plan.id!r}, {workspace.plan.fingerprint!r})
+"""
+    result = run(workspace.root, "-c", apply_script)
+    assert result.returncode == 77, result.stderr
+    operation_id = workspace.gate.active_id()
+    host = _host(workspace)
+    inspection = host.inspect(operation_id)
+    fingerprint = inspection["resume_review_fingerprint"]
+    assert isinstance(fingerprint, str)
+
+    result = cli(
+        workspace.root,
+        "restore-resume",
+        "--operation-id",
+        operation_id,
+        "--fingerprint",
+        fingerprint,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert not workspace.gate.blocked()
+    prepared = RestoreRollback(host)._load(operation_id)
+    for target in prepared.targets:
+        assert hash_file(workspace.root / target.path) == (target.after.sha256, target.after.size)
 
 
 def test_actual_concurrent_recovery_commands_cannot_enter_owning_rollback_lease(

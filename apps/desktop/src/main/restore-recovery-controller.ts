@@ -35,14 +35,17 @@ export interface InstalledRecoveryOptions extends RestoreAdmissionOptions {
 }
 
 export type InstalledRecoveryOutcome =
-  "cancelled" | "finalized" | "rolled-back";
+  "cancelled" | "finalized" | "resumed" | "rolled-back";
 
 interface RestoreInspection {
   operation_id: string;
   version: 2;
-  state: "INTERRUPTED" | "ROLLING_BACK" | "APPLIED" | "ROLLED_BACK";
+  state:
+    "INTERRUPTED" | "RESUMING" | "ROLLING_BACK" | "APPLIED" | "ROLLED_BACK";
   rollback_supported: boolean;
   review_fingerprint: string | null;
+  resume_supported: boolean;
+  resume_review_fingerprint: string | null;
 }
 
 function isMissing(error: unknown): boolean {
@@ -203,6 +206,8 @@ function parseInspection(
     keys.join("\0") !==
     [
       "operation_id",
+      "resume_review_fingerprint",
+      "resume_supported",
       "review_fingerprint",
       "rollback_supported",
       "state",
@@ -215,23 +220,38 @@ function parseInspection(
     record.operation_id !== expectedOperation ||
     record.version !== 2 ||
     typeof state !== "string" ||
-    !["INTERRUPTED", "ROLLING_BACK", "APPLIED", "ROLLED_BACK"].includes(
-      state,
-    ) ||
+    ![
+      "INTERRUPTED",
+      "RESUMING",
+      "ROLLING_BACK",
+      "APPLIED",
+      "ROLLED_BACK",
+    ].includes(state) ||
     typeof record.rollback_supported !== "boolean" ||
+    typeof record.resume_supported !== "boolean" ||
     !(
       record.review_fingerprint === null ||
       (typeof record.review_fingerprint === "string" &&
         FINGERPRINT_PATTERN.test(record.review_fingerprint))
+    ) ||
+    !(
+      record.resume_review_fingerprint === null ||
+      (typeof record.resume_review_fingerprint === "string" &&
+        FINGERPRINT_PATTERN.test(record.resume_review_fingerprint))
     )
   )
     throw new InstalledRecoveryError();
-  const resumable = state === "INTERRUPTED" || state === "ROLLING_BACK";
+  const supportsRollback = state === "INTERRUPTED" || state === "ROLLING_BACK";
+  const supportsResume = state === "INTERRUPTED" || state === "RESUMING";
   if (
-    record.rollback_supported !== resumable ||
-    (resumable
+    record.rollback_supported !== supportsRollback ||
+    record.resume_supported !== supportsResume ||
+    (supportsRollback
       ? typeof record.review_fingerprint !== "string"
-      : record.review_fingerprint !== null)
+      : record.review_fingerprint !== null) ||
+    (supportsResume
+      ? typeof record.resume_review_fingerprint !== "string"
+      : record.resume_review_fingerprint !== null)
   )
     throw new InstalledRecoveryError();
   return record as unknown as RestoreInspection;
@@ -258,7 +278,7 @@ export async function runInstalledRestoreRecovery(
   const operationId = await readGuardOperation(options);
   const masterKey = await loadExistingMasterKey(options.masterKeyPath);
   const inspection = await inspect(options, masterKey, operationId);
-  if (!inspection.rollback_supported) {
+  if (!inspection.rollback_supported && !inspection.resume_supported) {
     if (inspection.state !== "APPLIED" && inspection.state !== "ROLLED_BACK")
       throw new InstalledRecoveryError();
     const terminalState = inspection.state;
@@ -308,45 +328,76 @@ export async function runInstalledRestoreRecovery(
     });
     return "finalized";
   }
-  if (!inspection.review_fingerprint) throw new InstalledRecoveryError();
-
+  const buttons = ["Keep workspace blocked"];
+  const actions: ("ROLLBACK" | "RESUME")[] = [];
+  if (inspection.rollback_supported) {
+    buttons.push("Roll back exact restore");
+    actions.push("ROLLBACK");
+  }
+  if (inspection.resume_supported) {
+    buttons.push("Resume exact restore");
+    actions.push("RESUME");
+  }
   const confirmation = await dialog.showMessageBox({
     type: "warning",
     title: "Job Apply Pro — interrupted restore recovery",
-    message: "Roll back the interrupted restore?",
+    message: "Choose how to recover the interrupted restore.",
     detail:
       `Job Apply Pro authenticated interrupted operation ${operationId}. ` +
-      `Rollback will restore its sealed before-images only.\n\n` +
-      `State: ${inspection.state}\nReview fingerprint: ${inspection.review_fingerprint}`,
-    buttons: ["Keep workspace blocked", "Roll back exact restore"],
+      "Rollback restores only its sealed before-images. Resume installs only its " +
+      "sealed after-images; it does not reread staging files or merge later history. " +
+      "Once either decision is recorded, it cannot be changed.\n\n" +
+      `State: ${inspection.state}\n` +
+      (inspection.review_fingerprint
+        ? `Rollback fingerprint: ${inspection.review_fingerprint}\n`
+        : "") +
+      (inspection.resume_review_fingerprint
+        ? `Resume fingerprint: ${inspection.resume_review_fingerprint}`
+        : ""),
+    buttons,
     defaultId: 0,
     cancelId: 0,
     noLink: true,
   });
-  if (confirmation.response !== 1) return "cancelled";
-
-  const fingerprint = inspection.review_fingerprint;
-  const rollbackOutput = await runRecoveryCommand(options, masterKey, [
-    "restore-rollback",
+  if (confirmation.response === 0) return "cancelled";
+  const action = actions[confirmation.response - 1];
+  if (!action) throw new InstalledRecoveryError();
+  const fingerprint =
+    action === "ROLLBACK"
+      ? inspection.review_fingerprint
+      : inspection.resume_review_fingerprint;
+  if (!fingerprint) throw new InstalledRecoveryError();
+  const command = action === "ROLLBACK" ? "restore-rollback" : "restore-resume";
+  const recoveryOutput = await runRecoveryCommand(options, masterKey, [
+    command,
     "--operation-id",
     operationId,
     "--fingerprint",
     fingerprint,
   ]);
-  if (rollbackOutput.length !== 0) throw new InstalledRecoveryError();
+  if (recoveryOutput.length !== 0) throw new InstalledRecoveryError();
   const terminal = await inspect(options, masterKey, operationId);
+  const expectedState = action === "ROLLBACK" ? "ROLLED_BACK" : "APPLIED";
   if (
-    terminal.state !== "ROLLED_BACK" ||
+    terminal.state !== expectedState ||
     terminal.rollback_supported ||
     terminal.review_fingerprint !== null ||
+    terminal.resume_supported ||
+    terminal.resume_review_fingerprint !== null ||
     restoreAdmissionBlocked(options)
   )
     throw new InstalledRecoveryError();
 
   await dialog.showMessageBox({
     type: "info",
-    title: "Job Apply Pro — restore rollback verified",
-    message: "The interrupted restore was rolled back and verified.",
+    title:
+      action === "ROLLBACK"
+        ? "Job Apply Pro — restore rollback verified"
+        : "Job Apply Pro — restore resume verified",
+    message:
+      action === "ROLLBACK"
+        ? "The interrupted restore was rolled back and verified."
+        : "The interrupted restore was resumed and verified.",
     detail:
       "Job Apply Pro will close now. Reopen it to start the restored workspace normally.",
     buttons: ["Close Job Apply Pro"],
@@ -354,5 +405,5 @@ export async function runInstalledRestoreRecovery(
     cancelId: 0,
     noLink: true,
   });
-  return "rolled-back";
+  return action === "ROLLBACK" ? "rolled-back" : "resumed";
 }

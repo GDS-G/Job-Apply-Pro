@@ -2,6 +2,17 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.72.0-alpha.1] - Unreleased
+
+### Interrupted Forward Restore Resume
+
+- Extend authenticated v2 recovery inspection with a distinct, fingerprint-bound forward-resume choice while keeping cancellation and workspace preservation as the native default.
+- Publish one immutable `ROLLBACK` or `RESUME` decision before recovery writes; refuse direction changes across retries or relaunches.
+- Resume only from the active operation's authenticated encrypted after-images, skip already completed targets, keep the database last, and avoid staging, archive, SQLite, and normal-service reads.
+- Require every live target to be an exact sealed before/after state before mutation, an exact `APPLIED` receipt afterward, terminal reinspection, and a cleared guard before reporting success.
+- Add the database-free `restore-resume` packaged-backend command and strict Electron protocol parsing for `INTERRUPTED`, `RESUMING`, `ROLLING_BACK`, `APPLIED`, and `ROLLED_BACK`.
+- Preserve legacy v1 manual/completion-only behavior, the existing v2 rollback contract, schema `20260915_0030`, and all production signing, physical release-lab, and live-provider gates.
+
 ## [0.62.0-alpha.1] - Unreleased
 
 ### Calendar Attempt Admission

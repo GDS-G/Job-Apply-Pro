@@ -1,4 +1,4 @@
-"""Version-two interrupted-operation rollback; never a general history merge."""
+"""Version-two interrupted-operation recovery; never a general history merge."""
 
 from __future__ import annotations
 
@@ -191,7 +191,7 @@ class RollbackDecision(RecoveryModel):
     version: Literal[2] = 2
     intent_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    action: Literal["ROLLBACK"] = "ROLLBACK"
+    action: Literal["ROLLBACK", "RESUME"] = "ROLLBACK"
 
 
 class TerminalReceipt(RecoveryModel):
@@ -738,6 +738,10 @@ class RestoreRollback:
     def _review_fingerprint(prepared: PreparedRestore) -> str:
         return hashlib.sha256(f"{POLICY}:ROLLBACK:{digest_model(prepared)}".encode()).hexdigest()
 
+    @staticmethod
+    def _resume_review_fingerprint(prepared: PreparedRestore) -> str:
+        return hashlib.sha256(f"{POLICY}:RESUME:{digest_model(prepared)}".encode()).hexdigest()
+
     def _active(self, operation_id: str) -> None:
         if not self.gate.blocked() or self.gate.active_id() != operation_id:
             raise RestoreAdmissionError(
@@ -811,9 +815,15 @@ class RestoreRollback:
         decision = RollbackDecision.model_validate(
             self.gate.read_v2_record(prepared.operation_id, "decision", self.cipher)
         )
-        if decision.intent_sha256 != digest_model(
-            prepared
-        ) or decision.review_fingerprint != self._review_fingerprint(prepared):
+        expected_fingerprint = (
+            self._review_fingerprint(prepared)
+            if decision.action == "ROLLBACK"
+            else self._resume_review_fingerprint(prepared)
+        )
+        if (
+            decision.intent_sha256 != digest_model(prepared)
+            or decision.review_fingerprint != expected_fingerprint
+        ):
             raise RestoreAdmissionError(RECOVERY_MESSAGE)
         return decision
 
@@ -827,7 +837,9 @@ class RestoreRollback:
         if receipt != expected:
             raise RestoreAdmissionError(RECOVERY_MESSAGE)
         decision = self._decision(prepared)
-        if (receipt.outcome == "ROLLED_BACK") != (decision is not None):
+        if receipt.outcome == "ROLLED_BACK" and (decision is None or decision.action != "ROLLBACK"):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        if receipt.outcome == "APPLIED" and decision is not None and decision.action != "RESUME":
             raise RestoreAdmissionError(RECOVERY_MESSAGE)
         return receipt
 
@@ -848,7 +860,10 @@ class RestoreRollback:
     def _write_receipt(
         self, prepared: PreparedRestore, outcome: Literal["APPLIED", "ROLLED_BACK"]
     ) -> None:
-        if (outcome == "ROLLED_BACK") != (self._decision(prepared) is not None):
+        decision = self._decision(prepared)
+        if outcome == "ROLLED_BACK" and (decision is None or decision.action != "ROLLBACK"):
+            raise RestoreAdmissionError(RECOVERY_MESSAGE)
+        if outcome == "APPLIED" and decision is not None and decision.action != "RESUME":
             raise RestoreAdmissionError(RECOVERY_MESSAGE)
         self._preflight(prepared, expected="AFTER" if outcome == "APPLIED" else "BEFORE")
         self.gate.write_v2_record(
@@ -887,7 +902,12 @@ class RestoreRollback:
                 self.finalize(operation_id)
                 return
             self._preflight(prepared)
-            if self._decision(prepared) is None:
+            decision = self._decision(prepared)
+            if decision is not None and decision.action != "ROLLBACK":
+                raise RestoreAdmissionError(
+                    "Forward resume is already authorized; the recovery decision cannot change"
+                )
+            if decision is None:
                 decision = RollbackDecision(
                     intent_sha256=digest_model(prepared), review_fingerprint=review_fingerprint
                 )
@@ -911,6 +931,47 @@ class RestoreRollback:
             self._write_receipt(prepared, "ROLLED_BACK")
             self.finalize(operation_id)
 
+    def resume(self, operation_id: str, review_fingerprint: str) -> None:
+        """Finish only the exact sealed after-image plan for a blocked v2 restore."""
+        with workspace_access(self.gate.root, restore=True):
+            self._active(operation_id)
+            prepared = self._load(operation_id)
+            if review_fingerprint != self._resume_review_fingerprint(prepared):
+                raise RestoreAdmissionError(
+                    "Forward-resume review changed; inspect the original operation"
+                )
+            receipt = self._receipt(prepared)
+            if receipt is not None:
+                if receipt.outcome == "ROLLED_BACK":
+                    raise RestoreAdmissionError(
+                        "Restore is already rolled back; only verified finalization is supported"
+                    )
+                self.finalize(operation_id)
+                return
+            self._preflight(prepared)
+            decision = self._decision(prepared)
+            if decision is not None and decision.action != "RESUME":
+                raise RestoreAdmissionError(
+                    "Rollback is already authorized; the recovery decision cannot change"
+                )
+            if decision is None:
+                decision = RollbackDecision(
+                    intent_sha256=digest_model(prepared),
+                    review_fingerprint=review_fingerprint,
+                    action="RESUME",
+                )
+                self.gate.write_v2_record(
+                    operation_id, "decision", decision.model_dump(mode="json"), self.cipher
+                )
+            # The sealed inventory always puts the database last. No staging read,
+            # database query or history merge is permitted during recovery.
+            for target in prepared.targets:
+                if self._state(prepared, target) == "AFTER":
+                    continue
+                self._install(prepared, target, target.after)
+            self._write_receipt(prepared, "APPLIED")
+            self.finalize(operation_id)
+
     def inspect(self, operation_id: str) -> dict[str, object]:
         with workspace_access(self.gate.root, restore=True):
             prepared = self._load(operation_id)
@@ -924,20 +985,30 @@ class RestoreRollback:
                     "state": receipt.outcome,
                     "rollback_supported": False,
                     "review_fingerprint": None,
+                    "resume_supported": False,
+                    "resume_review_fingerprint": None,
                 }
             self._active(operation_id)
             self._preflight(prepared)
             decision = self._decision(prepared)
+            rollback = decision is None or decision.action == "ROLLBACK"
+            resume = decision is None or decision.action == "RESUME"
             return {
                 "operation_id": operation_id,
                 "version": 2,
                 "state": receipt.outcome
                 if receipt
                 else "ROLLING_BACK"
-                if decision
+                if decision is not None and decision.action == "ROLLBACK"
+                else "RESUMING"
+                if decision is not None
                 else "INTERRUPTED",
-                "rollback_supported": receipt is None,
+                "rollback_supported": receipt is None and rollback,
                 "review_fingerprint": self._review_fingerprint(prepared)
-                if receipt is None
+                if receipt is None and rollback
+                else None,
+                "resume_supported": receipt is None and resume,
+                "resume_review_fingerprint": self._resume_review_fingerprint(prepared)
+                if receipt is None and resume
                 else None,
             }

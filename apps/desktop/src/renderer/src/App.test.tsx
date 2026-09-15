@@ -669,7 +669,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Reviewed Browser Field Reconciliation v0.71.0-alpha.1"),
+      screen.getByText("Interrupted Forward Restore Resume v0.72.0-alpha.1"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

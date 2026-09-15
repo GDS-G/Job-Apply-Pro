@@ -55,19 +55,24 @@ vi.mock("electron", () => ({
 
 const OPERATION_ID = "76543210-4321-4321-8321-210987654321";
 const FINGERPRINT = "a".repeat(64);
+const RESUME_FINGERPRINT = "b".repeat(64);
 const MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
 const WRONG_KEY = Buffer.alloc(32, 9).toString("base64");
 
 function inspection(
-  state: "INTERRUPTED" | "ROLLING_BACK" | "APPLIED" | "ROLLED_BACK",
+  state:
+    "INTERRUPTED" | "RESUMING" | "ROLLING_BACK" | "APPLIED" | "ROLLED_BACK",
 ): string {
   const rollback = state === "INTERRUPTED" || state === "ROLLING_BACK";
+  const resume = state === "INTERRUPTED" || state === "RESUMING";
   return JSON.stringify({
     operation_id: OPERATION_ID,
     version: 2,
     state,
     rollback_supported: rollback,
     review_fingerprint: rollback ? FINGERPRINT : null,
+    resume_supported: resume,
+    resume_review_fingerprint: resume ? RESUME_FINGERPRINT : null,
   });
 }
 
@@ -199,9 +204,88 @@ describe("installed restore recovery controller", () => {
     expect(mocks.showMessageBox.mock.calls[0]![0]).toMatchObject({
       defaultId: 0,
       cancelId: 0,
-      buttons: ["Keep workspace blocked", "Roll back exact restore"],
+      buttons: [
+        "Keep workspace blocked",
+        "Roll back exact restore",
+        "Resume exact restore",
+      ],
     });
   });
+
+  it("forwards only the authenticated exact forward-resume review", async () => {
+    mocks.results.push(
+      { stdout: inspection("INTERRUPTED") },
+      { stdout: "", effect: () => rmSync(guardPath) },
+      { stdout: inspection("APPLIED") },
+    );
+    mocks.showMessageBox
+      .mockResolvedValueOnce({ response: 2, checkboxChecked: false })
+      .mockResolvedValueOnce({ response: 0, checkboxChecked: false });
+
+    await expect(runInstalledRestoreRecovery(options())).resolves.toBe(
+      "resumed",
+    );
+
+    expect(mocks.spawn.mock.calls.map((call) => call[1])).toEqual([
+      ["restore-inspect", "--operation-id", OPERATION_ID],
+      [
+        "restore-resume",
+        "--operation-id",
+        OPERATION_ID,
+        "--fingerprint",
+        RESUME_FINGERPRINT,
+      ],
+      ["restore-inspect", "--operation-id", OPERATION_ID],
+    ]);
+    expect(mocks.showMessageBox.mock.calls[0]![0]).toMatchObject({
+      defaultId: 0,
+      cancelId: 0,
+      buttons: [
+        "Keep workspace blocked",
+        "Roll back exact restore",
+        "Resume exact restore",
+      ],
+    });
+  });
+
+  it.each([
+    ["ROLLING_BACK", "restore-rollback", FINGERPRINT],
+    ["RESUMING", "restore-resume", RESUME_FINGERPRINT],
+  ] as const)(
+    "offers only the already published %s direction",
+    async (state, command, fingerprint) => {
+      mocks.results.push(
+        { stdout: inspection(state) },
+        { stdout: "", effect: () => rmSync(guardPath) },
+        {
+          stdout: inspection(
+            state === "ROLLING_BACK" ? "ROLLED_BACK" : "APPLIED",
+          ),
+        },
+      );
+      mocks.showMessageBox
+        .mockResolvedValueOnce({ response: 1, checkboxChecked: false })
+        .mockResolvedValueOnce({ response: 0, checkboxChecked: false });
+
+      await expect(runInstalledRestoreRecovery(options())).resolves.toBe(
+        state === "ROLLING_BACK" ? "rolled-back" : "resumed",
+      );
+
+      expect(mocks.showMessageBox.mock.calls[0]![0].buttons).toEqual([
+        "Keep workspace blocked",
+        state === "ROLLING_BACK"
+          ? "Roll back exact restore"
+          : "Resume exact restore",
+      ]);
+      expect(mocks.spawn.mock.calls[1]![1]).toEqual([
+        command,
+        "--operation-id",
+        OPERATION_ID,
+        "--fingerprint",
+        fingerprint,
+      ]);
+    },
+  );
 
   it("keeps cancel as the default and performs no rollback mutation", async () => {
     mocks.results.push({ stdout: inspection("INTERRUPTED") });
@@ -269,6 +353,7 @@ describe("installed restore recovery controller", () => {
 
   it.each([
     ["rollback", "INTERRUPTED", "restore-rollback"],
+    ["resume", "RESUMING", "restore-resume"],
     ["finalization", "APPLIED", "restore-finalize"],
   ] as const)(
     "rejects unexpected stdout from the %s mutation command",

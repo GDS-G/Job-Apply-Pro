@@ -73,6 +73,8 @@ def test_inspection_emits_only_authenticated_service_result_using_original_key(
         "state": "RECOVERY_REQUIRED",
         "rollback_supported": True,
         "review_fingerprint": _FINGERPRINT,
+        "resume_supported": True,
+        "resume_review_fingerprint": "b" * 64,
     }
     recovery_service.inspect.return_value = inspection
     monkeypatch.setattr(sys, "argv", ["backend", "restore-inspect", "--operation-id", operation_id])
@@ -104,6 +106,7 @@ def test_existing_finalize_still_delegates_only_explicit_operation(
     recovery_service.finalize.assert_called_once_with(operation_id)
     recovery_service.inspect.assert_not_called()
     recovery_service.rollback.assert_not_called()
+    recovery_service.resume.assert_not_called()
 
 
 def test_explicit_rollback_forwards_exact_review_without_inspecting_or_finalizing(
@@ -128,10 +131,37 @@ def test_explicit_rollback_forwards_exact_review_without_inspecting_or_finalizin
     recovery_service.rollback.assert_called_once_with(operation_id, _FINGERPRINT)
     recovery_service.inspect.assert_not_called()
     recovery_service.finalize.assert_not_called()
+    recovery_service.resume.assert_not_called()
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.parametrize("command", ["restore-inspect", "restore-rollback"])
+def test_explicit_resume_forwards_exact_review_without_inspecting_or_finalizing(
+    recovery_service: Mock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    operation_id = str(uuid4())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backend",
+            "restore-resume",
+            "--operation-id",
+            operation_id,
+            "--fingerprint",
+            _FINGERPRINT,
+        ],
+    )
+
+    desktop_entry.main()
+
+    recovery_service.resume.assert_called_once_with(operation_id, _FINGERPRINT)
+    recovery_service.inspect.assert_not_called()
+    recovery_service.finalize.assert_not_called()
+    recovery_service.rollback.assert_not_called()
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("command", ["restore-inspect", "restore-rollback", "restore-resume"])
 def test_recovery_error_never_reports_success_or_retries(
     command: str,
     recovery_service: Mock,
@@ -139,10 +169,16 @@ def test_recovery_error_never_reports_success_or_retries(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     operation_id = str(uuid4())
-    method = recovery_service.inspect if command == "restore-inspect" else recovery_service.rollback
+    method = (
+        recovery_service.inspect
+        if command == "restore-inspect"
+        else recovery_service.rollback
+        if command == "restore-rollback"
+        else recovery_service.resume
+    )
     method.side_effect = RestoreAdmissionError("synthetic failure")
     arguments = ["backend", command, "--operation-id", operation_id]
-    if command == "restore-rollback":
+    if command in {"restore-rollback", "restore-resume"}:
         arguments += ["--fingerprint", _FINGERPRINT]
     monkeypatch.setattr(sys, "argv", arguments)
 
@@ -161,12 +197,25 @@ def test_recovery_error_never_reports_success_or_retries(
         ["restore-rollback"],
         ["restore-rollback", "--operation-id", "operation"],
         ["restore-rollback", "--fingerprint", _FINGERPRINT],
+        ["restore-resume"],
+        ["restore-resume", "--operation-id", "operation"],
+        ["restore-resume", "--fingerprint", _FINGERPRINT],
         ["restore-inspect", "--operation-id", ""],
         ["restore-rollback", "--operation-id", "operation", "--fingerprint", ""],
+        ["restore-resume", "--operation-id", "operation", "--fingerprint", ""],
         ["restore-inspect", "--operation-id", "operation", "--plan-id", "plan"],
         ["restore-inspect", "--operation-id", "operation", "--fingerprint", _FINGERPRINT],
         [
             "restore-rollback",
+            "--operation-id",
+            "operation",
+            "--fingerprint",
+            _FINGERPRINT,
+            "--plan-id",
+            "plan",
+        ],
+        [
+            "restore-resume",
             "--operation-id",
             "operation",
             "--fingerprint",
@@ -241,7 +290,7 @@ def _run_recovery(
     )
 
 
-@pytest.mark.parametrize("command", ["restore-inspect", "restore-rollback"])
+@pytest.mark.parametrize("command", ["restore-inspect", "restore-rollback", "restore-resume"])
 @pytest.mark.parametrize("failure", ["missing-key", "wrong-key", "missing-guard", "invalid-uuid"])
 def test_recovery_failures_are_db_free_and_never_create_a_replacement_key(
     tmp_path: Path, command: str, failure: str
@@ -263,7 +312,7 @@ def test_recovery_failures_are_db_free_and_never_create_a_replacement_key(
         "--operation-id",
         "not-a-uuid" if failure == "invalid-uuid" else operation_id,
     ]
-    if command == "restore-rollback":
+    if command in {"restore-rollback", "restore-resume"}:
         arguments += ["--fingerprint", _FINGERPRINT]
 
     result = _run_recovery(tmp_path, arguments, key=key)

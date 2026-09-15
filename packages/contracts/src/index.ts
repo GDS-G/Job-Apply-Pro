@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Browser Field Reconciliation",
-  version: "0.71.0-alpha.1",
+  name: "Interrupted Forward Restore Resume",
+  version: "0.72.0-alpha.1",
   channel: "alpha",
 } as const;
 

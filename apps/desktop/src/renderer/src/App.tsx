@@ -1702,13 +1702,12 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Browser Field Reconciliation v0.71.0-alpha.1
+                Interrupted Forward Restore Resume v0.72.0-alpha.1
               </strong>
               <p>
-                One exact current Greenhouse final-submit control can now use
-                the separate default-off native review and identifier-backed
-                confirmation boundary. Navigation, fields, upload, manual
-                controls, and submission remain independently authorized.
+                An interrupted restore can now be explicitly rolled back or
+                resumed from its authenticated sealed images. Recovery remains
+                user-selected, fail-closed, and separate from normal startup.
               </p>
             </div>
             <span className="status-pill status-pill--safe">

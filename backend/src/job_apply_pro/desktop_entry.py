@@ -190,6 +190,11 @@ def restore_rollback(operation_id: str, fingerprint: str) -> None:
     _restore_recovery_service().rollback(operation_id, fingerprint)
 
 
+def restore_resume(operation_id: str, fingerprint: str) -> None:
+    # The service returns only after authenticating and verifying exact forward completion.
+    _restore_recovery_service().resume(operation_id, fingerprint)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Job Apply Pro packaged backend")
     parser.add_argument(
@@ -202,6 +207,7 @@ def main() -> None:
             "restore-finalize",
             "restore-inspect",
             "restore-rollback",
+            "restore-resume",
             "browser-worker",
         ),
     )
@@ -214,6 +220,7 @@ def main() -> None:
         "restore-finalize": {"operation_id"},
         "restore-inspect": {"operation_id"},
         "restore-rollback": {"operation_id", "fingerprint"},
+        "restore-resume": {"operation_id", "fingerprint"},
     }
     if arguments.command in recovery_arguments:
         for name in ("plan_id", "fingerprint", "operation_id"):
@@ -251,6 +258,10 @@ def main() -> None:
         if not arguments.operation_id or not arguments.fingerprint:
             parser.error("restore-rollback requires --operation-id and --fingerprint")
         restore_rollback(arguments.operation_id, arguments.fingerprint)
+    elif arguments.command == "restore-resume":
+        if not arguments.operation_id or not arguments.fingerprint:
+            parser.error("restore-resume requires --operation-id and --fingerprint")
+        restore_resume(arguments.operation_id, arguments.fingerprint)
     elif arguments.command == "migrate":
         migrate()
     elif arguments.command == "serve":
