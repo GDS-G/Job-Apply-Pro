@@ -42,7 +42,7 @@ The packaged browser runtime includes `resources/backend/job-apply-pro-browser-w
 
 When explicitly using Chromium, its matching Playwright browser must already be installed. Frozen Windows workers use `%LOCALAPPDATA%\ms-playwright` by default and preserve an explicit `PLAYWRIGHT_BROWSERS_PATH` override. No browser is downloaded automatically by the app; a missing executable is a recoverable installation/configuration error, not permission to use another personal browser profile.
 
-1. For production use, wait for a published signed installer. The local `Job-Apply-Pro-0.75.0-alpha.1-x64.exe` development-candidate filename does not prove signing or successful acceptance; independent inspection reports `NotSigned`. Consult the readiness audit for the exact version's build, hashes and limitations. Test unsigned candidates only on an isolated development workstation.
+1. For production use, wait for a published signed installer. The local `Job-Apply-Pro-0.76.0-alpha.1-x64.exe` development-candidate filename does not prove signing or successful acceptance. Consult the readiness audit for the exact version's build, signature status, hashes, and limitations. Test unsigned candidates only on an isolated development workstation.
 2. For a future signed release, compare the Authenticode publisher and checksum with its release record; do not assume that a GitHub account name is the certificate subject. Do not proceed with production installation if its signature is invalid or its publisher is unexpected.
 3. Choose a per-user installation directory and start Job Apply Pro.
 4. The first start creates an OS-protected encryption key, migrates the local database, and starts the bundled loopback backend. Python and Node are not required.

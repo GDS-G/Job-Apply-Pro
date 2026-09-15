@@ -144,7 +144,7 @@ Forward database restore preserves current rows and their dependency closure acr
 
 ## Signed publication
 
-1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.75.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
+1. Once signing and acceptance prerequisites above are satisfied, tag the exact approved commit `v0.76.0-alpha.1` and push the tag, or dispatch **Signed Windows Release** for that ref. Do not tag or dispatch an unsigned candidate as a production release.
 2. The workflow tests, builds, requires the certificate, signs the NSIS installer, generates an SPDX JSON SBOM, verifies Authenticode, creates SHA-256 checksums and dependency inventories, and only then publishes a prerelease.
 3. Download the published installer on a clean supported Windows workstation. Verify `Get-AuthenticodeSignature` reports `Valid`, the subject is the expected publisher, and the SHA-256 value matches `SHA256SUMS.txt`.
 4. Install, launch, perform the smoke workflow, and confirm the update metadata resolves to the same signed artifact.
