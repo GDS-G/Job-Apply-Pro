@@ -27,6 +27,7 @@ class ExternalEffectConsumedError(RuntimeError):
 class ExternalEffectService:
     POLICY_VERSION = "external-effects-v1"
     RECONCILIATION_POLICY_VERSION = "browser-field-reconciliation-v1"
+    NAVIGATION_RECONCILIATION_POLICY_VERSION = "browser-navigation-reconciliation-v1"
 
     def __init__(self, repository: ExternalEffectRepository, cipher: SensitiveDataCipher) -> None:
         self._repository = repository
@@ -196,6 +197,65 @@ class ExternalEffectService:
             operation_id,
             attempt_id,
             kind=ExternalEffectReconciliationKind.BROWSER_FIELD_VALUE_CONFIRMED,
+            evidence_reference=evidence_reference,
+            evidence_fingerprint=self.request_fingerprint(evidence),
+            result_page_fingerprint=page_fingerprint,
+            now=now or datetime.now(UTC),
+        )
+
+    def prepare_browser_navigation_reconciliation(
+        self,
+        operation_id: str,
+        attempt_id: str,
+        *,
+        payload: dict[str, object],
+        source_page_fingerprint: str,
+        actor: str = "desktop-user",
+        now: datetime | None = None,
+    ) -> ExternalEffectReconciliation:
+        encrypted = self._cipher.encrypt_json(
+            payload,
+            context=self._reconciliation_context(operation_id, attempt_id),
+        )
+        return self._repository.prepare_reconciliation_intent(
+            operation_id,
+            attempt_id,
+            kind=ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED,
+            encrypted_payload=encrypted,
+            source_page_fingerprint=source_page_fingerprint,
+            policy_version=self.NAVIGATION_RECONCILIATION_POLICY_VERSION,
+            actor=actor,
+            now=now or datetime.now(UTC),
+        )
+
+    def browser_navigation_reconciliation_payload(
+        self, reconciliation: ExternalEffectReconciliation
+    ) -> dict[str, object]:
+        if reconciliation.kind is not ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED:
+            raise ValueError("External effect has no browser navigation reconciliation intent")
+        return self._cipher.decrypt_json(
+            reconciliation.encrypted_payload,
+            context=self._reconciliation_context(
+                reconciliation.operation_id, reconciliation.attempt_id
+            ),
+        )
+
+    def reconcile_browser_navigation(
+        self,
+        operation_id: str,
+        attempt_id: str,
+        *,
+        evidence_reference: str,
+        evidence: object,
+        page_fingerprint: str,
+        now: datetime | None = None,
+    ) -> ExternalEffectRecord:
+        if evidence_reference != f"browser-action:{attempt_id}":
+            raise ValueError("Browser reconciliation evidence reference is invalid")
+        return self._repository.reconcile_uncertain(
+            operation_id,
+            attempt_id,
+            kind=ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED,
             evidence_reference=evidence_reference,
             evidence_fingerprint=self.request_fingerprint(evidence),
             result_page_fingerprint=page_fingerprint,

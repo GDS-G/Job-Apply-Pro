@@ -2,6 +2,18 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.76.0-alpha.1] - Unreleased
+
+### Reviewed Browser Navigation Reconciliation
+
+- Prepare encrypted reconciliation intent before dispatch only for the exact reviewed Greenhouse one-stage navigation action.
+- Bind intent to operation, attempt, request, control, locator, source origin, page type, stage, form review, and page fingerprint.
+- Add a read-only proof that requires the same origin, a changed fingerprint, and a recognized strictly later non-confirmation Greenhouse form stage.
+- Reprove on approval, preserve the original `UNCERTAIN` operation and attempt, and terminalize only the reconciliation record without replaying browser I/O.
+- Add authenticated API, typed client/preload contracts, strict identifiers, a cancel-default native warning, and kind-specific Operations controls.
+- Preserve field reconciliation separately and reject same-page, earlier/equal, confirmation, unknown, foreign-origin, stale-review, and generic-click outcomes.
+- Reuse schema `20260915_0030` with restore validation for the new reconciliation kind; no migration is required.
+
 ## [0.75.0-alpha.1] - Unreleased
 
 ### Reviewed Profile Quarantine Recovery

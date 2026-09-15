@@ -644,13 +644,19 @@ def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
         reconciled_attempt = next(
             (item for item in attempts if item.id == reconciliation.attempt_id), None
         )
+        reconciliation_policies = {
+            ExternalEffectReconciliationKind.BROWSER_FIELD_VALUE_CONFIRMED: (
+                "browser-field-reconciliation-v1"
+            ),
+            ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED: (
+                "browser-navigation-reconciliation-v1"
+            ),
+        }
         if (
             reconciled_operation is None
             or reconciled_attempt is None
             or reconciled_operation.kind is not ExternalEffectKind.BROWSER_ACTION
-            or reconciliation.kind
-            is not ExternalEffectReconciliationKind.BROWSER_FIELD_VALUE_CONFIRMED
-            or reconciliation.policy_version != "browser-field-reconciliation-v1"
+            or reconciliation.policy_version != reconciliation_policies.get(reconciliation.kind)
             or reconciled_attempt.operation_id != reconciled_operation.id
         ):
             raise RestoreHistoryError(UNAVAILABLE)
@@ -659,8 +665,16 @@ def _external_effect_ledger(snapshot: HistorySnapshot) -> None:
             or reconciled_attempt.status is not ExternalEffectStatus.UNCERTAIN
             or reconciled_attempt.id != max(attempts, key=lambda item: item.sequence).id
             or reconciliation.evidence_reference != f"browser-action:{reconciled_attempt.id}"
-            or reconciliation.source_page_fingerprint != reconciliation.result_page_fingerprint
             or (reconciled_attempt.id,) not in snapshot.tables["browser_actions"]
+            or (
+                reconciliation.kind
+                is ExternalEffectReconciliationKind.BROWSER_FIELD_VALUE_CONFIRMED
+                and reconciliation.source_page_fingerprint != reconciliation.result_page_fingerprint
+            )
+            or (
+                reconciliation.kind is ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED
+                and reconciliation.source_page_fingerprint == reconciliation.result_page_fingerprint
+            )
         ):
             raise RestoreHistoryError(UNAVAILABLE)
 

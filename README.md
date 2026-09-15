@@ -2,6 +2,12 @@
 
 Job Apply Pro is a local-first Windows desktop application for coordinating job discovery, qualification, application workflows, and durable tracking. The product keeps deterministic state, security, validation, and browser control around bounded AI-assisted tasks.
 
+## Reviewed Browser Navigation Reconciliation build
+
+The active source milestone is **Reviewed Browser Navigation Reconciliation `v0.76.0-alpha.1`**. Before one exact reviewed Greenhouse stage-navigation click crosses the Playwright boundary, the backend can now prepare an encrypted reconciliation intent bound to its durable operation, only attempt, source origin, page/stage, form-review fingerprint, control, locator, and request fingerprint. If the worker response is lost, Operations may offer **Verify current form stage** only when a fresh read-only observation proves the same origin and a different, recognized, strictly later non-confirmation Greenhouse stage. Preview and approval each reprove the outcome. Approval records only reconciliation evidence; it never replays the click, uploads, or submits, and the original operation and attempt remain `UNCERTAIN`. See [ADR-0086](docs/adr/0086-reviewed-browser-navigation-reconciliation.md).
+
+Exact v0.76 source and unsigned-package evidence is pending completion of the frozen-candidate release gates. Greenhouse remains disabled for production and has no authorized live-portal compatibility evidence. Protected integration, trusted signing, physical installed-app testing, signed update/rollback, and live-provider acceptance remain separate external gates; no v0.75 result transfers.
+
 ## Reviewed Profile Quarantine Recovery build
 
 The active source milestone is **Reviewed Profile Quarantine Recovery `v0.75.0-alpha.1`**. A failed v0.75 profile retirement now leaves one profile-associated quarantine that can be rediscovered after restart as `CLEANUP_PENDING`. The backend issues a new fingerprint only for exact stopped history, a missing canonical profile, one safe isolated directory, and its current bounded inventory. Electron displays a cancel-default native warning and approves only the immutable backend preview. The renderer never supplies or receives a path, inventory, cookie, token, credential, or claimed deletion result. Durable session/effect/checkpoint evidence and historical-name blocking remain. Anonymous v0.74 quarantines, provider logout/revocation, forensic secure erasure, automatic retention, and bulk cleanup remain separate. See [ADR-0085](docs/adr/0085-reviewed-profile-quarantine-recovery.md).

@@ -24,6 +24,9 @@ from job_apply_pro.domain.browser import (
     BrowserFieldReconciliationApproval,
     BrowserFieldReconciliationPreview,
     BrowserFieldReconciliationResult,
+    BrowserNavigationReconciliationApproval,
+    BrowserNavigationReconciliationPreview,
+    BrowserNavigationReconciliationResult,
     BrowserObservation,
     BrowserPermission,
     BrowserProfileCleanupApproval,
@@ -40,6 +43,7 @@ from job_apply_pro.domain.browser import (
     BrowserSessionState,
     BrowserVerification,
     ConfirmationState,
+    SemanticLocator,
     VerificationKind,
 )
 from job_apply_pro.domain.checkpoints import EncryptedCheckpointRecord
@@ -49,11 +53,16 @@ from job_apply_pro.domain.external_effects import (
     ExternalEffectReconciliationStatus,
     ExternalEffectStatus,
 )
+from job_apply_pro.domain.greenhouse_form import GreenhouseFormAction, GreenhouseFormStage
 from job_apply_pro.domain.workflow import utc_now
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.external_effects import (
     ExternalEffectConsumedError,
     ExternalEffectService,
+)
+from job_apply_pro.services.greenhouse_form import (
+    GreenhouseFormContractError,
+    GreenhouseFormContractService,
 )
 from job_apply_pro.storage.external_effect_repository import ExternalEffectConflictError
 from job_apply_pro.storage.repository_contracts import (
@@ -96,6 +105,21 @@ _RECONCILABLE_FIELD_VERIFICATIONS = {
     VerificationKind.CHECKED_EQUALS,
 }
 _FIELD_ACTION_INTENT = "Populate one explicitly approved application field"
+_GREENHOUSE_NAVIGATION_INTENT = "Advance the exact reviewed Greenhouse form by one control"
+_GREENHOUSE_STAGE_ORDER = {
+    GreenhouseFormStage.APPLICATION: 1,
+    GreenhouseFormStage.DOCUMENTS: 2,
+    GreenhouseFormStage.QUESTIONNAIRE: 3,
+    GreenhouseFormStage.REVIEW: 4,
+    GreenhouseFormStage.CONFIRMATION: 5,
+}
+_GREENHOUSE_PAGE_STAGES = {
+    "APPLICATION_FORM": GreenhouseFormStage.APPLICATION,
+    "DOCUMENT_UPLOAD": GreenhouseFormStage.DOCUMENTS,
+    "QUESTIONNAIRE": GreenhouseFormStage.QUESTIONNAIRE,
+    "SUBMISSION_REVIEW": GreenhouseFormStage.REVIEW,
+    "CONFIRMATION": GreenhouseFormStage.CONFIRMATION,
+}
 _ACTIVE_PROFILE_STATES = {
     BrowserSessionState.STARTING,
     BrowserSessionState.ACTIVE,
@@ -697,9 +721,12 @@ class BrowserRuntimeService:
         self._validate_action(record, action)
         source_observation = record.observation
         reconcilable_field_action = self._is_reconcilable_field_action(action)
-        if reconcilable_field_action and source_observation is None:
+        navigation_intent = self._navigation_reconciliation_intent(action, source_observation)
+        if (
+            reconcilable_field_action or navigation_intent is not None
+        ) and source_observation is None:
             raise BrowserPolicyError(
-                "Reviewed field execution requires a current browser observation"
+                "Reviewed browser execution requires a current browser observation"
             )
         sequence = self._repository.next_action_sequence(session_id)
         action_request = action.model_dump(mode="json")
@@ -732,6 +759,18 @@ class BrowserRuntimeService:
                     payload={
                         "action_kind": action.kind.value,
                         "verification": action.verification.model_dump(mode="json"),
+                        "request_fingerprint": operation.request_fingerprint,
+                    },
+                    source_page_fingerprint=source_observation.page_fingerprint,
+                    actor="browser-runtime",
+                )
+            elif navigation_intent is not None:
+                assert source_observation is not None  # validated before durable admission
+                self._external_effects.prepare_browser_navigation_reconciliation(
+                    operation.id,
+                    attempt.id,
+                    payload={
+                        **navigation_intent,
                         "request_fingerprint": operation.request_fingerprint,
                     },
                     source_page_fingerprint=source_observation.page_fingerprint,
@@ -998,6 +1037,66 @@ class BrowserRuntimeService:
             ),
         )
 
+    def preview_navigation_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> BrowserNavigationReconciliationPreview:
+        preview, _observation, _evidence = self._prove_navigation_reconciliation(
+            session_id, operation_id
+        )
+        return preview
+
+    def approve_navigation_reconciliation(
+        self,
+        session_id: str,
+        approval: BrowserNavigationReconciliationApproval,
+    ) -> BrowserNavigationReconciliationResult:
+        preview, observation, evidence = self._prove_navigation_reconciliation(
+            session_id, approval.operation_id
+        )
+        if preview.review_fingerprint != approval.expected_review_fingerprint:
+            raise BrowserReconciliationUnprovenError(
+                "Browser navigation reconciliation changed after review"
+            )
+        saved = self._repository.save_observation(
+            session_id, BrowserSessionState.USER_TAKEOVER, observation
+        )
+        self._save_checkpoint(saved, observation, pending_action=None)
+        try:
+            effect = self._external_effects.reconcile_browser_navigation(
+                preview.operation_id,
+                preview.attempt_id,
+                evidence_reference=f"browser-action:{preview.attempt_id}",
+                evidence=evidence,
+                page_fingerprint=observation.page_fingerprint,
+            )
+        except (ExternalEffectConflictError, ValueError) as error:
+            raise BrowserReconciliationUnprovenError(
+                "Browser navigation reconciliation ownership changed"
+            ) from error
+        reconciliation = effect.reconciliation
+        if (
+            reconciliation is None
+            or reconciliation.status is not ExternalEffectReconciliationStatus.CONFIRMED_APPLIED
+            or reconciliation.reconciled_at is None
+        ):  # pragma: no cover - repository contract
+            raise RuntimeError("Browser navigation reconciliation did not become durable")
+        return BrowserNavigationReconciliationResult(
+            operation_id=preview.operation_id,
+            attempt_id=preview.attempt_id,
+            session_id=session_id,
+            source_page_type=preview.source_page_type,
+            result_page_type=preview.result_page_type,
+            result_page_fingerprint=observation.page_fingerprint,
+            reconciliation_kind=(
+                ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED.value
+            ),
+            reconciled_at=reconciliation.reconciled_at,
+            notice=(
+                "A recognized later Greenhouse form stage was observed and recorded. "
+                "The original uncertain navigation remains immutable and was not retried."
+            ),
+        )
+
     def stage_encrypted_upload(
         self,
         session_id: str,
@@ -1041,6 +1140,244 @@ class BrowserRuntimeService:
         if record is None:
             raise LookupError(f"Browser session {session_id} was not found")
         return record
+
+    def _prove_navigation_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> tuple[
+        BrowserNavigationReconciliationPreview,
+        BrowserObservation,
+        dict[str, object],
+    ]:
+        session = self._record(session_id)
+        if session.state is not BrowserSessionState.USER_TAKEOVER:
+            raise BrowserSessionStateError(
+                "Browser navigation reconciliation requires user takeover"
+            )
+        effect = self._external_effects.get(operation_id)
+        if (
+            effect is None
+            or effect.operation.kind is not ExternalEffectKind.BROWSER_ACTION
+            or effect.operation.subject_type != "browser_session"
+            or effect.operation.subject_id != session_id
+            or effect.operation.status is not ExternalEffectStatus.UNCERTAIN
+            or effect.reconciliation is None
+            or effect.reconciliation.kind
+            is not ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED
+            or effect.reconciliation.status is not ExternalEffectReconciliationStatus.AVAILABLE
+            or effect.reconciliation.policy_version
+            != ExternalEffectService.NAVIGATION_RECONCILIATION_POLICY_VERSION
+            or len(effect.attempts) != 1
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "External effect is not an available uncertain reviewed navigation"
+            )
+        attempt = effect.attempts[0]
+        intent = effect.reconciliation
+        if (
+            attempt.id != intent.attempt_id
+            or attempt.status is not ExternalEffectStatus.UNCERTAIN
+            or attempt.provider != "playwright"
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser navigation attempt does not match its durable intent"
+            )
+        actions = [
+            item for item in self._repository.list_actions(session_id) if item.id == attempt.id
+        ]
+        if len(actions) != 1:
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain reviewed navigation has no unique local action evidence"
+            )
+        action_result = actions[0]
+        action = action_result.action
+        try:
+            payload = self._external_effects.browser_navigation_reconciliation_payload(intent)
+        except ValueError:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser navigation reconciliation intent is invalid"
+            ) from None
+        if set(payload) != {
+            "action_kind",
+            "control_key",
+            "locator",
+            "request_fingerprint",
+            "source_form_review_fingerprint",
+            "source_origin",
+            "source_page_type",
+            "source_stage",
+        }:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser navigation reconciliation intent is invalid"
+            )
+        try:
+            action_kind = BrowserActionKind(str(payload["action_kind"]))
+            locator_value = payload["locator"]
+            if not isinstance(locator_value, dict):
+                raise ValueError
+            locator = SemanticLocator.model_validate(locator_value)
+            source_stage = GreenhouseFormStage(str(payload["source_stage"]))
+            source_page_type = str(payload["source_page_type"])
+            source_origin = str(payload["source_origin"])
+            source_form_review = str(payload["source_form_review_fingerprint"])
+            control_key = str(payload["control_key"])
+        except (TypeError, ValueError):
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser navigation reconciliation intent is invalid"
+            ) from None
+        expected_precondition = BrowserVerification(
+            kind=VerificationKind.LOCATOR_VISIBLE,
+            locator=locator,
+        )
+        if (
+            action_kind is not BrowserActionKind.CLICK
+            or action.kind is not action_kind
+            or action.locator != locator
+            or action.preconditions != [expected_precondition]
+            or action.intended_result != _GREENHOUSE_NAVIGATION_INTENT
+            or action.verification.kind is not VerificationKind.NONE
+            or action.permission is not BrowserPermission.ELEVATED
+            or action.confirmation is not ConfirmationState.CONFIRMED
+            or action.sensitive_value
+            or action.value is not None
+            or action.file_path is not None
+            or action.url is not None
+            or action.coordinates is not None
+            or action_result.verified
+            or action_result.error is None
+            or attempt.target_code != BrowserActionKind.CLICK.value
+            or payload["request_fingerprint"] != effect.operation.request_fingerprint
+            or not source_page_type
+            or len(source_page_type) > 100
+            or _GREENHOUSE_PAGE_STAGES.get(source_page_type) is not source_stage
+            or len(source_form_review) != 64
+            or any(value not in "0123456789abcdef" for value in source_form_review)
+            or not control_key
+            or len(control_key) > 200
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser action is outside the reviewed navigation contract"
+            )
+        try:
+            observation = BrowserObservation.model_validate(
+                self._worker.call("observe", {"session_id": session_id}, timeout_seconds=75)
+            )
+            self._validate_live_observation(session, observation)
+            assessment = GreenhouseFormContractService().assess(observation)
+        except (TypeError, ValueError, BrowserPolicyError, GreenhouseFormContractError):
+            raise BrowserReconciliationUnprovenError(
+                "Current page does not prove a recognized reviewed navigation result"
+            ) from None
+        if (
+            observation.origin != source_origin
+            or observation.page_fingerprint == intent.source_page_fingerprint
+            or assessment.page_type != observation.page_type
+            or assessment.stage is GreenhouseFormStage.CONFIRMATION
+            or _GREENHOUSE_STAGE_ORDER[assessment.stage] <= _GREENHOUSE_STAGE_ORDER[source_stage]
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Current page does not prove a recognized later Greenhouse form stage"
+            )
+        evidence: dict[str, object] = {
+            "policy_version": (ExternalEffectService.NAVIGATION_RECONCILIATION_POLICY_VERSION),
+            "operation_id": effect.operation.id,
+            "attempt_id": attempt.id,
+            "session_id": session_id,
+            "action_kind": action_kind.value,
+            "control_key": control_key,
+            "request_fingerprint": effect.operation.request_fingerprint,
+            "source_page_fingerprint": intent.source_page_fingerprint,
+            "source_page_type": source_page_type,
+            "source_stage": source_stage.value,
+            "result_page_fingerprint": observation.page_fingerprint,
+            "result_page_type": observation.page_type,
+            "result_stage": assessment.stage.value,
+            "origin": observation.origin,
+        }
+        review_fingerprint = self._external_effects.request_fingerprint(evidence)
+        return (
+            BrowserNavigationReconciliationPreview(
+                operation_id=effect.operation.id,
+                attempt_id=attempt.id,
+                session_id=session_id,
+                source_page_type=source_page_type,
+                result_page_type=observation.page_type,
+                result_page_fingerprint=observation.page_fingerprint,
+                review_fingerprint=review_fingerprint,
+                notice=(
+                    "A recognized later Greenhouse form stage is currently observed. "
+                    "Approval records reconciliation without repeating the navigation."
+                ),
+            ),
+            observation,
+            evidence,
+        )
+
+    @staticmethod
+    def _navigation_reconciliation_intent(
+        action: BrowserAction, observation: BrowserObservation | None
+    ) -> dict[str, object] | None:
+        if action.intended_result != _GREENHOUSE_NAVIGATION_INTENT:
+            return None
+        if observation is None:
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse navigation requires a current browser observation"
+            )
+        try:
+            assessment = GreenhouseFormContractService().assess(observation)
+        except GreenhouseFormContractError:
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse navigation requires a current recognized form stage"
+            ) from None
+        expected_precondition = (
+            BrowserVerification(
+                kind=VerificationKind.LOCATOR_VISIBLE,
+                locator=action.locator,
+            )
+            if action.locator is not None
+            else None
+        )
+        controls = [
+            item
+            for item in assessment.controls
+            if item.control_key == assessment.navigation_control_key
+            and item.action is GreenhouseFormAction.REVIEW_NAVIGATION
+        ]
+        observed = [
+            item
+            for item in observation.controls
+            if item.control_key == assessment.navigation_control_key
+            and item.locator == action.locator
+        ]
+        if (
+            action.kind is not BrowserActionKind.CLICK
+            or action.locator is None
+            or expected_precondition is None
+            or action.preconditions != [expected_precondition]
+            or action.verification.kind is not VerificationKind.NONE
+            or action.permission is not BrowserPermission.ELEVATED
+            or action.confirmation is not ConfirmationState.CONFIRMED
+            or action.sensitive_value
+            or action.value is not None
+            or action.file_path is not None
+            or action.url is not None
+            or action.coordinates is not None
+            or not assessment.ready_to_advance
+            or len(controls) != 1
+            or len(observed) != 1
+            or assessment.navigation_control_key is None
+        ):
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse navigation is outside the reconciliation contract"
+            )
+        return {
+            "action_kind": action.kind.value,
+            "control_key": assessment.navigation_control_key,
+            "locator": action.locator.model_dump(mode="json"),
+            "source_form_review_fingerprint": assessment.review_fingerprint,
+            "source_origin": observation.origin,
+            "source_page_type": observation.page_type,
+            "source_stage": assessment.stage.value,
+        }
 
     def _prove_field_reconciliation(
         self, session_id: str, operation_id: str

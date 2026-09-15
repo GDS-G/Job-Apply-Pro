@@ -787,8 +787,6 @@ class ExternalEffectRepository:
             reconciliation_kind=(
                 ExternalEffectReconciliationKind(reconciliation.kind)
                 if reconciliation is not None
-                and reconciliation.status
-                == ExternalEffectReconciliationStatus.CONFIRMED_APPLIED.value
                 else None
             ),
             reconciled_at=(

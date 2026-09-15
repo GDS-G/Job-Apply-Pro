@@ -48,6 +48,9 @@ const bridge: DesktopBridge = {
     reconcileBrowserField: async () => {
       throw new Error("Not implemented in this test.");
     },
+    reconcileBrowserNavigation: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     getCandidateKnowledge: async (profileId) => ({
       profile_id: profileId,
       documents: [],

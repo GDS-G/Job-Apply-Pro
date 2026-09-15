@@ -1,5 +1,9 @@
 # Windows release and rollback runbook
 
+## v0.76 candidate-specific checks
+
+For Reviewed Browser Navigation Reconciliation `v0.76.0-alpha.1`, verify the frozen candidate proves the pre-dispatch intent, response-loss path, later-stage reconciliation, same-page/confirmation refusal, approval-time reproof, immutable uncertain history, authenticated API, strict client/IPC identifiers, cancel-default native review, kind-specific renderer control, and restore-history validation. Package and protocol checks must run against the exact delivered copies. Do not promote a changed page or URL as success, enable production Greenhouse, or transfer v0.75 evidence. Signed, physical, update/rollback, and authorized live-portal checks remain separate release-owner gates.
+
 ## Release prerequisites
 
 - Clean protected release branch and version synchronized across `VERSION`, `build.json`, Python, npm packages, UI, health responses, and changelog.

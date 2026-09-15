@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   BrowserFieldReconciliationPreview,
   BrowserFieldReconciliationResult,
+  BrowserNavigationReconciliationPreview,
+  BrowserNavigationReconciliationResult,
   BrowserProfileCleanupPreview,
   BrowserProfileCleanupResult,
   BrowserProfileRetirementPreview,
@@ -63,6 +65,27 @@ const result: BrowserFieldReconciliationResult = {
   reconciled_at: "2026-09-15T18:00:00+00:00",
   notice:
     "The verified field outcome was recorded without repeating the action.",
+};
+const navigationPreview: BrowserNavigationReconciliationPreview = {
+  operation_id: operationId,
+  attempt_id: attemptId,
+  session_id: sessionId,
+  source_page_type: "APPLICATION_FORM",
+  result_page_type: "DOCUMENT_UPLOAD",
+  result_page_fingerprint: "greenhouse-documents-v2",
+  review_fingerprint: "d".repeat(64),
+  notice: "A recognized later Greenhouse form stage is visible.",
+};
+const navigationResult: BrowserNavigationReconciliationResult = {
+  operation_id: operationId,
+  attempt_id: attemptId,
+  session_id: sessionId,
+  source_page_type: navigationPreview.source_page_type,
+  result_page_type: navigationPreview.result_page_type,
+  result_page_fingerprint: navigationPreview.result_page_fingerprint,
+  reconciliation_kind: "BROWSER_NAVIGATION_CONFIRMED",
+  reconciled_at: "2026-09-15T19:00:00+00:00",
+  notice: "Reviewed navigation was recorded without retrying it.",
 };
 const retirementPreview: BrowserProfileRetirementPreview = {
   engine: "msedge",
@@ -165,6 +188,34 @@ describe("browser field reconciliation backend client", () => {
     );
   });
 
+  it("previews and approves reviewed navigation through its separate routes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json(navigationPreview))
+      .mockResolvedValueOnce(Response.json(navigationResult));
+
+    await expect(
+      client.previewBrowserNavigationReconciliation(operationId, sessionId),
+    ).resolves.toEqual(navigationPreview);
+    await expect(
+      client.approveBrowserNavigationReconciliation(navigationPreview),
+    ).resolves.toEqual(navigationResult);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `http://127.0.0.1:8765/browser/sessions/${sessionId}/navigation-reconciliations/${operationId}/preview`,
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      `http://127.0.0.1:8765/browser/sessions/${sessionId}/navigation-reconciliations/${operationId}/approve`,
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        operation_id: operationId,
+        expected_review_fingerprint: "d".repeat(64),
+        confirmation_phrase: "RECONCILE REVIEWED NAVIGATION",
+      }),
+    });
+  });
+
   it("lists and reviews browser profiles through authenticated routes", async () => {
     fetchMock
       .mockResolvedValueOnce(Response.json([retirementPreview]))
@@ -252,6 +303,10 @@ describe("browser field reconciliation IPC boundary", () => {
       vi.fn<BackendClient["previewBrowserFieldReconciliation"]>(),
     approveBrowserFieldReconciliation:
       vi.fn<BackendClient["approveBrowserFieldReconciliation"]>(),
+    previewBrowserNavigationReconciliation:
+      vi.fn<BackendClient["previewBrowserNavigationReconciliation"]>(),
+    approveBrowserNavigationReconciliation:
+      vi.fn<BackendClient["approveBrowserNavigationReconciliation"]>(),
     listBrowserProfiles: vi.fn<BackendClient["listBrowserProfiles"]>(),
     previewBrowserProfileRetirement:
       vi.fn<BackendClient["previewBrowserProfileRetirement"]>(),
@@ -274,6 +329,15 @@ describe("browser field reconciliation IPC boundary", () => {
     return listener({ sender } as IpcMainInvokeEvent, ...args);
   }
 
+  async function invokeNavigation(...args: unknown[]): Promise<unknown> {
+    const listener = handlers.get("workbench:reconcile-browser-navigation");
+    if (!listener)
+      throw new Error(
+        "Browser navigation reconciliation IPC was not registered",
+      );
+    return listener({ sender } as IpcMainInvokeEvent, ...args);
+  }
+
   beforeEach(() => {
     handlers.clear();
     vi.clearAllMocks();
@@ -281,6 +345,12 @@ describe("browser field reconciliation IPC boundary", () => {
     showMessageBox.mockResolvedValue({ response: 0 });
     client.previewBrowserFieldReconciliation.mockResolvedValue(preview);
     client.approveBrowserFieldReconciliation.mockResolvedValue(result);
+    client.previewBrowserNavigationReconciliation.mockResolvedValue(
+      navigationPreview,
+    );
+    client.approveBrowserNavigationReconciliation.mockResolvedValue(
+      navigationResult,
+    );
     client.listBrowserProfiles.mockResolvedValue([retirementPreview]);
     client.previewBrowserProfileRetirement.mockResolvedValue(retirementPreview);
     client.approveBrowserProfileRetirement.mockResolvedValue(retirementResult);
@@ -329,6 +399,38 @@ describe("browser field reconciliation IPC boundary", () => {
     expect(
       client.approveBrowserFieldReconciliation,
     ).toHaveBeenCalledExactlyOnceWith(preview);
+  });
+
+  it("keeps uncertain navigation unresolved when the native warning is canceled", async () => {
+    await expect(invokeNavigation(operationId, sessionId)).resolves.toBeNull();
+
+    expect(
+      client.previewBrowserNavigationReconciliation,
+    ).toHaveBeenCalledExactlyOnceWith(operationId, sessionId);
+    expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+      buttons: ["Cancel", "Record navigation outcome"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    expect(
+      client.approveBrowserNavigationReconciliation,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("approves only the immutable navigation preview after explicit choice", async () => {
+    showMessageBox.mockResolvedValue({ response: 1 });
+
+    await expect(invokeNavigation(operationId, sessionId)).resolves.toEqual(
+      navigationResult,
+    );
+
+    expect(
+      client.previewBrowserNavigationReconciliation,
+    ).toHaveBeenCalledExactlyOnceWith(operationId, sessionId);
+    expect(
+      client.approveBrowserNavigationReconciliation,
+    ).toHaveBeenCalledExactlyOnceWith(navigationPreview);
   });
 
   it("validates profile retirement input before preview or dialog", async () => {

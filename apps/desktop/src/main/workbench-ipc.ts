@@ -848,6 +848,34 @@ export function registerWorkbenchIpc(
       return supervisor.client.approveBrowserFieldReconciliation(preview);
     },
   );
+  ipcMain.handle(
+    "workbench:reconcile-browser-navigation",
+    async (event, operationValue: unknown, sessionValue: unknown) => {
+      const operationId = uuid(operationValue, "External effect id");
+      const sessionId = uuid(sessionValue, "Browser session id");
+      const preview =
+        await supervisor.client.previewBrowserNavigationReconciliation(
+          operationId,
+          sessionId,
+        );
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        type: "warning" as const,
+        title: "Record reviewed navigation outcome?",
+        message: "A recognized later Greenhouse form stage is visible now.",
+        detail: `From: ${preview.source_page_type}\nTo: ${preview.result_page_type}\nSession: ${preview.session_id}\nResult page fingerprint: ${preview.result_page_fingerprint}\nReview fingerprint: ${preview.review_fingerprint}\n\nThis records that the prior uncertain navigation reached a later reviewed form stage. It does not click, retry, upload, or submit.`,
+        buttons: ["Cancel", "Record navigation outcome"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveBrowserNavigationReconciliation(preview);
+    },
+  );
   ipcMain.handle("knowledge:get", (_event, value: unknown) =>
     supervisor.client.getCandidateKnowledge(
       requiredText(value, "Profile id", 100),

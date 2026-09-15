@@ -17,6 +17,9 @@ from job_apply_pro.domain.browser import (
     BrowserFieldReconciliationApproval,
     BrowserFieldReconciliationPreview,
     BrowserFieldReconciliationResult,
+    BrowserNavigationReconciliationApproval,
+    BrowserNavigationReconciliationPreview,
+    BrowserNavigationReconciliationResult,
     BrowserProfileCleanupApproval,
     BrowserProfileCleanupPreview,
     BrowserProfileCleanupResult,
@@ -334,6 +337,42 @@ def approve_browser_field_reconciliation(
         )
     try:
         return service.approve_field_reconciliation(session_id, approval)
+    except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/sessions/{session_id}/navigation-reconciliations/{operation_id}/preview",
+    response_model=BrowserNavigationReconciliationPreview,
+)
+def preview_browser_navigation_reconciliation(
+    session_id: BrowserReconciliationId,
+    operation_id: BrowserReconciliationId,
+    service: BrowserServiceDependency,
+) -> BrowserNavigationReconciliationPreview:
+    try:
+        return service.preview_navigation_reconciliation(session_id, operation_id)
+    except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/sessions/{session_id}/navigation-reconciliations/{operation_id}/approve",
+    response_model=BrowserNavigationReconciliationResult,
+)
+def approve_browser_navigation_reconciliation(
+    session_id: BrowserReconciliationId,
+    operation_id: BrowserReconciliationId,
+    approval: BrowserNavigationReconciliationApproval,
+    service: BrowserServiceDependency,
+) -> BrowserNavigationReconciliationResult:
+    if approval.operation_id != operation_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Browser navigation reconciliation operation id does not match the route",
+        )
+    try:
+        return service.approve_navigation_reconciliation(session_id, approval)
     except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
         raise _http_error(error) from error
 

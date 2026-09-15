@@ -21,6 +21,8 @@ import type {
   BrowserEngine,
   BrowserFieldReconciliationPreview,
   BrowserFieldReconciliationResult,
+  BrowserNavigationReconciliationPreview,
+  BrowserNavigationReconciliationResult,
   BrowserProfileCleanupPreview,
   BrowserProfileCleanupResult,
   BrowserProfileRetirementPreview,
@@ -333,6 +335,32 @@ export class BackendClient {
           operation_id: preview.operation_id,
           expected_review_fingerprint: preview.review_fingerprint,
           confirmation_phrase: "RECONCILE VERIFIED FIELD",
+        }),
+      },
+    );
+  }
+
+  previewBrowserNavigationReconciliation(
+    operationId: string,
+    sessionId: string,
+  ): Promise<BrowserNavigationReconciliationPreview> {
+    return this.request(
+      `/browser/sessions/${encodeURIComponent(sessionId)}/navigation-reconciliations/${encodeURIComponent(operationId)}/preview`,
+      { method: "POST" },
+    );
+  }
+
+  approveBrowserNavigationReconciliation(
+    preview: BrowserNavigationReconciliationPreview,
+  ): Promise<BrowserNavigationReconciliationResult> {
+    return this.request(
+      `/browser/sessions/${encodeURIComponent(preview.session_id)}/navigation-reconciliations/${encodeURIComponent(preview.operation_id)}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          operation_id: preview.operation_id,
+          expected_review_fingerprint: preview.review_fingerprint,
+          confirmation_phrase: "RECONCILE REVIEWED NAVIGATION",
         }),
       },
     );

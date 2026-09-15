@@ -852,6 +852,30 @@ export function App() {
     }
   }
 
+  async function reconcileBrowserNavigation(
+    operationId: string,
+    sessionId: string,
+  ) {
+    setBusy(true);
+    setReconciliationMessage(null);
+    try {
+      const result =
+        await window.jobApplyPro.workbench.reconcileBrowserNavigation(
+          operationId,
+          sessionId,
+        );
+      if (result) {
+        setReconciliationMessage(result.notice);
+        await refreshWorkflows();
+      }
+      setError(null);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importResume(form: FormData) {
     if (!profileId) return;
     const input: CandidateDocumentImportInput = {
@@ -1821,7 +1845,7 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Profile Quarantine Recovery v0.75.0-alpha.1
+                Reviewed Browser Navigation Reconciliation v0.76.0-alpha.1
               </strong>
               <p>
                 Persistent portal data can now be retired only after an exact
@@ -4256,6 +4280,10 @@ export function App() {
                       {effect.reconciliation_available &&
                         effect.kind === "BROWSER_ACTION" &&
                         effect.subject_type === "browser_session" &&
+                        (effect.reconciliation_kind ===
+                          "BROWSER_FIELD_VALUE_CONFIRMED" ||
+                          effect.reconciliation_kind ===
+                            "BROWSER_NAVIGATION_CONFIRMED") &&
                         browserSessions.some(
                           (session) => session.id === effect.subject_id,
                         ) && (
@@ -4263,15 +4291,24 @@ export function App() {
                             className="button button--secondary"
                             disabled={busy}
                             onClick={() =>
-                              void reconcileBrowserField(
-                                effect.id,
-                                effect.subject_id,
-                              )
+                              void (effect.reconciliation_kind ===
+                              "BROWSER_NAVIGATION_CONFIRMED"
+                                ? reconcileBrowserNavigation(
+                                    effect.id,
+                                    effect.subject_id,
+                                  )
+                                : reconcileBrowserField(
+                                    effect.id,
+                                    effect.subject_id,
+                                  ))
                             }
                             type="button"
                           >
-                            <ShieldCheck size={15} /> Verify current field
-                            outcome
+                            <ShieldCheck size={15} />
+                            {effect.reconciliation_kind ===
+                            "BROWSER_NAVIGATION_CONFIRMED"
+                              ? "Verify current form stage"
+                              : "Verify current field outcome"}
                           </button>
                         )}
                     </article>

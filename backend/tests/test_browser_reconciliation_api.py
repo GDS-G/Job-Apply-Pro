@@ -11,6 +11,8 @@ from job_apply_pro.domain.browser import (
     BrowserActionKind,
     BrowserFieldReconciliationPreview,
     BrowserFieldReconciliationResult,
+    BrowserNavigationReconciliationPreview,
+    BrowserNavigationReconciliationResult,
     VerificationKind,
 )
 from job_apply_pro.main import create_app
@@ -128,3 +130,72 @@ def test_reconciliation_api_rejects_malformed_path_ids_before_service_dispatch(
         "detail": "Request validation failed; check required fields and supported values"
     }
     service.preview_field_reconciliation.assert_not_called()
+
+
+def test_navigation_reconciliation_api_previews_then_approves_exact_review(
+    reconciliation_api: tuple[TestClient, Mock],
+) -> None:
+    client, service = reconciliation_api
+    preview = BrowserNavigationReconciliationPreview(
+        operation_id=_OPERATION_ID,
+        attempt_id=_ATTEMPT_ID,
+        session_id=_SESSION_ID,
+        source_page_type="APPLICATION_FORM",
+        result_page_type="DOCUMENT_UPLOAD",
+        result_page_fingerprint="greenhouse-documents-v2",
+        review_fingerprint="b" * 64,
+        notice="A recognized later form stage is visible.",
+    )
+    result = BrowserNavigationReconciliationResult(
+        operation_id=_OPERATION_ID,
+        attempt_id=_ATTEMPT_ID,
+        session_id=_SESSION_ID,
+        source_page_type=preview.source_page_type,
+        result_page_type=preview.result_page_type,
+        result_page_fingerprint=preview.result_page_fingerprint,
+        reconciliation_kind="BROWSER_NAVIGATION_CONFIRMED",
+        reconciled_at=datetime(2026, 9, 15, 19, tzinfo=UTC),
+        notice="Reviewed navigation outcome recorded without retrying it.",
+    )
+    service.preview_navigation_reconciliation.return_value = preview
+    service.approve_navigation_reconciliation.return_value = result
+    path = f"/api/v1/browser/sessions/{_SESSION_ID}/navigation-reconciliations/{_OPERATION_ID}"
+
+    reviewed = client.post(f"{path}/preview")
+    assert reviewed.status_code == 200
+    assert reviewed.json() == preview.model_dump(mode="json")
+    service.preview_navigation_reconciliation.assert_called_once_with(_SESSION_ID, _OPERATION_ID)
+
+    approved = client.post(
+        f"{path}/approve",
+        json={
+            "operation_id": _OPERATION_ID,
+            "expected_review_fingerprint": preview.review_fingerprint,
+            "confirmation_phrase": "RECONCILE REVIEWED NAVIGATION",
+        },
+    )
+    assert approved.status_code == 200
+    assert approved.json() == result.model_dump(mode="json")
+    approval = service.approve_navigation_reconciliation.call_args.args[1]
+    assert approval.operation_id == _OPERATION_ID
+    assert approval.confirmation_phrase == "RECONCILE REVIEWED NAVIGATION"
+
+
+def test_navigation_reconciliation_api_rejects_route_body_mismatch(
+    reconciliation_api: tuple[TestClient, Mock],
+) -> None:
+    client, service = reconciliation_api
+    response = client.post(
+        f"/api/v1/browser/sessions/{_SESSION_ID}/navigation-reconciliations/{_OPERATION_ID}/approve",
+        json={
+            "operation_id": "05d34e54-311a-47b4-8bd1-8d35d0334956",
+            "expected_review_fingerprint": "b" * 64,
+            "confirmation_phrase": "RECONCILE REVIEWED NAVIGATION",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Browser navigation reconciliation operation id does not match the route"
+    }
+    service.approve_navigation_reconciliation.assert_not_called()

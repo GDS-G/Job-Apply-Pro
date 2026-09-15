@@ -12,9 +12,12 @@ from job_apply_pro.browser.client import BrowserWorkerUnavailableError
 from job_apply_pro.domain.browser import (
     BrowserAction,
     BrowserActionKind,
+    BrowserControlKind,
     BrowserEngine,
     BrowserFieldReconciliationApproval,
+    BrowserNavigationReconciliationApproval,
     BrowserObservation,
+    BrowserObservedControl,
     BrowserRetryPolicy,
     BrowserSessionRecord,
     BrowserSessionState,
@@ -122,9 +125,11 @@ def _service(
     session: Session,
     tmp_path: Path,
     outcome: dict[str, object] | Exception,
+    *,
+    observation: BrowserObservation | None = None,
 ) -> tuple[BrowserRuntimeService, ExternalEffectService, _Worker]:
     now = datetime.now(UTC)
-    observation = _observation()
+    observation = observation or _observation()
     BrowserRuntimeRepository(session).add(
         BrowserSessionRecord(
             id="00000000-0000-4000-8000-000000000101",
@@ -195,6 +200,73 @@ def _field_action() -> BrowserAction:
         permission="ELEVATED",
         confirmation=ConfirmationState.CONFIRMED,
         sensitive_value=True,
+    )
+
+
+def _greenhouse_observation(
+    *,
+    page_type: str,
+    page_fingerprint: str,
+    include_navigation: bool,
+) -> BrowserObservation:
+    locator = SemanticLocator(
+        strategy=LocatorStrategy.LABEL,
+        value="Continue",
+        exact=True,
+    )
+    controls = (
+        [
+            BrowserObservedControl(
+                index=0,
+                control_key="greenhouse-continue",
+                kind=BrowserControlKind.BUTTON,
+                tag="button",
+                label="Continue",
+                label_source="TEXT",
+                text="Continue",
+                visible=True,
+                locator=locator,
+            )
+        ]
+        if include_navigation
+        else []
+    )
+    return BrowserObservation(
+        sequence=1,
+        url="https://boards.greenhouse.io/example/jobs/123",
+        title="Synthetic Greenhouse fixture",
+        origin="https://boards.greenhouse.io",
+        page_type=page_type,
+        page_fingerprint=page_fingerprint,
+        tabs=[],
+        accessibility_snapshot="",
+        visible_text="Synthetic fixture",
+        controls=controls,
+        validation_errors=[],
+        modals=[],
+        console_errors=[],
+        network_failures=[],
+        upload_status=[],
+        download_status=[],
+        screenshot_path="fixture.png",
+        observed_at=datetime.now(UTC),
+    )
+
+
+def _navigation_action() -> BrowserAction:
+    locator = SemanticLocator(
+        strategy=LocatorStrategy.LABEL,
+        value="Continue",
+        exact=True,
+    )
+    return BrowserAction(
+        kind=BrowserActionKind.CLICK,
+        locator=locator,
+        preconditions=[BrowserVerification(kind=VerificationKind.LOCATOR_VISIBLE, locator=locator)],
+        intended_result="Advance the exact reviewed Greenhouse form by one control",
+        verification=BrowserVerification(kind=VerificationKind.NONE),
+        permission="ELEVATED",
+        confirmation=ConfirmationState.CONFIRMED,
     )
 
 
@@ -441,6 +513,139 @@ def test_uncertain_non_field_action_has_no_reconciliation_authority(
         service.preview_field_reconciliation(session_id, operation.id)
     assert effects.has_unresolved_subject("browser_session", session_id)
     assert worker.methods == ["execute"]
+
+
+def test_uncertain_navigation_is_reconciled_only_by_a_later_reviewed_stage(
+    session: Session, tmp_path: Path
+) -> None:
+    source = _greenhouse_observation(
+        page_type="APPLICATION_FORM",
+        page_fingerprint="greenhouse-application-v1",
+        include_navigation=True,
+    )
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=source,
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _navigation_action())
+    operation = effects.list_public()[0]
+    assert operation.reconciliation_available
+    assert operation.reconciliation_kind == "BROWSER_NAVIGATION_CONFIRMED"
+
+    later = _greenhouse_observation(
+        page_type="DOCUMENT_UPLOAD",
+        page_fingerprint="greenhouse-documents-v2",
+        include_navigation=False,
+    )
+    worker.result = later.model_dump(mode="json")
+    preview = service.preview_navigation_reconciliation(session_id, operation.id)
+    result = service.approve_navigation_reconciliation(
+        session_id,
+        BrowserNavigationReconciliationApproval(
+            operation_id=operation.id,
+            expected_review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="RECONCILE REVIEWED NAVIGATION",
+        ),
+    )
+
+    assert preview.source_page_type == "APPLICATION_FORM"
+    assert preview.result_page_type == "DOCUMENT_UPLOAD"
+    assert result.reconciliation_kind == "BROWSER_NAVIGATION_CONFIRMED"
+    assert result.result_page_fingerprint == "greenhouse-documents-v2"
+    assert worker.methods == ["execute", "observe", "observe"]
+    assert not effects.has_unresolved_subject("browser_session", session_id)
+    record = effects.get(operation.id)
+    assert record is not None
+    assert record.operation.status is ExternalEffectStatus.UNCERTAIN
+
+
+@pytest.mark.parametrize(
+    ("page_type", "page_fingerprint"),
+    [
+        ("APPLICATION_FORM", "greenhouse-application-v1"),
+        ("CONFIRMATION", "greenhouse-confirmation-v2"),
+    ],
+)
+def test_navigation_reconciliation_refuses_same_or_confirmation_stage(
+    session: Session,
+    tmp_path: Path,
+    page_type: str,
+    page_fingerprint: str,
+) -> None:
+    source = _greenhouse_observation(
+        page_type="APPLICATION_FORM",
+        page_fingerprint="greenhouse-application-v1",
+        include_navigation=True,
+    )
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=source,
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _navigation_action())
+    operation = effects.list_public()[0]
+    worker.result = _greenhouse_observation(
+        page_type=page_type,
+        page_fingerprint=page_fingerprint,
+        include_navigation=False,
+    ).model_dump(mode="json")
+
+    with pytest.raises(BrowserSessionStateError, match="does not prove"):
+        service.preview_navigation_reconciliation(session_id, operation.id)
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe"]
+
+
+def test_navigation_reconciliation_approval_rechecks_current_stage(
+    session: Session, tmp_path: Path
+) -> None:
+    source = _greenhouse_observation(
+        page_type="APPLICATION_FORM",
+        page_fingerprint="greenhouse-application-v1",
+        include_navigation=True,
+    )
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=source,
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _navigation_action())
+    operation = effects.list_public()[0]
+    worker.result = _greenhouse_observation(
+        page_type="DOCUMENT_UPLOAD",
+        page_fingerprint="greenhouse-documents-v2",
+        include_navigation=False,
+    ).model_dump(mode="json")
+    preview = service.preview_navigation_reconciliation(session_id, operation.id)
+    worker.result = _greenhouse_observation(
+        page_type="QUESTIONNAIRE",
+        page_fingerprint="greenhouse-questionnaire-v3",
+        include_navigation=False,
+    ).model_dump(mode="json")
+
+    with pytest.raises(BrowserSessionStateError, match="changed after review"):
+        service.approve_navigation_reconciliation(
+            session_id,
+            BrowserNavigationReconciliationApproval(
+                operation_id=operation.id,
+                expected_review_fingerprint=preview.review_fingerprint,
+                confirmation_phrase="RECONCILE REVIEWED NAVIGATION",
+            ),
+        )
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe", "observe"]
 
 
 def test_startup_recovery_marks_interrupted_browser_session_for_takeover(

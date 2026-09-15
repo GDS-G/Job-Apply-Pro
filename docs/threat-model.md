@@ -1,5 +1,9 @@
 # Production threat model
 
+## Reviewed navigation reconciliation boundary
+
+Reviewed Browser Navigation Reconciliation `v0.76.0-alpha.1` does not infer success from a changed URL or page alone. Reconciliation authority must exist before dispatch and is limited to the exact reviewed Greenhouse navigation contract. Encrypted intent binds operation, attempt, request, control, semantic locator, source origin/page/stage, form-review fingerprint, and source page fingerprint. Both preview and approval independently perform a read-only observation and require the same origin plus a different, recognized, strictly later non-confirmation stage. Renderer input cannot choose the evidence or target stage. The original effect remains immutable and `UNCERTAIN`; reconciliation never replays a click and never grants upload or submit authority. Same-page, earlier/equal, confirmation, unknown, foreign-origin, stale, generic-click, and changed-review cases fail closed.
+
 ## Protected assets
 
 Candidate identity and history, resumes, answers, browser sessions, mail/calendar data, application evidence, encryption keys, API/provider credentials, backups, and release artifacts require protection. Availability of local recovery data and integrity of submission evidence are as important as confidentiality.

@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Profile Quarantine Recovery",
-  version: "0.75.0-alpha.1",
+  name: "Reviewed Browser Navigation Reconciliation",
+  version: "0.76.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -542,6 +542,29 @@ export interface BrowserFieldReconciliationResult {
   action_kind: BrowserActionKind;
   page_fingerprint: string;
   reconciliation_kind: "BROWSER_FIELD_VALUE_CONFIRMED";
+  reconciled_at: string;
+  notice: string;
+}
+
+export interface BrowserNavigationReconciliationPreview {
+  operation_id: string;
+  attempt_id: string;
+  session_id: string;
+  source_page_type: string;
+  result_page_type: string;
+  result_page_fingerprint: string;
+  review_fingerprint: string;
+  notice: string;
+}
+
+export interface BrowserNavigationReconciliationResult {
+  operation_id: string;
+  attempt_id: string;
+  session_id: string;
+  source_page_type: string;
+  result_page_type: string;
+  result_page_fingerprint: string;
+  reconciliation_kind: "BROWSER_NAVIGATION_CONFIRMED";
   reconciled_at: string;
   notice: string;
 }
@@ -1456,7 +1479,8 @@ export type ExternalEffectKind =
 export type ExternalEffectStatus =
   "PREPARED" | "DISPATCHING" | "CONFIRMED" | "FAILED" | "UNCERTAIN";
 
-export type ExternalEffectReconciliationKind = "BROWSER_FIELD_VALUE_CONFIRMED";
+export type ExternalEffectReconciliationKind =
+  "BROWSER_FIELD_VALUE_CONFIRMED" | "BROWSER_NAVIGATION_CONFIRMED";
 
 export interface ExternalEffectMetrics {
   total: number;
@@ -2150,6 +2174,10 @@ export interface DesktopBridge {
       operationId: string,
       sessionId: string,
     ): Promise<BrowserFieldReconciliationResult | null>;
+    reconcileBrowserNavigation(
+      operationId: string,
+      sessionId: string,
+    ): Promise<BrowserNavigationReconciliationResult | null>;
     getCandidateKnowledge(
       profileId: string,
     ): Promise<CandidateKnowledgeSnapshot>;
