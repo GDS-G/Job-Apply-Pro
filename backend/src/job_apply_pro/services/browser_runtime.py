@@ -42,6 +42,9 @@ from job_apply_pro.domain.browser import (
     BrowserSessionRecord,
     BrowserSessionSnapshot,
     BrowserSessionState,
+    BrowserSubmissionReconciliationApproval,
+    BrowserSubmissionReconciliationPreview,
+    BrowserSubmissionReconciliationResult,
     BrowserUploadReconciliationApproval,
     BrowserUploadReconciliationPreview,
     BrowserUploadReconciliationResult,
@@ -58,7 +61,13 @@ from job_apply_pro.domain.external_effects import (
     ExternalEffectStatus,
 )
 from job_apply_pro.domain.greenhouse_form import GreenhouseFormAction, GreenhouseFormStage
+from job_apply_pro.domain.portals import PortalCapability, PortalKind
 from job_apply_pro.domain.workflow import utc_now
+from job_apply_pro.portals.catalog import (
+    PortalCatalog,
+    PortalCatalogError,
+    confirmation_identifier,
+)
 from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.external_effects import (
     ExternalEffectConsumedError,
@@ -111,6 +120,7 @@ _RECONCILABLE_FIELD_VERIFICATIONS = {
 _FIELD_ACTION_INTENT = "Populate one explicitly approved application field"
 _GREENHOUSE_NAVIGATION_INTENT = "Advance the exact reviewed Greenhouse form by one control"
 _GREENHOUSE_UPLOAD_INTENT = "Upload the exact reviewed immutable application document"
+_GREENHOUSE_SUBMISSION_INTENT = "Submit the exact reviewed application"
 _GREENHOUSE_DOCUMENT_SUFFIXES = {".doc", ".docx", ".pdf"}
 _GREENHOUSE_STAGE_ORDER = {
     GreenhouseFormStage.APPLICATION: 1,
@@ -729,8 +739,12 @@ class BrowserRuntimeService:
         reconcilable_field_action = self._is_reconcilable_field_action(action)
         upload_intent = self._upload_reconciliation_intent(record, action, source_observation)
         navigation_intent = self._navigation_reconciliation_intent(action, source_observation)
+        submission_intent = self._submission_reconciliation_intent(action, source_observation)
         if (
-            reconcilable_field_action or upload_intent is not None or navigation_intent is not None
+            reconcilable_field_action
+            or upload_intent is not None
+            or navigation_intent is not None
+            or submission_intent is not None
         ) and source_observation is None:
             raise BrowserPolicyError(
                 "Reviewed browser execution requires a current browser observation"
@@ -790,6 +804,18 @@ class BrowserRuntimeService:
                     attempt.id,
                     payload={
                         **navigation_intent,
+                        "request_fingerprint": operation.request_fingerprint,
+                    },
+                    source_page_fingerprint=source_observation.page_fingerprint,
+                    actor="browser-runtime",
+                )
+            elif submission_intent is not None:
+                assert source_observation is not None  # validated before durable admission
+                self._external_effects.prepare_browser_submission_reconciliation(
+                    operation.id,
+                    attempt.id,
+                    payload={
+                        **submission_intent,
                         "request_fingerprint": operation.request_fingerprint,
                     },
                     source_page_fingerprint=source_observation.page_fingerprint,
@@ -1174,6 +1200,66 @@ class BrowserRuntimeService:
             ),
         )
 
+    def preview_submission_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> BrowserSubmissionReconciliationPreview:
+        preview, _observation, _evidence = self._prove_submission_reconciliation(
+            session_id, operation_id
+        )
+        return preview
+
+    def approve_submission_reconciliation(
+        self,
+        session_id: str,
+        approval: BrowserSubmissionReconciliationApproval,
+    ) -> BrowserSubmissionReconciliationResult:
+        preview, observation, evidence = self._prove_submission_reconciliation(
+            session_id, approval.operation_id
+        )
+        if preview.review_fingerprint != approval.expected_review_fingerprint:
+            raise BrowserReconciliationUnprovenError(
+                "Browser submission reconciliation changed after review"
+            )
+        saved = self._repository.save_observation(
+            session_id, BrowserSessionState.USER_TAKEOVER, observation
+        )
+        self._save_checkpoint(saved, observation, pending_action=None)
+        try:
+            effect = self._external_effects.reconcile_browser_submission(
+                preview.operation_id,
+                preview.attempt_id,
+                evidence_reference=f"browser-action:{preview.attempt_id}",
+                evidence=evidence,
+                page_fingerprint=observation.page_fingerprint,
+            )
+        except (ExternalEffectConflictError, ValueError) as error:
+            raise BrowserReconciliationUnprovenError(
+                "Browser submission reconciliation ownership changed"
+            ) from error
+        reconciliation = effect.reconciliation
+        if (
+            reconciliation is None
+            or reconciliation.status is not ExternalEffectReconciliationStatus.CONFIRMED_APPLIED
+            or reconciliation.reconciled_at is None
+        ):  # pragma: no cover - repository contract
+            raise RuntimeError("Browser submission reconciliation did not become durable")
+        return BrowserSubmissionReconciliationResult(
+            operation_id=preview.operation_id,
+            attempt_id=preview.attempt_id,
+            session_id=session_id,
+            source_page_type=preview.source_page_type,
+            result_page_type=preview.result_page_type,
+            result_page_fingerprint=observation.page_fingerprint,
+            reconciliation_kind=(
+                ExternalEffectReconciliationKind.BROWSER_SUBMISSION_CONFIRMED.value
+            ),
+            reconciled_at=reconciliation.reconciled_at,
+            notice=(
+                "An identifier-backed Greenhouse confirmation was observed and recorded. "
+                "The original uncertain submission remains immutable and was not retried."
+            ),
+        )
+
     def stage_encrypted_upload(
         self,
         session_id: str,
@@ -1217,6 +1303,241 @@ class BrowserRuntimeService:
         if record is None:
             raise LookupError(f"Browser session {session_id} was not found")
         return record
+
+    def _prove_submission_reconciliation(
+        self, session_id: str, operation_id: str
+    ) -> tuple[
+        BrowserSubmissionReconciliationPreview,
+        BrowserObservation,
+        dict[str, object],
+    ]:
+        session = self._record(session_id)
+        if session.state is not BrowserSessionState.USER_TAKEOVER:
+            raise BrowserSessionStateError(
+                "Browser submission reconciliation requires user takeover"
+            )
+        effect = self._external_effects.get(operation_id)
+        if (
+            effect is None
+            or effect.operation.kind is not ExternalEffectKind.BROWSER_ACTION
+            or effect.operation.subject_type != "browser_session"
+            or effect.operation.subject_id != session_id
+            or effect.operation.status is not ExternalEffectStatus.UNCERTAIN
+            or effect.reconciliation is None
+            or effect.reconciliation.kind
+            is not ExternalEffectReconciliationKind.BROWSER_SUBMISSION_CONFIRMED
+            or effect.reconciliation.status is not ExternalEffectReconciliationStatus.AVAILABLE
+            or effect.reconciliation.policy_version
+            != ExternalEffectService.SUBMISSION_RECONCILIATION_POLICY_VERSION
+            or len(effect.attempts) != 1
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "External effect is not an available uncertain reviewed submission"
+            )
+        attempt = effect.attempts[0]
+        intent = effect.reconciliation
+        if (
+            attempt.id != intent.attempt_id
+            or attempt.status is not ExternalEffectStatus.UNCERTAIN
+            or attempt.provider != "playwright"
+            or attempt.request_fingerprint != effect.operation.request_fingerprint
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser submission attempt does not match its durable intent"
+            )
+        actions = [
+            item for item in self._repository.list_actions(session_id) if item.id == attempt.id
+        ]
+        if len(actions) != 1:
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain reviewed submission has no unique local action evidence"
+            )
+        action_result = actions[0]
+        action = action_result.action
+        try:
+            payload = self._external_effects.browser_submission_reconciliation_payload(intent)
+        except ValueError:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser submission reconciliation intent is invalid"
+            ) from None
+        if set(payload) != {
+            "action_kind",
+            "control_key",
+            "locator",
+            "portal",
+            "portal_adapter_version",
+            "postcondition",
+            "request_fingerprint",
+            "source_form_review_fingerprint",
+            "source_origin",
+            "source_page_type",
+            "source_stage",
+        }:
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser submission reconciliation intent is invalid"
+            )
+        catalog = PortalCatalog()
+        definition = catalog.get(PortalKind.GREENHOUSE)
+        try:
+            action_kind = BrowserActionKind(str(payload["action_kind"]))
+            locator_value = payload["locator"]
+            if not isinstance(locator_value, dict):
+                raise ValueError
+            locator = SemanticLocator.model_validate(locator_value)
+            source_stage = GreenhouseFormStage(str(payload["source_stage"]))
+            source_page_type = str(payload["source_page_type"])
+            source_origin = str(payload["source_origin"])
+            source_form_review = str(payload["source_form_review_fingerprint"])
+            control_key = str(payload["control_key"])
+            source_assessment = GreenhouseFormContractService().assess(action_result.observation)
+        except (TypeError, ValueError, GreenhouseFormContractError):
+            raise BrowserReconciliationUnprovenError(
+                "Encrypted browser submission reconciliation intent is invalid"
+            ) from None
+        expected_precondition = BrowserVerification(
+            kind=VerificationKind.LOCATOR_VISIBLE,
+            locator=locator,
+        )
+        source_controls = [
+            item
+            for item in source_assessment.controls
+            if item.control_key == control_key
+            and item.action is GreenhouseFormAction.FINAL_SUBMISSION_GATE
+            and item.control_kind is BrowserControlKind.BUTTON
+        ]
+        source_observed = [
+            item
+            for item in action_result.observation.controls
+            if item.control_key == control_key
+            and item.locator == locator
+            and item.kind is BrowserControlKind.BUTTON
+        ]
+        if (
+            action_kind is not BrowserActionKind.CLICK
+            or action.kind is not action_kind
+            or action.locator != locator
+            or action.preconditions != [expected_precondition]
+            or action.intended_result != _GREENHOUSE_SUBMISSION_INTENT
+            or action.verification.kind is not VerificationKind.NONE
+            or action.permission is not BrowserPermission.ELEVATED
+            or action.confirmation is not ConfirmationState.CONFIRMED
+            or action.sensitive_value
+            or action.file_path is not None
+            or action.value is not None
+            or action.url is not None
+            or action.coordinates is not None
+            or action_result.verified
+            or action_result.error is None
+            or attempt.target_code != BrowserActionKind.CLICK.value
+            or payload["request_fingerprint"] != effect.operation.request_fingerprint
+            or payload["portal"] != PortalKind.GREENHOUSE.value
+            or payload["portal_adapter_version"] != definition.adapter_version
+            or payload["postcondition"] != "IDENTIFIER_BACKED_CONFIRMATION"
+            or action_result.observation.page_fingerprint != intent.source_page_fingerprint
+            or action_result.observation.origin != source_origin
+            or action_result.observation.page_type != source_page_type
+            or source_assessment.page_type != source_page_type
+            or source_page_type != "SUBMISSION_REVIEW"
+            or source_assessment.stage is not GreenhouseFormStage.REVIEW
+            or source_assessment.stage is not source_stage
+            or source_assessment.review_fingerprint != source_form_review
+            or not control_key
+            or len(control_key) > 200
+            or len(source_controls) != 1
+            or len(source_observed) != 1
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Uncertain browser action is outside the reviewed submission contract"
+            )
+        try:
+            observation = BrowserObservation.model_validate(
+                self._worker.call("observe", {"session_id": session_id}, timeout_seconds=75)
+            )
+            self._validate_live_observation(session, observation)
+            assessment = GreenhouseFormContractService().assess(observation)
+            labels = [
+                str(value)
+                for observed in observation.controls
+                for value in (observed.label, observed.text)
+                if value
+            ]
+            match = catalog.identify(
+                url=observation.url,
+                page_type=observation.page_type,
+                visible_text=observation.visible_text,
+                control_labels=labels,
+                page_fingerprint=observation.page_fingerprint,
+            )
+            identifier = confirmation_identifier(observation.visible_text)
+        except (
+            TypeError,
+            ValueError,
+            BrowserPolicyError,
+            GreenhouseFormContractError,
+            PortalCatalogError,
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Current page does not prove a recognized reviewed submission result"
+            ) from None
+        if (
+            observation.origin != source_origin
+            or observation.page_fingerprint == intent.source_page_fingerprint
+            or assessment.page_type != observation.page_type
+            or assessment.stage is not GreenhouseFormStage.CONFIRMATION
+            or match.portal is not PortalKind.GREENHOUSE
+            or match.capability is not PortalCapability.CONFIRMATION
+            or match.page_type != observation.page_type
+            or identifier is None
+            or not catalog.verify_confirmation(
+                PortalKind.GREENHOUSE,
+                page_type=match.page_type,
+                visible_text=observation.visible_text,
+                confirmation_identifier=identifier,
+            )
+        ):
+            raise BrowserReconciliationUnprovenError(
+                "Current page does not prove an identifier-backed Greenhouse confirmation"
+            )
+        identifier_fingerprint = self._external_effects.request_fingerprint(
+            {"portal": PortalKind.GREENHOUSE.value, "identifier": identifier}
+        )
+        evidence: dict[str, object] = {
+            "policy_version": ExternalEffectService.SUBMISSION_RECONCILIATION_POLICY_VERSION,
+            "operation_id": effect.operation.id,
+            "attempt_id": attempt.id,
+            "session_id": session_id,
+            "action_kind": action_kind.value,
+            "control_key": control_key,
+            "request_fingerprint": effect.operation.request_fingerprint,
+            "source_page_fingerprint": intent.source_page_fingerprint,
+            "source_page_type": source_page_type,
+            "source_stage": source_stage.value,
+            "result_page_fingerprint": observation.page_fingerprint,
+            "result_page_type": observation.page_type,
+            "result_stage": assessment.stage.value,
+            "origin": observation.origin,
+            "portal": match.portal.value,
+            "portal_adapter_version": definition.adapter_version,
+            "confirmation_identifier_fingerprint": identifier_fingerprint,
+        }
+        review_fingerprint = self._external_effects.request_fingerprint(evidence)
+        return (
+            BrowserSubmissionReconciliationPreview(
+                operation_id=effect.operation.id,
+                attempt_id=attempt.id,
+                session_id=session_id,
+                source_page_type=source_page_type,
+                result_page_type=observation.page_type,
+                result_page_fingerprint=observation.page_fingerprint,
+                review_fingerprint=review_fingerprint,
+                notice=(
+                    "An identifier-backed Greenhouse confirmation is currently observed. "
+                    "Approval records reconciliation without submitting again."
+                ),
+            ),
+            observation,
+            evidence,
+        )
 
     def _prove_upload_reconciliation(
         self, session_id: str, operation_id: str
@@ -1701,6 +2022,80 @@ class BrowserRuntimeService:
             "source_upload_status_fingerprint": self._external_effects.request_fingerprint(
                 source_upload_names
             ),
+        }
+
+    def _submission_reconciliation_intent(
+        self,
+        action: BrowserAction,
+        observation: BrowserObservation | None,
+    ) -> dict[str, object] | None:
+        if action.intended_result != _GREENHOUSE_SUBMISSION_INTENT:
+            return None
+        if observation is None:
+            return None
+        host = (urlsplit(observation.url).hostname or "").casefold()
+        if host != "greenhouse.io" and not host.endswith(".greenhouse.io"):
+            return None
+        try:
+            assessment = GreenhouseFormContractService().assess(observation)
+        except GreenhouseFormContractError:
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse submission requires a current recognized review stage"
+            ) from None
+        expected_precondition = (
+            BrowserVerification(
+                kind=VerificationKind.LOCATOR_VISIBLE,
+                locator=action.locator,
+            )
+            if action.locator is not None
+            else None
+        )
+        contracts = [
+            item
+            for item in assessment.controls
+            if item.action is GreenhouseFormAction.FINAL_SUBMISSION_GATE
+            and item.control_kind is BrowserControlKind.BUTTON
+        ]
+        observed = [
+            item
+            for item in observation.controls
+            if item.locator == action.locator and item.kind is BrowserControlKind.BUTTON
+        ]
+        if (
+            action.kind is not BrowserActionKind.CLICK
+            or action.locator is None
+            or expected_precondition is None
+            or action.preconditions != [expected_precondition]
+            or action.verification.kind is not VerificationKind.NONE
+            or action.permission is not BrowserPermission.ELEVATED
+            or action.confirmation is not ConfirmationState.CONFIRMED
+            or action.sensitive_value
+            or action.value is not None
+            or action.file_path is not None
+            or action.url is not None
+            or action.coordinates is not None
+            or assessment.page_type != observation.page_type
+            or observation.page_type != "SUBMISSION_REVIEW"
+            or assessment.stage is not GreenhouseFormStage.REVIEW
+            or len(contracts) != 1
+            or len(observed) != 1
+            or contracts[0].control_key != observed[0].control_key
+        ):
+            raise BrowserPolicyError(
+                "Reviewed Greenhouse submission is outside the reconciliation contract"
+            )
+        definition = PortalCatalog().get(PortalKind.GREENHOUSE)
+        return {
+            "action_kind": action.kind.value,
+            "control_key": contracts[0].control_key,
+            "locator": action.locator.model_dump(mode="json"),
+            "portal": PortalKind.GREENHOUSE.value,
+            "portal_adapter_version": definition.adapter_version,
+            "postcondition": "IDENTIFIER_BACKED_CONFIRMATION",
+            "source_form_review_fingerprint": assessment.review_fingerprint,
+            "source_origin": observation.origin,
+            "source_page_type": observation.page_type,
+            "source_stage": assessment.stage.value,
         }
 
     @staticmethod

@@ -198,11 +198,18 @@ def _authenticate_external_effect_reconciliation(
         "expected_file_sha256",
         "source_upload_status_fingerprint",
     }
-    expected_keys = (
-        navigation_keys
-        if kind is ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED
-        else upload_keys
-    )
+    submission_keys = navigation_keys | {
+        "portal",
+        "portal_adapter_version",
+        "postcondition",
+    }
+    expected_keys = {
+        ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED: navigation_keys,
+        ExternalEffectReconciliationKind.BROWSER_UPLOAD_CONFIRMED: upload_keys,
+        ExternalEffectReconciliationKind.BROWSER_SUBMISSION_CONFIRMED: submission_keys,
+    }.get(kind)
+    if expected_keys is None:
+        raise RestoreHistoryError(UNAVAILABLE)
     try:
         action_kind = BrowserActionKind(str(payload["action_kind"]))
         locator_value = payload["locator"]
@@ -224,6 +231,24 @@ def _authenticate_external_effect_reconciliation(
         raise RestoreHistoryError(UNAVAILABLE)
     if kind is ExternalEffectReconciliationKind.BROWSER_NAVIGATION_CONFIRMED:
         if action_kind is not BrowserActionKind.CLICK:
+            raise RestoreHistoryError(UNAVAILABLE)
+        return
+
+    if kind is ExternalEffectReconciliationKind.BROWSER_SUBMISSION_CONFIRMED:
+        source_origin = payload.get("source_origin")
+        assert isinstance(source_origin, str)
+        parsed_origin = urlsplit(source_origin)
+        host = (parsed_origin.hostname or "").casefold()
+        if (
+            action_kind is not BrowserActionKind.CLICK
+            or page_type != "SUBMISSION_REVIEW"
+            or stage is not GreenhouseFormStage.REVIEW
+            or payload.get("portal") != "GREENHOUSE"
+            or not _bounded_text(payload.get("portal_adapter_version"), 40)
+            or payload.get("postcondition") != "IDENTIFIER_BACKED_CONFIRMATION"
+            or parsed_origin.scheme != "https"
+            or (host != "greenhouse.io" and not host.endswith(".greenhouse.io"))
+        ):
             raise RestoreHistoryError(UNAVAILABLE)
         return
 

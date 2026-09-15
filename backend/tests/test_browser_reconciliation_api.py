@@ -13,6 +13,8 @@ from job_apply_pro.domain.browser import (
     BrowserFieldReconciliationResult,
     BrowserNavigationReconciliationPreview,
     BrowserNavigationReconciliationResult,
+    BrowserSubmissionReconciliationPreview,
+    BrowserSubmissionReconciliationResult,
     BrowserUploadReconciliationPreview,
     BrowserUploadReconciliationResult,
     VerificationKind,
@@ -270,3 +272,72 @@ def test_upload_reconciliation_api_rejects_route_body_mismatch(
         "detail": "Browser upload reconciliation operation id does not match the route"
     }
     service.approve_upload_reconciliation.assert_not_called()
+
+
+def test_submission_reconciliation_api_previews_then_approves_exact_review(
+    reconciliation_api: tuple[TestClient, Mock],
+) -> None:
+    client, service = reconciliation_api
+    preview = BrowserSubmissionReconciliationPreview(
+        operation_id=_OPERATION_ID,
+        attempt_id=_ATTEMPT_ID,
+        session_id=_SESSION_ID,
+        source_page_type="SUBMISSION_REVIEW",
+        result_page_type="CONFIRMATION",
+        result_page_fingerprint="greenhouse-confirmation-v2",
+        review_fingerprint="d" * 64,
+        notice="An identifier-backed Greenhouse confirmation is visible.",
+    )
+    result = BrowserSubmissionReconciliationResult(
+        operation_id=_OPERATION_ID,
+        attempt_id=_ATTEMPT_ID,
+        session_id=_SESSION_ID,
+        source_page_type=preview.source_page_type,
+        result_page_type=preview.result_page_type,
+        result_page_fingerprint=preview.result_page_fingerprint,
+        reconciliation_kind="BROWSER_SUBMISSION_CONFIRMED",
+        reconciled_at=datetime(2026, 9, 15, 21, tzinfo=UTC),
+        notice="Confirmed submission recorded without submitting again.",
+    )
+    service.preview_submission_reconciliation.return_value = preview
+    service.approve_submission_reconciliation.return_value = result
+    path = f"/api/v1/browser/sessions/{_SESSION_ID}/submission-reconciliations/{_OPERATION_ID}"
+
+    reviewed = client.post(f"{path}/preview")
+    assert reviewed.status_code == 200
+    assert reviewed.json() == preview.model_dump(mode="json")
+    service.preview_submission_reconciliation.assert_called_once_with(_SESSION_ID, _OPERATION_ID)
+
+    approved = client.post(
+        f"{path}/approve",
+        json={
+            "operation_id": _OPERATION_ID,
+            "expected_review_fingerprint": preview.review_fingerprint,
+            "confirmation_phrase": "RECONCILE CONFIRMED SUBMISSION",
+        },
+    )
+    assert approved.status_code == 200
+    assert approved.json() == result.model_dump(mode="json")
+    approval = service.approve_submission_reconciliation.call_args.args[1]
+    assert approval.operation_id == _OPERATION_ID
+    assert approval.confirmation_phrase == "RECONCILE CONFIRMED SUBMISSION"
+
+
+def test_submission_reconciliation_api_rejects_route_body_mismatch(
+    reconciliation_api: tuple[TestClient, Mock],
+) -> None:
+    client, service = reconciliation_api
+    response = client.post(
+        f"/api/v1/browser/sessions/{_SESSION_ID}/submission-reconciliations/{_OPERATION_ID}/approve",
+        json={
+            "operation_id": "05d34e54-311a-47b4-8bd1-8d35d0334956",
+            "expected_review_fingerprint": "d" * 64,
+            "confirmation_phrase": "RECONCILE CONFIRMED SUBMISSION",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Browser submission reconciliation operation id does not match the route"
+    }
+    service.approve_submission_reconciliation.assert_not_called()

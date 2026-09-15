@@ -514,7 +514,11 @@ def test_prepared_external_effect_history_is_semantically_admitted(
 
 def _reviewed_reconciliation_payload(kind: str) -> dict[str, object]:
     payload: dict[str, object] = {
-        "action_kind": "CLICK" if kind == "BROWSER_NAVIGATION_CONFIRMED" else "UPLOAD",
+        "action_kind": (
+            "CLICK"
+            if kind in {"BROWSER_NAVIGATION_CONFIRMED", "BROWSER_SUBMISSION_CONFIRMED"}
+            else "UPLOAD"
+        ),
         "control_key": "greenhouse-resume",
         "locator": {
             "strategy": "LABEL",
@@ -537,10 +541,34 @@ def _reviewed_reconciliation_payload(kind: str) -> dict[str, object]:
                 "source_upload_status_fingerprint": "d" * 64,
             }
         )
+    elif kind == "BROWSER_SUBMISSION_CONFIRMED":
+        payload.update(
+            {
+                "control_key": "greenhouse-submit",
+                "locator": {
+                    "strategy": "ROLE",
+                    "value": "button",
+                    "name": "Submit application",
+                    "exact": True,
+                },
+                "portal": "GREENHOUSE",
+                "portal_adapter_version": "1.0.0",
+                "postcondition": "IDENTIFIER_BACKED_CONFIRMATION",
+                "source_page_type": "SUBMISSION_REVIEW",
+                "source_stage": "REVIEW",
+            }
+        )
     return payload
 
 
-@pytest.mark.parametrize("kind", ["BROWSER_NAVIGATION_CONFIRMED", "BROWSER_UPLOAD_CONFIRMED"])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "BROWSER_NAVIGATION_CONFIRMED",
+        "BROWSER_UPLOAD_CONFIRMED",
+        "BROWSER_SUBMISSION_CONFIRMED",
+    ],
+)
 def test_restore_authenticates_kind_specific_reviewed_reconciliation_payload(
     kind: str,
 ) -> None:
@@ -569,6 +597,30 @@ def test_restore_refuses_changed_reviewed_upload_meaning(field: str, value: obje
     with pytest.raises(inspection.RestoreHistoryError, match=inspection.UNAVAILABLE):
         guard._authenticate_external_effect_reconciliation(
             {"kind": "BROWSER_UPLOAD_CONFIRMED"},
+            payload,
+            "a" * 64,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("action_kind", "UPLOAD"),
+        ("portal", "INDEED"),
+        ("portal_adapter_version", ""),
+        ("postcondition", "NEXT_STAGE_OBSERVED"),
+        ("source_page_type", "QUESTIONNAIRE"),
+        ("source_stage", "QUESTIONNAIRE"),
+        ("source_origin", "https://example.com"),
+        ("request_fingerprint", "e" * 64),
+    ],
+)
+def test_restore_refuses_changed_reviewed_submission_meaning(field: str, value: object) -> None:
+    payload = _reviewed_reconciliation_payload("BROWSER_SUBMISSION_CONFIRMED")
+    payload[field] = value
+    with pytest.raises(inspection.RestoreHistoryError, match=inspection.UNAVAILABLE):
+        guard._authenticate_external_effect_reconciliation(
+            {"kind": "BROWSER_SUBMISSION_CONFIRMED"},
             payload,
             "a" * 64,
         )

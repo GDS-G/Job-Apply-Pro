@@ -905,6 +905,34 @@ export function registerWorkbenchIpc(
       return supervisor.client.approveBrowserUploadReconciliation(preview);
     },
   );
+  ipcMain.handle(
+    "workbench:reconcile-browser-submission",
+    async (event, operationValue: unknown, sessionValue: unknown) => {
+      const operationId = uuid(operationValue, "External effect id");
+      const sessionId = uuid(sessionValue, "Browser session id");
+      const preview =
+        await supervisor.client.previewBrowserSubmissionReconciliation(
+          operationId,
+          sessionId,
+        );
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const options = {
+        type: "warning" as const,
+        title: "Record confirmed application submission?",
+        message: "An identifier-backed Greenhouse confirmation is visible now.",
+        detail: `From: ${preview.source_page_type}\nTo: ${preview.result_page_type}\nSession: ${preview.session_id}\nResult page fingerprint: ${preview.result_page_fingerprint}\nReview fingerprint: ${preview.review_fingerprint}\n\nThis records read-only confirmation evidence for the prior uncertain final submission. It does not click, retry, upload, or submit again.`,
+        buttons: ["Cancel", "Record confirmed submission"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+      return supervisor.client.approveBrowserSubmissionReconciliation(preview);
+    },
+  );
   ipcMain.handle("knowledge:get", (_event, value: unknown) =>
     supervisor.client.getCandidateKnowledge(
       requiredText(value, "Profile id", 100),

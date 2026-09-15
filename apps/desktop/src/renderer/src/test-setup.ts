@@ -54,6 +54,9 @@ const bridge: DesktopBridge = {
     reconcileBrowserUpload: async () => {
       throw new Error("Not implemented in this test.");
     },
+    reconcileBrowserSubmission: async () => {
+      throw new Error("Not implemented in this test.");
+    },
     getCandidateKnowledge: async (profileId) => ({
       profile_id: profileId,
       documents: [],

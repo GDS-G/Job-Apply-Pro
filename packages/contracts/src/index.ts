@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Browser Upload Reconciliation",
-  version: "0.77.0-alpha.1",
+  name: "Reviewed Browser Submission Reconciliation",
+  version: "0.78.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -588,6 +588,29 @@ export interface BrowserUploadReconciliationResult {
   page_type: string;
   result_page_fingerprint: string;
   reconciliation_kind: "BROWSER_UPLOAD_CONFIRMED";
+  reconciled_at: string;
+  notice: string;
+}
+
+export interface BrowserSubmissionReconciliationPreview {
+  operation_id: string;
+  attempt_id: string;
+  session_id: string;
+  source_page_type: string;
+  result_page_type: string;
+  result_page_fingerprint: string;
+  review_fingerprint: string;
+  notice: string;
+}
+
+export interface BrowserSubmissionReconciliationResult {
+  operation_id: string;
+  attempt_id: string;
+  session_id: string;
+  source_page_type: string;
+  result_page_type: string;
+  result_page_fingerprint: string;
+  reconciliation_kind: "BROWSER_SUBMISSION_CONFIRMED";
   reconciled_at: string;
   notice: string;
 }
@@ -1505,7 +1528,8 @@ export type ExternalEffectStatus =
 export type ExternalEffectReconciliationKind =
   | "BROWSER_FIELD_VALUE_CONFIRMED"
   | "BROWSER_NAVIGATION_CONFIRMED"
-  | "BROWSER_UPLOAD_CONFIRMED";
+  | "BROWSER_UPLOAD_CONFIRMED"
+  | "BROWSER_SUBMISSION_CONFIRMED";
 
 export interface ExternalEffectMetrics {
   total: number;
@@ -2207,6 +2231,10 @@ export interface DesktopBridge {
       operationId: string,
       sessionId: string,
     ): Promise<BrowserUploadReconciliationResult | null>;
+    reconcileBrowserSubmission(
+      operationId: string,
+      sessionId: string,
+    ): Promise<BrowserSubmissionReconciliationResult | null>;
     getCandidateKnowledge(
       profileId: string,
     ): Promise<CandidateKnowledgeSnapshot>;

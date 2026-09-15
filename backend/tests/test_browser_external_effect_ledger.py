@@ -21,6 +21,7 @@ from job_apply_pro.domain.browser import (
     BrowserRetryPolicy,
     BrowserSessionRecord,
     BrowserSessionState,
+    BrowserSubmissionReconciliationApproval,
     BrowserUploadReconciliationApproval,
     BrowserVerification,
     ConfirmationState,
@@ -337,6 +338,99 @@ def _upload_action(path: Path) -> BrowserAction:
         permission="ELEVATED",
         confirmation=ConfirmationState.CONFIRMED,
         sensitive_value=True,
+    )
+
+
+def _greenhouse_submission_observation(
+    *,
+    page_fingerprint: str = "greenhouse-review-v1",
+) -> BrowserObservation:
+    locator = SemanticLocator(
+        strategy=LocatorStrategy.ROLE,
+        value="button",
+        name="Submit application",
+        exact=True,
+    )
+    return BrowserObservation(
+        sequence=1,
+        url="https://boards.greenhouse.io/example/jobs/123#review",
+        title="Synthetic Greenhouse submission review",
+        origin="https://boards.greenhouse.io",
+        page_type="SUBMISSION_REVIEW",
+        page_fingerprint=page_fingerprint,
+        tabs=[],
+        accessibility_snapshot="",
+        visible_text="Greenhouse review application",
+        controls=[
+            BrowserObservedControl(
+                index=0,
+                control_key="greenhouse-submit",
+                kind=BrowserControlKind.BUTTON,
+                tag="button",
+                input_type="submit",
+                text="Submit application",
+                visible=True,
+                locator=locator,
+            )
+        ],
+        validation_errors=[],
+        modals=[],
+        console_errors=[],
+        network_failures=[],
+        upload_status=["candidate-resume.pdf"],
+        download_status=[],
+        screenshot_path="fixture.png",
+        observed_at=datetime.now(UTC),
+    )
+
+
+def _greenhouse_confirmation_observation(
+    *,
+    page_fingerprint: str = "greenhouse-confirmation-v2",
+    visible_text: str = ("Greenhouse application received. Confirmation number GH-12345"),
+) -> BrowserObservation:
+    return BrowserObservation(
+        sequence=2,
+        url="https://boards.greenhouse.io/example/jobs/123/confirmation",
+        title="Synthetic Greenhouse confirmation",
+        origin="https://boards.greenhouse.io",
+        page_type="CONFIRMATION",
+        page_fingerprint=page_fingerprint,
+        tabs=[],
+        accessibility_snapshot="",
+        visible_text=visible_text,
+        controls=[],
+        validation_errors=[],
+        modals=[],
+        console_errors=[],
+        network_failures=[],
+        upload_status=["candidate-resume.pdf"],
+        download_status=[],
+        screenshot_path="fixture.png",
+        observed_at=datetime.now(UTC),
+    )
+
+
+def _submission_action() -> BrowserAction:
+    locator = SemanticLocator(
+        strategy=LocatorStrategy.ROLE,
+        value="button",
+        name="Submit application",
+        exact=True,
+    )
+    return BrowserAction(
+        kind=BrowserActionKind.CLICK,
+        locator=locator,
+        preconditions=[
+            BrowserVerification(
+                kind=VerificationKind.LOCATOR_VISIBLE,
+                locator=locator,
+            )
+        ],
+        intended_result="Submit the exact reviewed application",
+        verification=BrowserVerification(kind=VerificationKind.NONE),
+        permission="ELEVATED",
+        confirmation=ConfirmationState.CONFIRMED,
     )
 
 
@@ -883,6 +977,116 @@ def test_upload_reconciliation_approval_rechecks_current_filename(
                 operation_id=operation.id,
                 expected_review_fingerprint=preview.review_fingerprint,
                 confirmation_phrase="RECONCILE REVIEWED UPLOAD",
+            ),
+        )
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe", "observe"]
+
+
+def test_uncertain_submission_is_reconciled_only_by_identifier_backed_confirmation(
+    session: Session, tmp_path: Path
+) -> None:
+    source = _greenhouse_submission_observation()
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=source,
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _submission_action())
+    operation = effects.list_public()[0]
+    assert operation.reconciliation_available
+    assert operation.reconciliation_kind == "BROWSER_SUBMISSION_CONFIRMED"
+
+    worker.result = _greenhouse_confirmation_observation().model_dump(mode="json")
+    preview = service.preview_submission_reconciliation(session_id, operation.id)
+    result = service.approve_submission_reconciliation(
+        session_id,
+        BrowserSubmissionReconciliationApproval(
+            operation_id=operation.id,
+            expected_review_fingerprint=preview.review_fingerprint,
+            confirmation_phrase="RECONCILE CONFIRMED SUBMISSION",
+        ),
+    )
+
+    assert preview.source_page_type == "SUBMISSION_REVIEW"
+    assert preview.result_page_type == "CONFIRMATION"
+    assert result.reconciliation_kind == "BROWSER_SUBMISSION_CONFIRMED"
+    assert result.result_page_fingerprint == "greenhouse-confirmation-v2"
+    assert worker.methods == ["execute", "observe", "observe"]
+    assert not effects.has_unresolved_subject("browser_session", session_id)
+    record = effects.get(operation.id)
+    assert record is not None
+    assert record.operation.status is ExternalEffectStatus.UNCERTAIN
+    assert record.attempts[0].status is ExternalEffectStatus.UNCERTAIN
+
+
+@pytest.mark.parametrize(
+    ("page_fingerprint", "visible_text"),
+    [
+        ("greenhouse-review-v1", "Greenhouse application received. Confirmation GH-12345"),
+        ("greenhouse-confirmation-v2", "Greenhouse application received"),
+        ("greenhouse-confirmation-v2", "Greenhouse confirmation number GH-12345"),
+    ],
+)
+def test_submission_reconciliation_refuses_stale_or_unverified_confirmation(
+    session: Session,
+    tmp_path: Path,
+    page_fingerprint: str,
+    visible_text: str,
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=_greenhouse_submission_observation(),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _submission_action())
+    operation = effects.list_public()[0]
+    worker.result = _greenhouse_confirmation_observation(
+        page_fingerprint=page_fingerprint,
+        visible_text=visible_text,
+    ).model_dump(mode="json")
+
+    with pytest.raises(BrowserSessionStateError, match="does not prove"):
+        service.preview_submission_reconciliation(session_id, operation.id)
+
+    assert effects.has_unresolved_subject("browser_session", session_id)
+    assert worker.methods == ["execute", "observe"]
+
+
+def test_submission_reconciliation_approval_rechecks_confirmation_identifier(
+    session: Session, tmp_path: Path
+) -> None:
+    service, effects, worker = _service(
+        session,
+        tmp_path,
+        BrowserWorkerUnavailableError("fixture response loss"),
+        observation=_greenhouse_submission_observation(),
+    )
+    session_id = "00000000-0000-4000-8000-000000000101"
+    with pytest.raises(BrowserActionUncertainError):
+        service.execute_action(session_id, _submission_action())
+    operation = effects.list_public()[0]
+    worker.result = _greenhouse_confirmation_observation().model_dump(mode="json")
+    preview = service.preview_submission_reconciliation(session_id, operation.id)
+    worker.result = _greenhouse_confirmation_observation(
+        page_fingerprint="greenhouse-confirmation-v3",
+        visible_text="Greenhouse application received. Confirmation number GH-67890",
+    ).model_dump(mode="json")
+
+    with pytest.raises(BrowserSessionStateError, match="changed after review"):
+        service.approve_submission_reconciliation(
+            session_id,
+            BrowserSubmissionReconciliationApproval(
+                operation_id=operation.id,
+                expected_review_fingerprint=preview.review_fingerprint,
+                confirmation_phrase="RECONCILE CONFIRMED SUBMISSION",
             ),
         )
 

@@ -23,6 +23,8 @@ import type {
   BrowserFieldReconciliationResult,
   BrowserNavigationReconciliationPreview,
   BrowserNavigationReconciliationResult,
+  BrowserSubmissionReconciliationPreview,
+  BrowserSubmissionReconciliationResult,
   BrowserUploadReconciliationPreview,
   BrowserUploadReconciliationResult,
   BrowserProfileCleanupPreview,
@@ -389,6 +391,32 @@ export class BackendClient {
           operation_id: preview.operation_id,
           expected_review_fingerprint: preview.review_fingerprint,
           confirmation_phrase: "RECONCILE REVIEWED UPLOAD",
+        }),
+      },
+    );
+  }
+
+  previewBrowserSubmissionReconciliation(
+    operationId: string,
+    sessionId: string,
+  ): Promise<BrowserSubmissionReconciliationPreview> {
+    return this.request(
+      `/browser/sessions/${encodeURIComponent(sessionId)}/submission-reconciliations/${encodeURIComponent(operationId)}/preview`,
+      { method: "POST" },
+    );
+  }
+
+  approveBrowserSubmissionReconciliation(
+    preview: BrowserSubmissionReconciliationPreview,
+  ): Promise<BrowserSubmissionReconciliationResult> {
+    return this.request(
+      `/browser/sessions/${encodeURIComponent(preview.session_id)}/submission-reconciliations/${encodeURIComponent(preview.operation_id)}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          operation_id: preview.operation_id,
+          expected_review_fingerprint: preview.review_fingerprint,
+          confirmation_phrase: "RECONCILE CONFIRMED SUBMISSION",
         }),
       },
     );

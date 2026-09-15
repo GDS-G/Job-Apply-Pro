@@ -899,6 +899,66 @@ export function App() {
     }
   }
 
+  async function reconcileBrowserSubmission(
+    operationId: string,
+    sessionId: string,
+  ) {
+    setBusy(true);
+    setReconciliationMessage(null);
+    try {
+      const result =
+        await window.jobApplyPro.workbench.reconcileBrowserSubmission(
+          operationId,
+          sessionId,
+        );
+      if (result) {
+        setReconciliationMessage(result.notice);
+        const run = supervisedPortalRuns.find(
+          (item) => item.browser_session_id === sessionId,
+        );
+        if (!run) {
+          setError(
+            "Submission reconciliation was recorded, but its supervised run is not loaded. Refresh the selected workflow and capture the current confirmation page.",
+          );
+          await refreshWorkflows();
+          return;
+        }
+        try {
+          const updated =
+            await window.jobApplyPro.workbench.captureSupervisedPortal(
+              run.id,
+              run.page_fingerprint,
+            );
+          setSupervisedPortalRuns((current) =>
+            current.map((item) => (item.id === updated.id ? updated : item)),
+          );
+          if (updated.state !== "SUBMISSION_CONFIRMED") {
+            setError(
+              "Submission reconciliation was recorded, but the current-page capture did not confirm the supervised run. Return to the exact provider confirmation page and capture again; do not resubmit.",
+            );
+            await refreshWorkflows();
+            return;
+          }
+          setReconciliationMessage(
+            `${result.notice} The supervised portal run is now confirmed and stopped.`,
+          );
+        } catch (caught) {
+          setError(
+            `Submission reconciliation was recorded, but the supervised run still needs a current-page capture: ${readableError(caught)}`,
+          );
+          await refreshWorkflows();
+          return;
+        }
+        await refreshWorkflows();
+      }
+      setError(null);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importResume(form: FormData) {
     if (!profileId) return;
     const input: CandidateDocumentImportInput = {
@@ -1868,13 +1928,13 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Browser Upload Reconciliation v0.77.0-alpha.1
+                Reviewed Browser Submission Reconciliation v0.78.0-alpha.1
               </strong>
               <p>
-                An uncertain exact reviewed Greenhouse file selection can be
-                recorded only after two read-only same-stage filename proofs.
-                The upload is never retried, and filename evidence is not
-                provider receipt.
+                An uncertain exact reviewed Greenhouse final submission can be
+                reconciled only after two read-only identifier-backed
+                confirmation proofs. The submit click is never retried, and the
+                supervised run is confirmed only by a current-page capture.
               </p>
             </div>
             <span className="status-pill status-pill--safe">
@@ -4308,7 +4368,9 @@ export function App() {
                           effect.reconciliation_kind ===
                             "BROWSER_NAVIGATION_CONFIRMED" ||
                           effect.reconciliation_kind ===
-                            "BROWSER_UPLOAD_CONFIRMED") &&
+                            "BROWSER_UPLOAD_CONFIRMED" ||
+                          effect.reconciliation_kind ===
+                            "BROWSER_SUBMISSION_CONFIRMED") &&
                         browserSessions.some(
                           (session) => session.id === effect.subject_id,
                         ) && (
@@ -4323,15 +4385,21 @@ export function App() {
                                     effect.subject_id,
                                   )
                                 : effect.reconciliation_kind ===
-                                    "BROWSER_UPLOAD_CONFIRMED"
-                                  ? reconcileBrowserUpload(
+                                    "BROWSER_SUBMISSION_CONFIRMED"
+                                  ? reconcileBrowserSubmission(
                                       effect.id,
                                       effect.subject_id,
                                     )
-                                  : reconcileBrowserField(
-                                      effect.id,
-                                      effect.subject_id,
-                                    ))
+                                  : effect.reconciliation_kind ===
+                                      "BROWSER_UPLOAD_CONFIRMED"
+                                    ? reconcileBrowserUpload(
+                                        effect.id,
+                                        effect.subject_id,
+                                      )
+                                    : reconcileBrowserField(
+                                        effect.id,
+                                        effect.subject_id,
+                                      ))
                             }
                             type="button"
                           >
@@ -4340,9 +4408,12 @@ export function App() {
                             "BROWSER_NAVIGATION_CONFIRMED"
                               ? "Verify current form stage"
                               : effect.reconciliation_kind ===
-                                  "BROWSER_UPLOAD_CONFIRMED"
-                                ? "Verify current upload outcome"
-                                : "Verify current field outcome"}
+                                  "BROWSER_SUBMISSION_CONFIRMED"
+                                ? "Verify confirmed submission"
+                                : effect.reconciliation_kind ===
+                                    "BROWSER_UPLOAD_CONFIRMED"
+                                  ? "Verify current upload outcome"
+                                  : "Verify current field outcome"}
                           </button>
                         )}
                     </article>

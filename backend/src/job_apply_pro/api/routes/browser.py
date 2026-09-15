@@ -30,6 +30,9 @@ from job_apply_pro.domain.browser import (
     BrowserSessionCreate,
     BrowserSessionSnapshot,
     BrowserSessionState,
+    BrowserSubmissionReconciliationApproval,
+    BrowserSubmissionReconciliationPreview,
+    BrowserSubmissionReconciliationResult,
     BrowserUploadReconciliationApproval,
     BrowserUploadReconciliationPreview,
     BrowserUploadReconciliationResult,
@@ -412,6 +415,42 @@ def approve_browser_upload_reconciliation(
         )
     try:
         return service.approve_upload_reconciliation(session_id, approval)
+    except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/sessions/{session_id}/submission-reconciliations/{operation_id}/preview",
+    response_model=BrowserSubmissionReconciliationPreview,
+)
+def preview_browser_submission_reconciliation(
+    session_id: BrowserReconciliationId,
+    operation_id: BrowserReconciliationId,
+    service: BrowserServiceDependency,
+) -> BrowserSubmissionReconciliationPreview:
+    try:
+        return service.preview_submission_reconciliation(session_id, operation_id)
+    except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/sessions/{session_id}/submission-reconciliations/{operation_id}/approve",
+    response_model=BrowserSubmissionReconciliationResult,
+)
+def approve_browser_submission_reconciliation(
+    session_id: BrowserReconciliationId,
+    operation_id: BrowserReconciliationId,
+    approval: BrowserSubmissionReconciliationApproval,
+    service: BrowserServiceDependency,
+) -> BrowserSubmissionReconciliationResult:
+    if approval.operation_id != operation_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Browser submission reconciliation operation id does not match the route",
+        )
+    try:
+        return service.approve_submission_reconciliation(session_id, approval)
     except (LookupError, BrowserSessionStateError, BrowserWorkerError) as error:
         raise _http_error(error) from error
 

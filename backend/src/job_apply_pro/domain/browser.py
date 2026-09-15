@@ -744,3 +744,38 @@ class BrowserUploadReconciliationResult(BaseModel):
     reconciliation_kind: Literal["BROWSER_UPLOAD_CONFIRMED"]
     reconciled_at: datetime
     notice: str = Field(min_length=1, max_length=500)
+
+
+class BrowserSubmissionReconciliationPreview(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(pattern=_UUID_PATTERN)
+    attempt_id: str = Field(pattern=_UUID_PATTERN)
+    session_id: str = Field(pattern=_UUID_PATTERN)
+    source_page_type: str = Field(min_length=1, max_length=100)
+    result_page_type: str = Field(min_length=1, max_length=100)
+    result_page_fingerprint: str = Field(min_length=1, max_length=200)
+    review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    notice: str = Field(min_length=1, max_length=500)
+
+
+class BrowserSubmissionReconciliationApproval(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(pattern=_UUID_PATTERN)
+    expected_review_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmation_phrase: Literal["RECONCILE CONFIRMED SUBMISSION"]
+
+
+class BrowserSubmissionReconciliationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    operation_id: str = Field(pattern=_UUID_PATTERN)
+    attempt_id: str = Field(pattern=_UUID_PATTERN)
+    session_id: str = Field(pattern=_UUID_PATTERN)
+    source_page_type: str = Field(min_length=1, max_length=100)
+    result_page_type: str = Field(min_length=1, max_length=100)
+    result_page_fingerprint: str = Field(min_length=1, max_length=200)
+    reconciliation_kind: Literal["BROWSER_SUBMISSION_CONFIRMED"]
+    reconciled_at: datetime
+    notice: str = Field(min_length=1, max_length=500)

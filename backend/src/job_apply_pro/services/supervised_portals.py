@@ -45,7 +45,11 @@ from job_apply_pro.domain.portals import (
     SupervisedPortalStepEvidence,
     SupervisedPortalSubmissionApproval,
 )
-from job_apply_pro.portals.catalog import PortalCatalog, PortalCatalogError
+from job_apply_pro.portals.catalog import (
+    PortalCatalog,
+    PortalCatalogError,
+    confirmation_identifier,
+)
 from job_apply_pro.services.greenhouse_form import (
     GreenhouseFormContractError,
     GreenhouseFormContractService,
@@ -111,11 +115,6 @@ _INTERVENTION_CAPABILITIES = {
     PortalCapability.ASSESSMENT: PortalInterventionReason.ASSESSMENT,
 }
 _SUBMIT_PATTERN = re.compile(r"\b(?:submit(?: application)?|send application|apply now)\b", re.I)
-_CONFIRMATION_PATTERN = re.compile(
-    r"\b(?:confirmation|application|reference)(?:\s+(?:number|id|code))?"
-    r"\s*[:#-]?\s*((?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{3,})\b",
-    re.I,
-)
 
 
 def parse_portal_allowlist(value: str) -> set[PortalKind]:
@@ -736,7 +735,7 @@ class SupervisedPortalService:
                 [PortalInterventionReason.FINAL_SUBMISSION],
             )
         if match.capability is PortalCapability.CONFIRMATION:
-            identifier = self._confirmation_identifier(observation.visible_text)
+            identifier = confirmation_identifier(observation.visible_text)
             verified = self._catalog.verify_confirmation(
                 portal,
                 page_type=match.page_type,
@@ -762,11 +761,6 @@ class SupervisedPortalService:
             SupervisedPortalDisposition.USER_ACTION_REQUIRED,
             [PortalInterventionReason.USER_TAKEOVER],
         )
-
-    @staticmethod
-    def _confirmation_identifier(visible_text: str) -> str | None:
-        match = _CONFIRMATION_PATTERN.search(visible_text)
-        return match.group(1) if match else None
 
     @staticmethod
     def _submission_action(

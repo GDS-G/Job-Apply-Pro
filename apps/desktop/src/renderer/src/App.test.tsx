@@ -670,7 +670,7 @@ describe("App", () => {
 
     expect(
       screen.getByText(
-        "Reviewed Browser Upload Reconciliation v0.77.0-alpha.1",
+        "Reviewed Browser Submission Reconciliation v0.78.0-alpha.1",
       ),
     ).toBeInTheDocument();
     expect(
@@ -1152,6 +1152,116 @@ describe("App", () => {
     );
     expect(
       await screen.findByText(/recorded without uploading again/i),
+    ).toBeInTheDocument();
+  });
+
+  it("reconciles an identifier-backed submission then captures the confirmed run", async () => {
+    const api = window.jobApplyPro.workbench;
+    const operationId = "94a4cc96-07d1-4a0e-8000-a74811a13c0e";
+    const attemptId = "49c70be6-ea1b-4c71-b668-d359f7ce4b06";
+    const sessionId = "8fdf419a-0771-4d75-99d2-c76ba2f89719";
+    const run: SupervisedPortalRunSnapshot = {
+      id: "greenhouse-reconciliation-run",
+      portal: "GREENHOUSE",
+      workflow_id: discoveredWorkflow.workflow_id,
+      browser_session_id: sessionId,
+      state: "SUBMISSION_UNCERTAIN",
+      current_url: "https://boards.greenhouse.io/example/jobs/123#review",
+      allowed_origins: ["https://boards.greenhouse.io"],
+      page_fingerprint: "greenhouse-review-v1",
+      disposition: "CONFIRMATION_UNCERTAIN",
+      intervention_reasons: ["USER_TAKEOVER"],
+      evidence: [],
+      observed_controls: [],
+      greenhouse_form: null,
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    };
+    const operations = await api.getOperationsDashboard();
+    vi.spyOn(api, "listSupervisedPortalRuns").mockResolvedValue([run]);
+    vi.spyOn(api, "listBrowserSessions").mockResolvedValue([
+      {
+        id: sessionId,
+        workflow_id: discoveredWorkflow.workflow_id,
+        engine: "chromium",
+        profile_name: "fixture-submission-profile",
+        state: "USER_TAKEOVER",
+        current_url: run.current_url,
+        allowed_origins: run.allowed_origins,
+        observation: null,
+        action_count: 1,
+        trace_path: null,
+        created_at: discoveredWorkflow.updated_at,
+        updated_at: discoveredWorkflow.updated_at,
+      },
+    ]);
+    vi.spyOn(api, "getOperationsDashboard").mockResolvedValue({
+      ...operations,
+      external_effects: {
+        total: 1,
+        unresolved: 1,
+        by_status: { UNCERTAIN: 1 },
+        by_kind: { BROWSER_ACTION: 1 },
+      },
+      unresolved_external_effects: [
+        {
+          id: operationId,
+          kind: "BROWSER_ACTION",
+          subject_type: "browser_session",
+          subject_id: sessionId,
+          status: "UNCERTAIN",
+          error_code: "WORKER_RESPONSE_UNAVAILABLE",
+          attempt_count: 1,
+          created_at: discoveredWorkflow.updated_at,
+          updated_at: discoveredWorkflow.updated_at,
+          completed_at: discoveredWorkflow.updated_at,
+          reconciliation_available: true,
+          reconciliation_kind: "BROWSER_SUBMISSION_CONFIRMED",
+        },
+      ],
+    });
+    const reconcile = vi
+      .spyOn(api, "reconcileBrowserSubmission")
+      .mockResolvedValue({
+        operation_id: operationId,
+        attempt_id: attemptId,
+        session_id: sessionId,
+        source_page_type: "SUBMISSION_REVIEW",
+        result_page_type: "CONFIRMATION",
+        result_page_fingerprint: "greenhouse-confirmation-v2",
+        reconciliation_kind: "BROWSER_SUBMISSION_CONFIRMED",
+        reconciled_at: "2026-09-15T21:00:00+00:00",
+        notice: "Confirmed submission recorded without submitting again.",
+      });
+    const capture = vi.spyOn(api, "captureSupervisedPortal").mockResolvedValue({
+      ...run,
+      state: "SUBMISSION_CONFIRMED",
+      current_url: "https://boards.greenhouse.io/example/jobs/123/confirmation",
+      page_fingerprint: "greenhouse-confirmation-v2",
+      disposition: "CONFIRMATION_VERIFIED",
+      intervention_reasons: [],
+    });
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /verify confirmed submission/i,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(reconcile).toHaveBeenCalledExactlyOnceWith(operationId, sessionId),
+    );
+    await waitFor(() =>
+      expect(capture).toHaveBeenCalledExactlyOnceWith(
+        run.id,
+        run.page_fingerprint,
+      ),
+    );
+    expect(
+      await screen.findByText(
+        /supervised portal run is now confirmed and stopped/i,
+      ),
     ).toBeInTheDocument();
   });
 

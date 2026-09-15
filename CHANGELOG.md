@@ -2,6 +2,19 @@
 
 All notable changes follow Keep a Changelog conventions and Semantic Versioning.
 
+## [0.78.0-alpha.1] - Unreleased
+
+### Reviewed Browser Submission Reconciliation
+
+- Prepare encrypted reconciliation intent before dispatch only for the exact reviewed Greenhouse final-submit control.
+- Bind operation/attempt/request, control/locator, source origin/page/review stage/form review, portal-adapter version, and identifier-backed confirmation postcondition.
+- Require two fresh read-only observations of the same-origin Greenhouse confirmation stage, provider confirmation signal, changed page fingerprint, and bounded confirmation identifier.
+- Keep the raw confirmation identifier out of the API, Electron bridge, renderer, and public effect record while binding a keyed identifier fingerprint into reviewed evidence.
+- Reprove on approval, preserve the original `UNCERTAIN` operation and attempt, and terminalize only reconciliation without repeating a click or submission.
+- Follow successful desktop reconciliation with the existing read-only supervised capture so the run becomes `SUBMISSION_CONFIRMED` only while the confirmed page remains current.
+- Add authenticated API, typed client/preload contracts, strict IPC identifiers, a Cancel-default native warning, a submission-specific Operations control, and exact restore authentication.
+- Reuse schema `20260915_0030`; production Greenhouse, authorized live acceptance, signing, and physical Windows validation remain separate gates.
+
 ## [0.77.0-alpha.1] - Unreleased
 
 ### Reviewed Browser Upload Reconciliation

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from urllib.parse import urlsplit
 
 from job_apply_pro.domain.portals import (
@@ -18,6 +19,20 @@ from job_apply_pro.domain.portals import (
 
 class PortalCatalogError(ValueError):
     pass
+
+
+_CONFIRMATION_IDENTIFIER_PATTERN = re.compile(
+    r"\b(?:confirmation|application|reference)(?:\s+(?:number|id|code))?"
+    r"\s*[:#-]?\s*((?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{3,})\b",
+    re.I,
+)
+
+
+def confirmation_identifier(visible_text: str) -> str | None:
+    """Extract the bounded identifier used by portal confirmation policy."""
+
+    match = _CONFIRMATION_IDENTIFIER_PATTERN.search(visible_text)
+    return match.group(1) if match else None
 
 
 _FLOW_CAPABILITIES = [
