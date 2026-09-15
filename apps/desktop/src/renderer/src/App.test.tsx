@@ -199,6 +199,7 @@ describe("App", () => {
           widget_expanded: null,
           widget_multiselectable: false,
           widget_searchable: false,
+          widget_controls_one_visible_listbox: false,
           accept: "",
           checked: false,
           required: true,
@@ -344,6 +345,170 @@ describe("App", () => {
         action: "REVIEW_DOCUMENT_UPLOAD",
         control_key: "resume",
         form_review_fingerprint: run.greenhouse_form?.review_fingerprint,
+      }),
+    );
+  });
+
+  it("maps only a Greenhouse reviewed custom control to a single-select binding", async () => {
+    const run: SupervisedPortalRunSnapshot = {
+      id: "greenhouse-widget-run",
+      portal: "GREENHOUSE",
+      workflow_id: discoveredWorkflow.workflow_id,
+      browser_session_id: "greenhouse-widget-browser",
+      state: "AWAITING_USER",
+      current_url:
+        "https://job-boards.greenhouse.io/synthetic/jobs/100#questions",
+      allowed_origins: ["https://job-boards.greenhouse.io"],
+      page_fingerprint: "greenhouse-widget-page",
+      disposition: "USER_ACTION_REQUIRED",
+      intervention_reasons: [],
+      evidence: [],
+      observed_controls: [
+        {
+          index: 0,
+          control_key: "work-location",
+          kind: "CUSTOM",
+          tag: "input",
+          input_type: "text",
+          role: "combobox",
+          label: "Preferred work location",
+          repeat_count: 1,
+          widget_popup: "listbox",
+          widget_expanded: true,
+          widget_multiselectable: false,
+          widget_searchable: true,
+          widget_controls_one_visible_listbox: true,
+          required: true,
+          native_required: true,
+          visible: true,
+          options: [
+            { value: "remote-internal", label: "Remote" },
+            { value: "hybrid-internal", label: "Hybrid" },
+          ],
+          locator: {
+            strategy: "LABEL",
+            value: "Preferred work location",
+            exact: true,
+          },
+        } as never,
+      ],
+      greenhouse_form: {
+        policy_version: "greenhouse-form-execution-contract/1",
+        page_fingerprint: "greenhouse-widget-page",
+        page_type: "APPLICATION_FORM",
+        stage: "APPLICATION",
+        required_control_count: 1,
+        satisfied_required_count: 0,
+        review_field_count: 1,
+        upload_review_count: 0,
+        manual_intervention_count: 0,
+        navigation_control_key: null,
+        navigation_label: null,
+        ready_to_advance: false,
+        controls: [
+          {
+            control_key: "work-location",
+            label: "Preferred work location",
+            control_kind: "CUSTOM",
+            required: true,
+            blocking: true,
+            action: "REVIEW_FIELD",
+            postcondition: "VALUE_EQUALS",
+            reason: "Bounded reviewed single-select widget",
+          },
+        ],
+        limitations: [],
+        review_fingerprint: "d".repeat(64),
+      },
+      created_at: discoveredWorkflow.updated_at,
+      updated_at: discoveredWorkflow.updated_at,
+    };
+    vi.spyOn(window.jobApplyPro.workbench, "listWorkflows").mockResolvedValue([
+      discoveredWorkflow,
+    ]);
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "listSupervisedPortalRuns",
+    ).mockResolvedValue([run]);
+    vi.spyOn(
+      window.jobApplyPro.workbench,
+      "listApplicationAnswers",
+    ).mockResolvedValue([
+      {
+        id: "answer-widget",
+        application_id: discoveredWorkflow.application_id,
+        profile_id: discoveredWorkflow.profile_id,
+        job_id: "fixture-job",
+        revision: 2,
+        question: "Preferred work location",
+        normalized_question: "preferred work location",
+        canonical_field: "work_arrangement",
+        answer_kind: "MULTIPLE_CHOICE",
+        validation_rules: { choices: ["Remote", "Hybrid"] },
+        answer: "Remote",
+        status: "REVIEWED",
+        source_type: "USER_REVIEWED",
+        source_answer_id: null,
+        library_answer_id: null,
+        evidence_claim_ids: [],
+        retrieval_results: [],
+        provider_id: null,
+        model_id: null,
+        prompt_version: null,
+        policy_version: "fixture",
+        confidence: 1,
+        character_limit: 200,
+        character_limit_applied: false,
+        limitations: [],
+        user_edited: true,
+        reuse_permission: "APPLICATIONS",
+        created_at: discoveredWorkflow.updated_at,
+        updated_at: discoveredWorkflow.updated_at,
+      },
+    ]);
+    const preview = vi
+      .spyOn(window.jobApplyPro.workbench, "previewApplicationFieldBinding")
+      .mockRejectedValue(new Error("Captured expected preview input"));
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review field binding" }),
+    );
+    expect(
+      screen.getByRole("option", { name: /single select widget/i }),
+    ).toHaveValue("work-location");
+    const reviewedAnswerSelect = screen
+      .getAllByLabelText("Reviewed application answer")
+      .find((element) => element.tagName === "SELECT");
+    expect(reviewedAnswerSelect).toBeDefined();
+    fireEvent.change(reviewedAnswerSelect!, {
+      target: { value: "answer-widget" },
+    });
+    const previewButton = screen.getByRole("button", {
+      name: "Preview exact binding",
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    fireEvent.click(previewButton);
+
+    await waitFor(() =>
+      expect(preview).toHaveBeenCalledExactlyOnceWith({
+        application_answer_id: "answer-widget",
+        observed_field: {
+          portal: "GREENHOUSE",
+          page_fingerprint: run.page_fingerprint,
+          control_key: "work-location",
+          control_kind: "SINGLE_SELECT_WIDGET",
+          label: "Preferred work location",
+          required: true,
+          options: ["Remote", "Hybrid"],
+          character_limit: null,
+          minimum_number: null,
+          maximum_number: null,
+          earliest_date: null,
+          latest_date: null,
+          legal_attestation: undefined,
+        },
       }),
     );
   });
@@ -504,7 +669,9 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByText("Reviewed Greenhouse Final Submission v0.69.0-alpha.1"),
+      screen.getByText(
+        "Reviewed Greenhouse Single-Select Widgets v0.70.0-alpha.1",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Guided application workspace" }),

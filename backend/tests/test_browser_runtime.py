@@ -102,6 +102,30 @@ class _FixtureHandler(BaseHTTPRequestHandler):
                   </select>
                 </body>
             """,
+            "/single-select-widget": """
+                <body data-page-type="QUESTIONNAIRE">
+                  <h1>Location preference</h1>
+                  <label id="work-location-label" for="work-location">
+                    Preferred work location
+                  </label>
+                  <input id="work-location" name="work_location" role="combobox"
+                    aria-labelledby="work-location-label" aria-haspopup="listbox"
+                    aria-expanded="true" aria-controls="work-location-options" required>
+                  <button type="button" onclick="document.getElementById('work-location')
+                    .setAttribute('aria-expanded', 'false')">Collapse widget</button>
+                  <div id="work-location-options" role="listbox">
+                    <div role="option" data-value="remote"
+                      onclick="document.getElementById('work-location').value='Remote'">
+                      Remote
+                    </div>
+                    <div role="option" data-value="hybrid"
+                      onclick="document.getElementById('work-location').value='Hybrid'">
+                      Hybrid
+                    </div>
+                    <div role="option" aria-disabled="true" data-value="on-site">On-site</div>
+                  </div>
+                </body>
+            """,
             "/conditional-fields": """
                 <body data-page-type="QUESTIONNAIRE">
                   <h1>Conditional questions</h1>
@@ -518,6 +542,99 @@ def test_select_by_visible_label_ignores_hidden_option_value(
                 ),
             )
             assert service.execute_action(started.id, action).verified
+    finally:
+        worker.close()
+
+
+def test_controlled_single_select_uses_one_owned_visible_option(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/single-select-widget"),
+                    profile_name="controlled-single-select",
+                )
+            )
+            assert started.observation is not None
+            control = started.observation.controls[0]
+            assert control.kind is BrowserControlKind.CUSTOM
+            assert control.role == "combobox"
+            assert control.widget_popup == "listbox"
+            assert control.widget_expanded is True
+            assert control.widget_searchable
+            assert not control.widget_multiselectable
+            assert control.widget_controls_one_visible_listbox
+            assert [option.label for option in control.options] == ["Remote", "Hybrid"]
+            assert control.locator is not None
+
+            action = BrowserAction(
+                kind=BrowserActionKind.CHOOSE_CONTROLLED_OPTION,
+                locator=control.locator,
+                value="Remote",
+                intended_result="Choose one reviewed controlled option",
+                verification=BrowserVerification(
+                    kind=VerificationKind.VALUE_EQUALS,
+                    locator=control.locator,
+                    value="Remote",
+                ),
+            )
+            assert service.execute_action(started.id, action).verified
+    finally:
+        worker.close()
+
+
+def test_controlled_single_select_refuses_live_collapsed_state(
+    session: Session, tmp_path: Path
+) -> None:
+    workflow_id = _create_workflow(session)
+    worker = BrowserWorkerClient(timeout_seconds=75)
+    service = _service(session, tmp_path, worker)
+    try:
+        with _fixture_site() as origin:
+            started = service.create_session(
+                BrowserSessionCreate(
+                    workflow_id=workflow_id,
+                    start_url=AnyHttpUrl(f"{origin}/single-select-widget"),
+                    profile_name="collapsed-single-select",
+                )
+            )
+            assert started.observation is not None
+            control = started.observation.controls[0]
+            collapse = next(
+                item for item in started.observation.controls if item.text == "Collapse widget"
+            )
+            assert collapse.locator is not None
+            assert service.execute_action(
+                started.id,
+                BrowserAction(
+                    kind=BrowserActionKind.CLICK,
+                    locator=collapse.locator,
+                    intended_result="Collapse the fixture widget before the guarded action",
+                ),
+            ).verified
+            assert control.locator is not None
+
+            with pytest.raises(BrowserActionUncertainError, match="outcome is uncertain"):
+                service.execute_action(
+                    started.id,
+                    BrowserAction(
+                        kind=BrowserActionKind.CHOOSE_CONTROLLED_OPTION,
+                        locator=control.locator,
+                        value="Remote",
+                        intended_result="Refuse a changed collapsed widget",
+                        verification=BrowserVerification(
+                            kind=VerificationKind.VALUE_EQUALS,
+                            locator=control.locator,
+                            value="Remote",
+                        ),
+                    ),
+                )
     finally:
         worker.close()
 

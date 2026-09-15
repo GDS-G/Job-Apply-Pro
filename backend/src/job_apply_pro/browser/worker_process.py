@@ -296,6 +296,38 @@ class BrowserWorker:
                 if action.value is None:
                     raise ValueError("SELECT_LABEL requires a visible label")
                 locator.select_option(label=action.value, timeout=timeout)
+            elif action.kind is BrowserActionKind.CHOOSE_CONTROLLED_OPTION:
+                if action.value is None:
+                    raise ValueError("CHOOSE_CONTROLLED_OPTION requires a visible label")
+                if locator.count() != 1:
+                    raise ValueError("Controlled option action requires one exact combobox")
+                if (
+                    locator.evaluate("element => element.tagName.toLowerCase()") != "input"
+                    or (locator.get_attribute("role") or "").casefold() != "combobox"
+                    or (locator.get_attribute("aria-haspopup") or "").casefold() != "listbox"
+                ):
+                    raise ValueError("Controlled option action requires an input combobox")
+                if not locator.is_visible() or not locator.is_enabled():
+                    raise ValueError("Controlled option action requires a visible enabled combobox")
+                if (locator.get_attribute("aria-expanded") or "").casefold() != "true":
+                    raise ValueError(
+                        "Controlled option action requires a currently expanded combobox"
+                    )
+                controlled_ids = (locator.get_attribute("aria-controls") or "").split()
+                if len(controlled_ids) != 1:
+                    raise ValueError("Controlled option action requires one owned listbox")
+                listbox = page.locator(f'[id={json.dumps(controlled_ids[0])}][role="listbox"]')
+                if listbox.count() != 1:
+                    raise ValueError("Controlled option action requires one owned listbox")
+                if (listbox.get_attribute("aria-multiselectable") or "").casefold() == "true":
+                    raise ValueError("Controlled option action cannot use a multi-select listbox")
+                listbox.wait_for(state="visible", timeout=timeout)
+                option = listbox.get_by_role("option", name=action.value, exact=True)
+                if option.count() != 1 or not option.is_visible() or not option.is_enabled():
+                    raise ValueError(
+                        "Controlled option action requires one exact visible enabled option"
+                    )
+                option.click(timeout=timeout)
             elif action.kind is BrowserActionKind.CHECK:
                 locator.check(timeout=timeout)
             elif action.kind is BrowserActionKind.UNCHECK:
@@ -453,7 +485,10 @@ class BrowserWorker:
                 .find(candidate => candidate?.getAttribute('role') === 'listbox');
               const widgetOptions = controlledListbox
                 ? Array.from(controlledListbox.querySelectorAll('[role="option"]'))
-                    .filter(isVisible).slice(0, 100).map(option => ({
+                    .filter(option => isVisible(option) &&
+                      !option.hasAttribute('disabled') &&
+                      (option.getAttribute('aria-disabled') || '').toLowerCase() !== 'true')
+                    .slice(0, 100).map(option => ({
                       value: (option.getAttribute('data-value') || option.textContent || '')
                         .trim().slice(0, 500),
                       label: (option.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 300)
@@ -486,6 +521,8 @@ class BrowserWorker:
                     .toLowerCase() === 'true',
                 widgetSearchable: el.getAttribute('role') === 'combobox' &&
                   (el.tagName.toLowerCase() === 'input' || el.hasAttribute('contenteditable')),
+                widgetControlsOneVisibleListbox: controlledIds.length === 1 &&
+                  Boolean(controlledListbox && isVisible(controlledListbox)),
                 accept: el.getAttribute('accept') || '',
                 checked: 'checked' in el ? Boolean(el.checked) : false,
                 maxLength: 'maxLength' in el && el.maxLength > 0 ? el.maxLength : null,

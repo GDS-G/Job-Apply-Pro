@@ -42,6 +42,7 @@ from job_apply_pro.security.encryption import SensitiveDataCipher
 from job_apply_pro.services.greenhouse_form import (
     GreenhouseFormContractError,
     GreenhouseFormContractService,
+    is_reviewed_greenhouse_single_select,
 )
 
 
@@ -197,7 +198,7 @@ class ApplicationFieldExecutionService:
                     "Approved field is missing or ambiguous on the current page"
                 )
             control = controls[0]
-            self._validate_control(binding, control)
+            self._validate_control(binding, control, portal=run.portal)
             if run.portal is PortalKind.GREENHOUSE:
                 if approval.greenhouse_form_review_fingerprint is None:
                     raise FieldExecutionPolicyError(
@@ -221,7 +222,7 @@ class ApplicationFieldExecutionService:
                 ]
                 if len(contracts) != 1:
                     raise FieldExecutionPolicyError(
-                        "Current Greenhouse contract does not authorize this native field"
+                        "Current Greenhouse contract does not authorize this reviewed field"
                     )
             elif approval.greenhouse_form_review_fingerprint is not None:
                 raise FieldExecutionPolicyError(
@@ -257,9 +258,17 @@ class ApplicationFieldExecutionService:
 
     @staticmethod
     def _validate_control(
-        binding: ApplicationFieldBindingRecord, control: BrowserObservedControl
+        binding: ApplicationFieldBindingRecord,
+        control: BrowserObservedControl,
+        *,
+        portal: PortalKind | None = None,
     ) -> None:
-        if control.kind not in _SUPPORTED_CONTROL_KINDS:
+        reviewed_single_select = (
+            portal is PortalKind.GREENHOUSE
+            and binding.control_kind is PortalFieldControlKind.SINGLE_SELECT_WIDGET
+            and is_reviewed_greenhouse_single_select(control)
+        )
+        if control.kind not in _SUPPORTED_CONTROL_KINDS and not reviewed_single_select:
             raise FieldExecutionPolicyError(
                 f"{control.kind.value} controls require visible user handling"
             )
@@ -283,7 +292,7 @@ class ApplicationFieldExecutionService:
             raise FieldExecutionPolicyError("Hidden fields cannot be executed")
         if control.legal_attestation:
             raise FieldExecutionPolicyError("Legal attestations require visible user handling")
-        if control.kind.value != binding.control_kind.value:
+        if not reviewed_single_select and control.kind.value != binding.control_kind.value:
             raise FieldExecutionConflictError("Observed control kind changed after binding")
         if control.kind is BrowserControlKind.RADIO_GROUP and any(
             option.locator
@@ -308,11 +317,16 @@ class ApplicationFieldExecutionService:
     def _observed_field(
         run: SupervisedPortalRunSnapshot, control: BrowserObservedControl
     ) -> ObservedPortalField:
+        control_kind = (
+            PortalFieldControlKind.SINGLE_SELECT_WIDGET
+            if run.portal is PortalKind.GREENHOUSE and is_reviewed_greenhouse_single_select(control)
+            else PortalFieldControlKind(control.kind.value)
+        )
         return ObservedPortalField(
             portal=run.portal.value,
             page_fingerprint=run.page_fingerprint,
             control_key=control.control_key,
-            control_kind=PortalFieldControlKind(control.kind.value),
+            control_kind=control_kind,
             label=(
                 control.label
                 or control.group_label
@@ -334,7 +348,24 @@ class ApplicationFieldExecutionService:
         locator = control.locator
         if locator is None:  # pragma: no cover - validated before construction
             raise FieldExecutionPolicyError("Field has no deterministic semantic locator")
-        if control.kind is BrowserControlKind.RADIO_GROUP:
+        if control.kind is BrowserControlKind.CUSTOM:
+            if not is_reviewed_greenhouse_single_select(control):
+                raise FieldExecutionPolicyError(
+                    "Custom widgets require a reviewed Greenhouse single-select contract"
+                )
+            matches = [option for option in control.options if answer_value == option.label]
+            if len(matches) != 1:
+                raise FieldExecutionConflictError(
+                    "Reviewed answer does not identify exactly one controlled option"
+                )
+            value = matches[0].label
+            kind = BrowserActionKind.CHOOSE_CONTROLLED_OPTION
+            verification = BrowserVerification(
+                kind=VerificationKind.VALUE_EQUALS,
+                locator=locator,
+                value=value,
+            )
+        elif control.kind is BrowserControlKind.RADIO_GROUP:
             matches = [option for option in control.options if answer_value == option.label]
             if len(matches) != 1 or matches[0].locator is None:
                 raise FieldExecutionConflictError(

@@ -40,6 +40,7 @@ class BrowserActionKind(StrEnum):
     FILL = "FILL"
     SELECT = "SELECT"
     SELECT_LABEL = "SELECT_LABEL"
+    CHOOSE_CONTROLLED_OPTION = "CHOOSE_CONTROLLED_OPTION"
     CHECK = "CHECK"
     UNCHECK = "UNCHECK"
     UPLOAD = "UPLOAD"
@@ -193,6 +194,7 @@ class BrowserObservedControl(BaseModel):
     widget_expanded: bool | None = None
     widget_multiselectable: bool = False
     widget_searchable: bool = False
+    widget_controls_one_visible_listbox: bool = False
     accept: str = Field(default="", max_length=500)
     checked: bool = False
     required: bool = False
@@ -427,6 +429,12 @@ class BrowserObservedControl(BaseModel):
                 item.get("widget_multiselectable", item.get("widgetMultiselectable"))
             ),
             "widget_searchable": bool(item.get("widget_searchable", item.get("widgetSearchable"))),
+            "widget_controls_one_visible_listbox": bool(
+                item.get(
+                    "widget_controls_one_visible_listbox",
+                    item.get("widgetControlsOneVisibleListbox"),
+                )
+            ),
             "accept": str(item.get("accept", ""))[:500],
             "checked": bool(item.get("checked")),
             "required": bool(item.get("required")) or native_required or accessible_required,

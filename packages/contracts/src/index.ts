@@ -1,6 +1,6 @@
 export const buildInfo = {
-  name: "Reviewed Greenhouse Final Submission",
-  version: "0.69.0-alpha.1",
+  name: "Reviewed Greenhouse Single-Select Widgets",
+  version: "0.70.0-alpha.1",
   channel: "alpha",
 } as const;
 
@@ -341,6 +341,7 @@ export type BrowserActionKind =
   | "FILL"
   | "SELECT"
   | "SELECT_LABEL"
+  | "CHOOSE_CONTROLLED_OPTION"
   | "CHECK"
   | "UNCHECK"
   | "UPLOAD"
@@ -395,6 +396,7 @@ export interface BrowserObservedControl {
   widget_expanded?: boolean | null;
   widget_multiselectable: boolean;
   widget_searchable: boolean;
+  widget_controls_one_visible_listbox: boolean;
   accept: string;
   checked: boolean;
   required: boolean;
@@ -1642,6 +1644,7 @@ export type PortalFieldControlKind =
   | "NUMBER"
   | "DATE"
   | "SELECT"
+  | "SINGLE_SELECT_WIDGET"
   | "RADIO_GROUP"
   | "CHECKBOX"
   | "FILE_UPLOAD"
@@ -1721,7 +1724,13 @@ export interface ApplicationFieldExecution {
   page_fingerprint_before: string;
   page_fingerprint_after: string;
   control_key: string;
-  action_kind: "FILL" | "SELECT" | "SELECT_LABEL" | "CHECK" | "UNCHECK";
+  action_kind:
+    | "FILL"
+    | "SELECT"
+    | "SELECT_LABEL"
+    | "CHOOSE_CONTROLLED_OPTION"
+    | "CHECK"
+    | "UNCHECK";
   verified: boolean;
   action_fingerprint: string;
   error?: string | null;

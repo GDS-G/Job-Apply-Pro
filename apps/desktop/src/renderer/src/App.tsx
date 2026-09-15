@@ -1061,6 +1061,14 @@ export function App() {
     const detected = latestSupervisedRun?.observed_controls.find(
       (control) => control.control_key === detectedKey,
     );
+    const detectedGreenhouseContract =
+      detected && latestSupervisedRun?.portal === "GREENHOUSE"
+        ? latestSupervisedRun.greenhouse_form?.controls.find(
+            (item) =>
+              item.control_key === detected.control_key &&
+              item.action === "REVIEW_FIELD",
+          )
+        : null;
     const input: ApplicationFieldBindingPreviewInput = {
       application_answer_id: String(form.get("application_answer_id")),
       observed_field: detected
@@ -1068,8 +1076,10 @@ export function App() {
             portal: latestSupervisedRun!.portal,
             page_fingerprint: latestSupervisedRun!.page_fingerprint,
             control_key: detected.control_key,
-            control_kind:
-              detected.kind as ApplicationFieldBindingPreviewInput["observed_field"]["control_kind"],
+            control_kind: (detected.kind === "CUSTOM" &&
+            detectedGreenhouseContract
+              ? "SINGLE_SELECT_WIDGET"
+              : detected.kind) as ApplicationFieldBindingPreviewInput["observed_field"]["control_kind"],
             label:
               detected.label ||
               detected.group_label ||
@@ -1669,7 +1679,7 @@ export function App() {
             </span>
             <div>
               <strong>
-                Reviewed Greenhouse Final Submission v0.69.0-alpha.1
+                Reviewed Greenhouse Single-Select Widgets v0.70.0-alpha.1
               </strong>
               <p>
                 One exact current Greenhouse final-submit control can now use
@@ -2754,7 +2764,16 @@ export function App() {
                             control.group_label ||
                             control.field_name ||
                             control.kind}{" "}
-                          · {control.kind.replaceAll("_", " ")}
+                          ·{" "}
+                          {control.kind === "CUSTOM" &&
+                          latestSupervisedRun?.portal === "GREENHOUSE" &&
+                          latestSupervisedRun.greenhouse_form?.controls.some(
+                            (item) =>
+                              item.control_key === control.control_key &&
+                              item.action === "REVIEW_FIELD",
+                          )
+                            ? "single select widget"
+                            : control.kind.replaceAll("_", " ")}
                           {control.required ? " · required" : ""}
                           {control.repeat_count > 1
                             ? ` / repeated ${Number(control.repeat_index ?? 0) + 1}/${control.repeat_count}`
@@ -2773,23 +2792,47 @@ export function App() {
                 </label>
                 <label>
                   Portal / ATS
-                  <input name="portal" maxLength={80} required />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="portal"
+                    maxLength={80}
+                    required={!detectedControlKey}
+                  />
                 </label>
                 <label>
                   Page fingerprint
-                  <input name="page_fingerprint" maxLength={200} required />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="page_fingerprint"
+                    maxLength={200}
+                    required={!detectedControlKey}
+                  />
                 </label>
                 <label>
                   Stable control key
-                  <input name="control_key" maxLength={200} required />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="control_key"
+                    maxLength={200}
+                    required={!detectedControlKey}
+                  />
                 </label>
                 <label>
                   Control label
-                  <input name="label" maxLength={500} required />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="label"
+                    maxLength={500}
+                    required={!detectedControlKey}
+                  />
                 </label>
                 <label>
                   Control kind
-                  <select name="control_kind" defaultValue="TEXT">
+                  <select
+                    disabled={Boolean(detectedControlKey)}
+                    name="control_kind"
+                    defaultValue="TEXT"
+                  >
                     <option value="TEXT">Text</option>
                     <option value="TEXT_AREA">Text area</option>
                     <option value="EMAIL">Email</option>
@@ -2807,11 +2850,16 @@ export function App() {
                 </label>
                 <label>
                   Observed options (one per line)
-                  <textarea name="options" maxLength={5000} />
+                  <textarea
+                    disabled={Boolean(detectedControlKey)}
+                    name="options"
+                    maxLength={5000}
+                  />
                 </label>
                 <label>
                   Character limit
                   <input
+                    disabled={Boolean(detectedControlKey)}
                     name="character_limit"
                     type="number"
                     min="1"
@@ -2820,26 +2868,53 @@ export function App() {
                 </label>
                 <label>
                   Minimum number
-                  <input name="minimum_number" type="number" step="any" />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="minimum_number"
+                    type="number"
+                    step="any"
+                  />
                 </label>
                 <label>
                   Maximum number
-                  <input name="maximum_number" type="number" step="any" />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="maximum_number"
+                    type="number"
+                    step="any"
+                  />
                 </label>
                 <label>
                   Earliest date
-                  <input name="earliest_date" type="date" />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="earliest_date"
+                    type="date"
+                  />
                 </label>
                 <label>
                   Latest date
-                  <input name="latest_date" type="date" />
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="latest_date"
+                    type="date"
+                  />
                 </label>
                 <label className="checkbox-row">
-                  <input name="required" type="checkbox" /> Required control
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="required"
+                    type="checkbox"
+                  />{" "}
+                  Required control
                 </label>
                 <label className="checkbox-row">
-                  <input name="legal_attestation" type="checkbox" /> Legal
-                  attestation or signature
+                  <input
+                    disabled={Boolean(detectedControlKey)}
+                    name="legal_attestation"
+                    type="checkbox"
+                  />{" "}
+                  Legal attestation or signature
                 </label>
                 <button
                   className="button button--secondary form-submit"

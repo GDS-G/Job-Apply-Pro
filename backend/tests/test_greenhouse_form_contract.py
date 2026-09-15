@@ -72,6 +72,32 @@ def _cases() -> dict[str, dict[str, Any]]:
     return {str(case["id"]): case for case in cases if isinstance(case, dict)}
 
 
+def _single_select_widget() -> BrowserObservedControl:
+    return BrowserObservedControl.model_validate(
+        {
+            "index": 0,
+            "control_key": "work-location",
+            "tag": "input",
+            "type": "text",
+            "role": "combobox",
+            "label": "Preferred work location",
+            "required": True,
+            "native_required": True,
+            "visible": True,
+            "aria-haspopup": "listbox",
+            "widget_popup": "listbox",
+            "widget_expanded": True,
+            "widget_searchable": True,
+            "widget_multiselectable": False,
+            "widget_controls_one_visible_listbox": True,
+            "options": [
+                {"value": "remote-internal", "label": "Remote"},
+                {"value": "hybrid-internal", "label": "Hybrid"},
+            ],
+        }
+    )
+
+
 def _result(
     before: BrowserObservation,
     after: BrowserObservation,
@@ -135,6 +161,55 @@ def test_sanitized_greenhouse_form_corpus_exercises_every_stage_and_boundary() -
     )
     review = service.assess(_observation(cases["submission-review"]))
     assert review.controls[0].action is GreenhouseFormAction.FINAL_SUBMISSION_GATE
+
+
+def test_expanded_greenhouse_single_select_is_a_reviewed_field() -> None:
+    service = GreenhouseFormContractService()
+    observation = _observation(_cases()["contact-ready"]).model_copy(
+        update={"controls": [_single_select_widget()]}
+    )
+
+    assessment = service.assess(observation)
+
+    assert assessment.review_field_count == 1
+    assert assessment.manual_intervention_count == 0
+    assert assessment.controls[0].action is GreenhouseFormAction.REVIEW_FIELD
+    assert assessment.controls[0].postcondition is GreenhousePostconditionKind.VALUE_EQUALS
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("widget_expanded", False),
+        ("widget_multiselectable", True),
+        ("widget_popup", "menu"),
+        ("widget_searchable", False),
+        ("widget_controls_one_visible_listbox", False),
+        ("repeat_count", 2),
+        ("locator", None),
+        ("options", []),
+    ],
+    ids=[
+        "collapsed",
+        "multiselect",
+        "non-listbox",
+        "non-searchable",
+        "unowned-or-hidden-listbox",
+        "repeated",
+        "unlocatable",
+        "no-options",
+    ],
+)
+def test_unbounded_greenhouse_widgets_remain_manual(field: str, value: object) -> None:
+    service = GreenhouseFormContractService()
+    unsafe = _single_select_widget().model_copy(update={field: value})
+    observation = _observation(_cases()["contact-ready"]).model_copy(update={"controls": [unsafe]})
+
+    assessment = service.assess(observation)
+
+    assert assessment.review_field_count == 0
+    assert assessment.manual_intervention_count == 1
+    assert assessment.controls[0].action is GreenhouseFormAction.USER_INTERVENTION
 
 
 @pytest.mark.parametrize(

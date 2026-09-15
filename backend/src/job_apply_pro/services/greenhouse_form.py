@@ -101,6 +101,34 @@ def _basename(value: str) -> str:
     return PurePath(value.replace("\\", "/")).name
 
 
+def is_reviewed_greenhouse_single_select(control: BrowserObservedControl) -> bool:
+    """Return whether one observed custom widget has a bounded executable shape."""
+
+    labels = [option.label for option in control.options]
+    return (
+        control.kind is BrowserControlKind.CUSTOM
+        and control.tag.casefold() == "input"
+        and control.role.casefold() == "combobox"
+        and control.widget_popup.casefold() == "listbox"
+        and control.widget_expanded is True
+        and control.widget_searchable
+        and control.widget_controls_one_visible_listbox
+        and not control.widget_multiselectable
+        and control.visible
+        and not control.disabled
+        and not control.read_only
+        and not control.busy
+        and not control.inert
+        and not control.accessibility_hidden
+        and not control.legal_attestation
+        and control.repeat_count == 1
+        and control.locator is not None
+        and bool(labels)
+        and all(label and label == label.strip() for label in labels)
+        and len({label.casefold() for label in labels}) == len(labels)
+    )
+
+
 class GreenhouseFormContractService:
     """Classify bounded Greenhouse observations without executing browser actions."""
 
@@ -198,8 +226,9 @@ class GreenhouseFormContractService:
                 "evidence remains separate."
             ),
             (
-                "Custom widgets, legal attestations, signatures, and final submission remain "
-                "manual or separately gated."
+                "Only bounded expanded single-select combobox widgets may use reviewed field "
+                "execution; other custom widgets, legal attestations, signatures, and final "
+                "submission remain manual or separately gated."
             ),
         ]
         payload: dict[str, object] = {
@@ -402,10 +431,11 @@ class GreenhouseFormContractService:
                     "and post-action filename observation."
                 ),
             )
+        reviewed_single_select = is_reviewed_greenhouse_single_select(control)
         manual = (
-            control.kind
+            (control.kind is BrowserControlKind.CUSTOM and not reviewed_single_select)
+            or control.kind
             in {
-                BrowserControlKind.CUSTOM,
                 BrowserControlKind.SIGNATURE,
                 BrowserControlKind.DISCLOSURE,
             }
@@ -447,7 +477,7 @@ class GreenhouseFormContractService:
                     "and value privacy remain outside this metadata-only assessment."
                 ),
             )
-        if control.kind in _FIELD_KINDS:
+        if control.kind in _FIELD_KINDS or reviewed_single_select:
             postcondition = {
                 BrowserControlKind.SELECT: GreenhousePostconditionKind.SELECTED_LABEL_EQUALS,
                 BrowserControlKind.RADIO_GROUP: GreenhousePostconditionKind.CHECKED_EQUALS,
@@ -462,8 +492,9 @@ class GreenhouseFormContractService:
                 action=GreenhouseFormAction.REVIEW_FIELD,
                 postcondition=postcondition,
                 reason=(
-                    "The field may proceed only through the existing answer/binding/page review "
-                    "and one-control verified execution gate."
+                    "The native field or bounded single-select widget may proceed only through "
+                    "the existing answer/binding/page review and one-control verified execution "
+                    "gate."
                 ),
             )
         return GreenhouseControlContract(

@@ -69,6 +69,7 @@ const portalFieldControlKinds = new Set([
   "NUMBER",
   "DATE",
   "SELECT",
+  "SINGLE_SELECT_WIDGET",
   "RADIO_GROUP",
   "CHECKBOX",
   "FILE_UPLOAD",

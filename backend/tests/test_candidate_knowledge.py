@@ -852,10 +852,10 @@ def test_application_field_binding_api_preview_approval_and_list(
     request = {
         "application_answer_id": reviewed.id,
         "observed_field": {
-            "portal": "FIXTURE_ATS",
+            "portal": "GREENHOUSE",
             "page_fingerprint": "api-application-page",
             "control_key": "work-arrangement",
-            "control_kind": "SELECT",
+            "control_kind": "SINGLE_SELECT_WIDGET",
             "label": "Work arrangement",
             "required": True,
             "options": ["Remote", "Hybrid"],

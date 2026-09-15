@@ -22,7 +22,13 @@ from job_apply_pro.domain.browser import (
     LocatorStrategy,
     SemanticLocator,
 )
-from job_apply_pro.domain.portals import SupervisedPortalRunSnapshot, SupervisedPortalRunState
+from job_apply_pro.domain.greenhouse_form import GreenhouseFormAction
+from job_apply_pro.domain.portals import (
+    PortalKind,
+    SupervisedPortalRunSnapshot,
+    SupervisedPortalRunState,
+)
+from job_apply_pro.services.greenhouse_form import is_reviewed_greenhouse_single_select
 
 
 class BindingRepositoryProtocol(Protocol):
@@ -135,8 +141,20 @@ class ApplicationFieldCoverageService:
         executions: list[ApplicationFieldExecution],
     ) -> ApplicationFieldCoverageItem:
         label = control.label or control.group_label or control.field_name or control.kind.value
+        reviewed_single_select = (
+            run.portal is PortalKind.GREENHOUSE
+            and is_reviewed_greenhouse_single_select(control)
+            and run.greenhouse_form is not None
+            and any(
+                item.control_key == control.control_key
+                and item.action is GreenhouseFormAction.REVIEW_FIELD
+                for item in run.greenhouse_form.controls
+            )
+        )
         kind = (
-            PortalFieldControlKind(control.kind.value)
+            PortalFieldControlKind.SINGLE_SELECT_WIDGET
+            if reviewed_single_select
+            else PortalFieldControlKind(control.kind.value)
             if control.kind.value in _PORTAL_FIELD_KINDS
             else PortalFieldControlKind.CUSTOM
         )
@@ -149,7 +167,7 @@ class ApplicationFieldCoverageService:
             and binding.control_kind == kind
         ]
         if (
-            control.kind not in _EXECUTABLE_KINDS
+            (control.kind not in _EXECUTABLE_KINDS and not reviewed_single_select)
             or control.legal_attestation
             or control.disabled
             or control.read_only

@@ -20,6 +20,7 @@ from job_apply_pro.domain.applications import (
 )
 from job_apply_pro.domain.browser import (
     BrowserControlKind,
+    BrowserObservation,
     BrowserObservedControl,
     LocatorStrategy,
     SemanticLocator,
@@ -32,6 +33,7 @@ from job_apply_pro.domain.portals import (
 )
 from job_apply_pro.domain.workflow import WorkflowState
 from job_apply_pro.services.field_coverage import ApplicationFieldCoverageService
+from job_apply_pro.services.greenhouse_form import GreenhouseFormContractService
 
 NOW = datetime(2026, 8, 12, tzinfo=UTC)
 
@@ -139,6 +141,7 @@ def _service(
     bindings: list[ApplicationFieldBindingRecord] | None = None,
     answers: list[ApplicationAnswerRecord] | None = None,
     executions: list[ApplicationFieldExecution] | None = None,
+    portal: PortalKind = PortalKind.LINKEDIN,
 ) -> ApplicationFieldCoverageService:
     application = Application(
         id="application-1",
@@ -150,19 +153,48 @@ def _service(
         created_at=NOW,
         updated_at=NOW,
     )
+    current_url = (
+        "https://job-boards.greenhouse.io/synthetic/jobs/100#app"
+        if portal is PortalKind.GREENHOUSE
+        else "https://www.linkedin.com/jobs/apply"
+    )
+    greenhouse_form = None
+    if portal is PortalKind.GREENHOUSE:
+        observation = BrowserObservation(
+            sequence=1,
+            url=current_url,
+            title="Greenhouse application",
+            origin="https://job-boards.greenhouse.io",
+            page_type="APPLICATION_FORM",
+            page_fingerprint="page-v1",
+            tabs=[],
+            accessibility_snapshot="",
+            visible_text="Sanitized Greenhouse application",
+            controls=controls,
+            validation_errors=[],
+            modals=[],
+            console_errors=[],
+            network_failures=[],
+            upload_status=[],
+            download_status=[],
+            screenshot_path="fixture.png",
+            observed_at=NOW,
+        )
+        greenhouse_form = GreenhouseFormContractService().assess(observation)
     run = SupervisedPortalRunSnapshot(
         id="run-1",
-        portal=PortalKind.LINKEDIN,
+        portal=portal,
         workflow_id="workflow-1",
         browser_session_id="session-1",
         state=SupervisedPortalRunState.AWAITING_USER,
-        current_url="https://www.linkedin.com/jobs/apply",
-        allowed_origins=["https://www.linkedin.com"],
+        current_url=current_url,
+        allowed_origins=[current_url.split("/", 3)[0] + "//" + current_url.split("/", 3)[2]],
         page_fingerprint="page-v1",
         disposition=SupervisedPortalDisposition.USER_ACTION_REQUIRED,
         intervention_reasons=[],
         evidence=[],
         observed_controls=controls,
+        greenhouse_form=greenhouse_form,
         created_at=NOW,
         updated_at=NOW,
     )
@@ -203,6 +235,31 @@ def _control(
     return BrowserObservedControl.model_validate(values)
 
 
+def _single_select_widget() -> BrowserObservedControl:
+    return BrowserObservedControl.model_validate(
+        {
+            "index": 0,
+            "control_key": "work-location",
+            "tag": "input",
+            "type": "text",
+            "role": "combobox",
+            "label": "Preferred work location",
+            "required": True,
+            "native_required": True,
+            "visible": True,
+            "widget_popup": "listbox",
+            "widget_expanded": True,
+            "widget_searchable": True,
+            "widget_multiselectable": False,
+            "widget_controls_one_visible_listbox": True,
+            "options": [
+                {"value": "remote-internal", "label": "Remote"},
+                {"value": "hybrid-internal", "label": "Hybrid"},
+            ],
+        }
+    )
+
+
 def test_review_classifies_required_coverage_without_answer_values() -> None:
     controls = [
         _control("email-control"),
@@ -227,6 +284,34 @@ def test_review_classifies_required_coverage_without_answer_values() -> None:
         ApplicationFieldCoverageStatus.MANUAL_REQUIRED,
     ]
     assert "not-read-by-coverage-review" not in review.model_dump_json()
+
+
+def test_review_maps_only_provider_reviewed_single_select_to_executable_kind() -> None:
+    control = _single_select_widget()
+    binding = _binding(
+        portal=PortalKind.GREENHOUSE.value,
+        control_key=control.control_key,
+        control_kind=PortalFieldControlKind.SINGLE_SELECT_WIDGET,
+    )
+
+    greenhouse = _service(
+        [control],
+        bindings=[binding],
+        answers=[_answer()],
+        portal=PortalKind.GREENHOUSE,
+    ).review("run-1", "application-1")
+    linkedin = _service(
+        [control],
+        bindings=[binding.model_copy(update={"portal": PortalKind.LINKEDIN.value})],
+        answers=[_answer()],
+    ).review("run-1", "application-1")
+
+    assert greenhouse.ready_to_execute_count == 1
+    assert greenhouse.items[0].control_kind is PortalFieldControlKind.SINGLE_SELECT_WIDGET
+    assert greenhouse.items[0].status is ApplicationFieldCoverageStatus.READY_TO_EXECUTE
+    assert linkedin.manual_required_count == 1
+    assert linkedin.items[0].control_kind is PortalFieldControlKind.CUSTOM
+    assert linkedin.items[0].status is ApplicationFieldCoverageStatus.MANUAL_REQUIRED
 
 
 def test_review_marks_verified_stale_and_ambiguous_bindings() -> None:

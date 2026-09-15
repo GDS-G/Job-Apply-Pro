@@ -212,11 +212,13 @@ class ApplicationFieldBindingService:
             },
             ApplicationAnswerKind.YES_NO: {
                 PortalFieldControlKind.SELECT,
+                PortalFieldControlKind.SINGLE_SELECT_WIDGET,
                 PortalFieldControlKind.RADIO_GROUP,
                 PortalFieldControlKind.CHECKBOX,
             },
             ApplicationAnswerKind.MULTIPLE_CHOICE: {
                 PortalFieldControlKind.SELECT,
+                PortalFieldControlKind.SINGLE_SELECT_WIDGET,
                 PortalFieldControlKind.RADIO_GROUP,
             },
         }

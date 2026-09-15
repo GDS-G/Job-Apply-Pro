@@ -186,6 +186,11 @@ def _fixture_service(
     fingerprint: str = "page-v1",
     portal: PortalKind = PortalKind.LINKEDIN,
     control_satisfied: bool = False,
+    answer_value: str = SECRET_ANSWER,
+    answer_kind: ApplicationAnswerKind = ApplicationAnswerKind.EXACT,
+    validation_rules: dict[str, object] | None = None,
+    observed_control: BrowserObservedControl | None = None,
+    binding_control_kind: PortalFieldControlKind = PortalFieldControlKind.EMAIL,
 ) -> tuple[ApplicationFieldExecutionService, _Browser, _ExecutionRepository]:
     cipher = SensitiveDataCipher(StaticKeyProvider(b"k" * 32))
     answer = ApplicationAnswerRecord(
@@ -199,10 +204,10 @@ def _fixture_service(
         ),
         encrypted_normalized_question=None,
         canonical_field="email",
-        answer_kind=ApplicationAnswerKind.EXACT,
-        validation_rules={},
+        answer_kind=answer_kind,
+        validation_rules=validation_rules or {},
         encrypted_value=cipher.encrypt_bytes(
-            SECRET_ANSWER.encode(), context="application-answer:answer-1:value"
+            answer_value.encode(), context="application-answer:answer-1:value"
         ),
         status=ApplicationAnswerStatus.REVIEWED,
         source_type=ApplicationAnswerSource.USER_REVIEWED,
@@ -231,8 +236,8 @@ def _fixture_service(
         answer_revision=answer.revision,
         portal=portal.value,
         page_fingerprint="page-v1",
-        control_key="email-control",
-        control_kind=PortalFieldControlKind.EMAIL,
+        control_key=observed_control.control_key if observed_control else "email-control",
+        control_kind=binding_control_kind,
         encrypted_label="encrypted",
         encrypted_options="encrypted",
         required=True,
@@ -247,7 +252,7 @@ def _fixture_service(
         created_at=NOW,
         updated_at=NOW,
     )
-    control = BrowserObservedControl(
+    control = observed_control or BrowserObservedControl(
         index=0,
         control_key="email-control",
         kind=BrowserControlKind.EMAIL,
@@ -311,6 +316,31 @@ def _fixture_service(
     return service, browser, executions
 
 
+def _single_select_widget(**changes: object) -> BrowserObservedControl:
+    values: dict[str, object] = {
+        "index": 0,
+        "control_key": "work-location",
+        "tag": "input",
+        "type": "text",
+        "role": "combobox",
+        "label": "Preferred work location",
+        "required": True,
+        "native_required": True,
+        "visible": True,
+        "widget_popup": "listbox",
+        "widget_expanded": True,
+        "widget_searchable": True,
+        "widget_multiselectable": False,
+        "widget_controls_one_visible_listbox": True,
+        "options": [
+            {"value": "remote-internal", "label": "Remote"},
+            {"value": "hybrid-internal", "label": "Hybrid"},
+        ],
+    }
+    values.update(changes)
+    return BrowserObservedControl.model_validate(values)
+
+
 def test_executes_exact_approved_field_without_auditing_answer_text() -> None:
     service, browser, executions = _fixture_service()
     result = service.execute(
@@ -364,6 +394,84 @@ def test_greenhouse_field_requires_current_provider_contract_review() -> None:
     )
     assert result.verified
     assert browser.action is not None and browser.action.sensitive_value
+
+
+def test_greenhouse_single_select_executes_one_exact_controlled_option() -> None:
+    service, browser, executions = _fixture_service(
+        portal=PortalKind.GREENHOUSE,
+        answer_value="Remote",
+        answer_kind=ApplicationAnswerKind.MULTIPLE_CHOICE,
+        validation_rules={"choices": ["Remote", "Hybrid"]},
+        observed_control=_single_select_widget(),
+        binding_control_kind=PortalFieldControlKind.SINGLE_SELECT_WIDGET,
+    )
+    assessment = GreenhouseFormContractService().assess(browser.observation)
+
+    result = service.execute(
+        "run-1",
+        ApplicationFieldExecutionApproval(
+            binding_id="binding-1",
+            review_page_fingerprint="page-v1",
+            greenhouse_form_review_fingerprint=assessment.review_fingerprint,
+            confirmation_phrase="EXECUTE APPROVED FIELD",
+        ),
+    )
+
+    assert result.verified
+    assert executions.values == [result]
+    assert browser.action is not None
+    assert browser.action.kind is BrowserActionKind.CHOOSE_CONTROLLED_OPTION
+    assert browser.action.value == "Remote"
+    assert browser.action.sensitive_value
+    assert browser.action.verification.kind is VerificationKind.VALUE_EQUALS
+    assert browser.action.verification.value == "Remote"
+    assert browser.takeovers == 1
+
+
+@pytest.mark.parametrize(
+    ("portal", "control"),
+    [
+        (PortalKind.LINKEDIN, _single_select_widget()),
+        (
+            PortalKind.GREENHOUSE,
+            _single_select_widget(widget_controls_one_visible_listbox=False),
+        ),
+        (PortalKind.GREENHOUSE, _single_select_widget(widget_expanded=False)),
+        (PortalKind.GREENHOUSE, _single_select_widget(widget_multiselectable=True)),
+    ],
+    ids=["other-portal", "unowned-listbox", "collapsed", "multiselect"],
+)
+def test_custom_widget_execution_remains_denied_outside_reviewed_shape(
+    portal: PortalKind, control: BrowserObservedControl
+) -> None:
+    service, browser, executions = _fixture_service(
+        portal=portal,
+        answer_value="Remote",
+        answer_kind=ApplicationAnswerKind.MULTIPLE_CHOICE,
+        validation_rules={"choices": ["Remote", "Hybrid"]},
+        observed_control=control,
+        binding_control_kind=PortalFieldControlKind.SINGLE_SELECT_WIDGET,
+    )
+    greenhouse_review = (
+        GreenhouseFormContractService().assess(browser.observation).review_fingerprint
+        if portal is PortalKind.GREENHOUSE
+        else None
+    )
+
+    with pytest.raises(FieldExecutionPolicyError, match="CUSTOM controls"):
+        service.execute(
+            "run-1",
+            ApplicationFieldExecutionApproval(
+                binding_id="binding-1",
+                review_page_fingerprint="page-v1",
+                greenhouse_form_review_fingerprint=greenhouse_review,
+                confirmation_phrase="EXECUTE APPROVED FIELD",
+            ),
+        )
+
+    assert browser.action is None
+    assert executions.values == []
+    assert browser.takeovers == 1
 
 
 def test_field_approval_rejects_unrecognized_renderer_authority() -> None:
