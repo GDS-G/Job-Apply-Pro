@@ -36,4 +36,4 @@ This mechanism does not prove that arbitrary matching directories were originall
 
 ## Validation
 
-Tests cover cleanup-pending discovery, retry after an injected recursive-removal failure, stale inventory rejection, exact route/body/UUID validation, authenticated API access, backend-client payloads, native cancel and approval behavior, and renderer status/action handling. Full source and package evidence is recorded only after the exact candidate is frozen and validated.
+Tests cover cleanup-pending discovery, retry after an injected recursive-removal failure, stale inventory rejection, exact route/body/UUID validation, authenticated API access, backend-client payloads, native cancel and approval behavior, and renderer status/action handling. Exact source checkpoint `18cc87691558bfe0509a5c0d48e1791b7ba99783` passes 1,903 backend tests at 86.67% coverage across 17,493 statements, 512 default desktop tests with two packaged-runtime opt-ins skipped, and every static/build/dependency-audit gate. Exact package evidence remains pending.
